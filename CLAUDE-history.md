@@ -23,5 +23,6 @@ Everything predating this history system. Artifex (working-titled **SWARM** at t
 | 004 | 2026-07-22 | decision | Technical/model pass (ADR-0002): 4-tier computed model policy, autonomy-dial budget rule, Postgres Model Catalog (Qwen2.5 v0), Ollama→vLLM serving, TS-now Learning seam | [history/2026-07-22_004_decision_model-tiering-inference.md](history/2026-07-22_004_decision_model-tiering-inference.md) |
 | 005 | 2026-07-22 | decision | Named the project **Artifex** (was working-title SWARM); renamed repo → github.com/mhylle/artifex, Tasktracker project, and top-level docs | [history/2026-07-22_005_decision_project-name-artifex.md](history/2026-07-22_005_decision_project-name-artifex.md) |
 | 006 | 2026-07-22 | documentation | Finished the rebrand across all content — `solution/` dossier, brainstorm, ADRs (SWARM → Artifex); dated history entries kept as the accurate record | [history/2026-07-22_006_documentation_rebrand-dossier.md](history/2026-07-22_006_documentation_rebrand-dossier.md) |
+| 007 | 2026-07-22 | documentation | Registered full architecture in Tasktracker (19 components + 31 relationships) and published contributor-facing `ARCHITECTURE.md` with Mermaid diagrams | [history/2026-07-22_007_documentation_architecture-registered.md](history/2026-07-22_007_documentation_architecture-registered.md) |
 
 ---

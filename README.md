@@ -37,6 +37,8 @@ Domain expertise is not built in — it is a thing the system *manufactures*, an
 
 ## Architecture (ADR-0001 / ADR-0002)
 
+**→ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full intended architecture** — diagrams, component reference, the model-tier ladder, mission flow, and the invariants a change must not break.
+
 All-TypeScript, multi-model:
 
 - **Angular** dashboard — an observability cockpit rendered purely from the audit ledger

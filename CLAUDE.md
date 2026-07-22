@@ -57,6 +57,7 @@ For multi-step tasks, state a brief plan with a verify step per item. Strong suc
 
 | Path | Contents |
 |---|---|
+| `ARCHITECTURE.md` | Contributor-facing intended architecture — diagrams, component reference, model-tier ladder, invariants (mirrors the Tasktracker architecture model) |
 | `solution/` | The functional solution dossier — 7 linked HTML pages: `index.html` (Overview), `architecture.html`, `lifecycle.html`, `agents.html`, `learning.html`, `observability.html`, `risks.html` |
 | `docs/brainstorms/` | Source brainstorm that produced the dossier (`2026-07-22-agent-swarm.md`) |
 | `docs/decisions/` | Architecture Decision Records (`ADR-*.md`) |
@@ -72,7 +73,8 @@ Dual-memory architecture. Memory bank files are git-shared and read **on demand*
 | `CLAUDE-activeContext.md` | Session start — current state, goals, and next-phase options |
 | `CLAUDE-history.md` | Catching up on how the project evolved (index only; entries live in `history/`) |
 | `solution/index.html` | You need the authoritative functional overview and the table of locked decisions |
-| `docs/decisions/ADR-*.md` | You need a technical/architecture decision and its rationale (stack: ADR-0001) |
+| `docs/decisions/ADR-*.md` | You need a technical/architecture decision and its rationale (stack: ADR-0001; model tiering: ADR-0002) |
+| `ARCHITECTURE.md` | You need the whole intended architecture at a glance — components, diagrams, invariants |
 
 **Shadow (machine-local):** native auto memory (`memory/MEMORY.md` + topic files, via `/memory`) mirrors key project facts for resilience. If this file or the memory bank is ever reset or wiped, recover context from auto memory.
 
