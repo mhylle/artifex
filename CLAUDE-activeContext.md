@@ -6,7 +6,8 @@
 
 ## Where We Are
 
-- **Stage:** Functional design complete; **technical pass complete** (stack + model/inference decisions locked). No implementation code yet. Security/perf still deferred. **Ready for planning (v0 slice + core schemas).**
+- **Stage:** Design complete + **v0 plan formed — Tasktracker readiness `ready`** (brainstorm / requirements / architecture / plan all satisfied). No implementation code yet. Security/perf still deferred. **Next: build P0.**
+- **v0 plan (ADR-0003):** 11 approved requirements (R1–R11) with 26 acceptance criteria; 14 TDD-shaped phases (P0 infra → P1 schemas → P2 ledger → P3 router → P4 constitution/tier → P5–P8 meta-agents → P9 loop → P10 API → P11 learning seam → P12 dashboard → P13 dogfood), each linked to its requirement. Schema encoding = **TypeBox** (ADR-0004). v0 dogfood mission = "structured report from 2–3 sub-questions". Tier-2 = attempt local 32B with Claude fallback via the admission gate.
 - **Stack decided (ADR-0001):** all-TypeScript. Angular dashboard · NestJS control plane · **separate** TS agent-runtime worker (BullMQ) · PostgreSQL + pgvector as the whole Memory Fabric · Redis/BullMQ job queue · a provider-neutral **Model Router** dispatching to Claude + local OpenAI-compatible models (Ollama/vLLM).
 - **Model/inference decided (ADR-0002, from frozen brainstorm `9885e5b0`):** model **tier is a computed policy** (blast radius + fan-in + reversibility + task class + budget + clade score), **4-tier ladder** (Tier-0 no-LLM → Tier-3 frontier); tier-bump = an escalation-ladder rung; budget-vs-blast governed by the **autonomy dial**. Local models declared by logical tier via a versioned **Model Catalog** (Postgres); v0 workhorse **Qwen2.5-family** (replaceable, admission-gated on real schemas). Serving: **Ollama dev → vLLM staging/prod** behind the router. Learning science loop **TS-now** behind a ledger-projection + proposal-emitter seam; Python only "when it hurts". Owner hardware: single **24 GB GPU** (prod fan-out will need cloud/multi-GPU vLLM).
 - **Name:** **Artifex** (Latin, "master craftsman/maker") — chosen 2026-07-22, replacing the working title "SWARM". Fully rebranded: repo, Tasktracker project + brainstorms, README, CLAUDE docs, the `solution/` dossier, and the ADRs. (Dated `history/` entries retain "SWARM" as the accurate record of what the project was called at the time.)
@@ -19,8 +20,8 @@
 
 ## Next-Phase Options (user's call)
 
-1. **`tt-create-plan` for the v0 slice** — the smallest build exercising the whole loop (decompose → contract → conjure → verify → fold → learn); the functional brainstorm's own #1 next step.
-2. **Design the ledger event schema + contract schema first** — the brainstorm calls these "the foundation everything feeds"; they're the shared-types core of the all-TS stack and the stable contract behind the Model Catalog and the Learning seam.
+1. **Start building — `tt-implement-plan` (or `tt-implement-phase` on P0)** — begin execution with P0 (workspace & infra scaffold), then P1 (the TypeBox schemas — the foundation everything feeds). Each phase is TDD-shaped (RED tests from the ACs before implementation).
+2. **Review/adjust the plan first** — the 14 phases and 11 requirements are in Tasktracker; reorder, split, or add before writing code.
 
 ## Known Loose Ends
 

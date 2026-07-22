@@ -24,5 +24,6 @@ Everything predating this history system. Artifex (working-titled **SWARM** at t
 | 005 | 2026-07-22 | decision | Named the project **Artifex** (was working-title SWARM); renamed repo → github.com/mhylle/artifex, Tasktracker project, and top-level docs | [history/2026-07-22_005_decision_project-name-artifex.md](history/2026-07-22_005_decision_project-name-artifex.md) |
 | 006 | 2026-07-22 | documentation | Finished the rebrand across all content — `solution/` dossier, brainstorm, ADRs (SWARM → Artifex); dated history entries kept as the accurate record | [history/2026-07-22_006_documentation_rebrand-dossier.md](history/2026-07-22_006_documentation_rebrand-dossier.md) |
 | 007 | 2026-07-22 | documentation | Registered full architecture in Tasktracker (19 components + 31 relationships) and published contributor-facing `ARCHITECTURE.md` with Mermaid diagrams | [history/2026-07-22_007_documentation_architecture-registered.md](history/2026-07-22_007_documentation_architecture-registered.md) |
+| 008 | 2026-07-22 | decision | Formed the v0 plan (ADR-0003/0004): 11 requirements + 26 ACs + 14 TDD phases in Tasktracker; readiness `ready`. TypeBox schemas; 32B-local Tier-2 w/ Claude fallback | [history/2026-07-22_008_decision_v0-plan.md](history/2026-07-22_008_decision_v0-plan.md) |
 
 ---
