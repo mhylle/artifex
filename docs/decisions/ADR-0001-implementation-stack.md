@@ -41,7 +41,7 @@ SWARM is a domain-neutral, self-assembling agent swarm (see the frozen functiona
 
 - One deployable set of TS packages (frontend / API / worker / shared-types) + Postgres + Redis + a local-inference server (Ollama/vLLM).
 - The **Model Router** and the **capability-manifest model-selection policy** become first-class buildable components.
-- **Open (deferred to the technical brainstorm/plan):** the exact tier-assignment policy (owner's hypothesis "only decomposition is large" is directionally right but to be widened to blast-radius-keyed); local model choice(s); Ollama-vs-vLLM staging; and whether the Learning Agent's between-mission science loop is later extracted as a separate offline **Python** service reading the ledger (the one clean seam where Python may re-enter).
+- **Open items — now RESOLVED in [ADR-0002](ADR-0002-model-tiering-and-inference.md)** (tier-assignment policy, local model declaration, inference serving/staging, and the Python science-loop seam). At the time of this ADR they were deferred to the technical brainstorm.
 
 ## Related
 

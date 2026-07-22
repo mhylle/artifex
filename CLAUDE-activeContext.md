@@ -6,8 +6,10 @@
 
 ## Where We Are
 
-- **Stage:** Functional design complete; **technical pass has begun.** The implementation stack is now decided (ADR-0001) — no implementation code yet. Security/performance still deferred.
-- **Stack decided (ADR-0001):** all-TypeScript. Angular dashboard · NestJS control plane · **separate** TS agent-runtime worker (BullMQ) · PostgreSQL + pgvector as the whole Memory Fabric · Redis/BullMQ job queue · a provider-neutral **Model Router** (Vercel AI SDK / thin custom) dispatching to Claude + local OpenAI-compatible models (Ollama/vLLM). **Multi-model is a first-class requirement** — model tier chosen by the Agent Creator per capability manifest, keyed to blast radius (cheap local by default; frontier where wrong is expensive). Architecture components + relationships registered in Tasktracker.
+- **Stage:** Functional design complete; **technical pass complete** (stack + model/inference decisions locked). No implementation code yet. Security/perf still deferred. **Ready for planning (v0 slice + core schemas).**
+- **Stack decided (ADR-0001):** all-TypeScript. Angular dashboard · NestJS control plane · **separate** TS agent-runtime worker (BullMQ) · PostgreSQL + pgvector as the whole Memory Fabric · Redis/BullMQ job queue · a provider-neutral **Model Router** dispatching to Claude + local OpenAI-compatible models (Ollama/vLLM).
+- **Model/inference decided (ADR-0002, from frozen brainstorm `9885e5b0`):** model **tier is a computed policy** (blast radius + fan-in + reversibility + task class + budget + clade score), **4-tier ladder** (Tier-0 no-LLM → Tier-3 frontier); tier-bump = an escalation-ladder rung; budget-vs-blast governed by the **autonomy dial**. Local models declared by logical tier via a versioned **Model Catalog** (Postgres); v0 workhorse **Qwen2.5-family** (replaceable, admission-gated on real schemas). Serving: **Ollama dev → vLLM staging/prod** behind the router. Learning science loop **TS-now** behind a ledger-projection + proposal-emitter seam; Python only "when it hurts". Owner hardware: single **24 GB GPU** (prod fan-out will need cloud/multi-GPU vLLM).
+- **Naming:** "SWARM" is a working title — a real project name is an open TODO (see loose ends).
 - **Functional design** exists as a **solution dossier (v1.1, 22 July 2026)** in `solution/` (7 HTML pages) — deliberately technology-free.
 - **Primary artifact:** a 7-page HTML dossier in `solution/` — Overview (`index.html`), Architecture, Mission Lifecycle, Agents, Memory & Learning, Observability, Risks & Safeguards — all mutually linked.
 - **Provenance:** outcome of a structured brainstorm (Socratic clarification → research → Six Hats / SCAMPER / premortem), source in `docs/brainstorms/2026-07-22-agent-swarm.md`, by Martin Hylleberg.
@@ -17,14 +19,14 @@
 
 ## Next-Phase Options (user's call)
 
-1. **Technical brainstorm** (`tt-brainstorm`) on the open design questions ADR-0001 deferred: the concrete **model tier-assignment policy** (widen the owner's "only decomposition is large" to a blast-radius ladder), local model choices, Ollama-vs-vLLM, and whether the Learning science loop later becomes a Python seam.
-2. **Define the v0 slice** — the smallest build exercising the whole loop (decompose → contract → conjure → verify → fold → learn); the brainstorm's own #1 next step. Then `tt-create-plan`.
-3. **Design the ledger event schema + contract schema first** — the brainstorm calls these the foundation everything feeds; they're the shared-types core of the all-TS stack.
-4. **Add a git remote** and push, if this is to be shared/backed up.
+1. **Name the project** — "SWARM" is a working title; pick the real name, then rename the Tasktracker project + GitHub repo + docs. (In flight.)
+2. **`tt-create-plan` for the v0 slice** — the smallest build exercising the whole loop (decompose → contract → conjure → verify → fold → learn); the functional brainstorm's own #1 next step.
+3. **Design the ledger event schema + contract schema first** — the brainstorm calls these "the foundation everything feeds"; they're the shared-types core of the all-TS stack and the stable contract behind the Model Catalog and the Learning seam.
 
 ## Known Loose Ends
 
-- The functional brainstorm is frozen in Tasktracker but also lives as markdown (`docs/brainstorms/`); project `brainstormPolicy` is `optional`.
+- **Project name is a working title** ("SWARM") — real name pending; rename ripples to Tasktracker project, repo (`gh repo rename`), README, and docs.
+- The two brainstorms are frozen in Tasktracker but the functional one also lives as markdown (`docs/brainstorms/`); project `brainstormPolicy` is `optional`.
 - Public open-source repo has no CONTRIBUTING / issue templates / CI yet — add when real code lands.
-- Genesis phase `84676257-…` is a container, not yet linked to any requirement (no requirements exist yet).
-- ADR-0001 open items (model tier policy, local model choice, Python science-loop seam) are recommendations, not yet locked — the subject of next-step option 1.
+- No requirements exist yet; genesis phase `84676257-…` is an unlinked container.
+- ADR-0002 parking lot: prod concurrency/hardware sizing, per-tier cost-weight calibration, catalog-A/B harness, Tier-2-on-24GB viability.
