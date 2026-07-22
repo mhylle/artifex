@@ -49,7 +49,7 @@ For multi-step tasks, state a brief plan with a verify step per item. Strong suc
 
 ## Project Overview
 
-- **Name:** Artifex (Latin: "master craftsman / maker") — a self-assembling, self-improving multi-agent system. Working-titled "SWARM" through the functional-design phase; the `solution/` dossier still carries that title.
+- **Name:** Artifex (Latin: "master craftsman / maker") — a self-assembling, self-improving multi-agent system. Working-titled "SWARM" through the functional-design phase; fully rebranded to Artifex on 2026-07-22 (repo, Tasktracker, dossier, ADRs).
 - **What it is:** Artifex is an agent system whose only permanent employees are four meta-agents — Orchestrator, Agent Creator, Reviewer, Learning Agent — that take any mission, atomize it into individually-verifiable tasks, craft a disposable specialist workforce at runtime, verify every task at both ends, fold results back into one outcome, and mine the audit trail to improve before the next mission. **Design stage:** functional design frozen (v1.1 dossier), stack + model/inference decisions locked (ADR-0001/0002); no implementation code yet. Security and performance still out of scope.
 - **Remote:** `origin` → https://github.com/mhylle/artifex (public, Apache-2.0) — commit AND push after each finalized unit of work (commit alone is not enough).
 

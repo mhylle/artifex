@@ -7,7 +7,7 @@
 
 ## Context
 
-SWARM is a domain-neutral, self-assembling agent swarm (see the frozen functional brainstorm and `solution/`). The backend is really two systems: a **control plane** (API, auth, human gates, dashboard streaming — short-lived) and an **agent runtime** (recursive decomposition, agent spawning, LLM calls, dual-ended verification, fold-up — long-running, massively fan-out, thousands of tasks per mission). A hard requirement surfaced during the decision: the swarm must run a **heterogeneous model fleet** — small **local** LLMs for the bulk of agents (cost + latency), frontier models only where cost-of-error or irreducible judgment is high — and **model selection must be an output of agent creation**.
+Artifex is a domain-neutral, self-assembling agent swarm (see the frozen functional brainstorm and `solution/`). The backend is really two systems: a **control plane** (API, auth, human gates, dashboard streaming — short-lived) and an **agent runtime** (recursive decomposition, agent spawning, LLM calls, dual-ended verification, fold-up — long-running, massively fan-out, thousands of tasks per mission). A hard requirement surfaced during the decision: the swarm must run a **heterogeneous model fleet** — small **local** LLMs for the bulk of agents (cost + latency), frontier models only where cost-of-error or irreducible judgment is high — and **model selection must be an output of agent creation**.
 
 ## Decision
 
@@ -26,7 +26,7 @@ SWARM is a domain-neutral, self-assembling agent swarm (see the frozen functiona
 ## Rationale
 
 - **All-TS** keeps one shared type set — critically, the **contract schema and ledger event schema** (the system's foundation) — across Angular, API, and worker. Going polyglot would duplicate/code-gen the most central schemas across a language boundary forever.
-- SWARM is Claude-native and the Claude Agent SDK is first-class in TS; orchestration is I/O-bound (awaiting many model calls), which suits Node.
+- Artifex is Claude-native and the Claude Agent SDK is first-class in TS; orchestration is I/O-bound (awaiting many model calls), which suits Node.
 - **PostgreSQL as the whole fabric** directly serves the dossier's "one substrate" principle and removes moving parts.
 - **Runtime/API separation** is non-negotiable: a mission's long-running, thousand-task tree cannot live in an HTTP request.
 - **Multi-model fits the design:** cheap local models are less reliable per step — exactly the regime the verification architecture (micro-decomposition + voting + red-flagging, à la MAKER) was built for. The economics and the correctness design reinforce each other. Model tier is keyed to **blast radius / task class** (default cheap; escalate where wrong is expensive — decomposition, semantic Gate B review, learning science loop), not to a single named agent.
@@ -45,5 +45,5 @@ SWARM is a domain-neutral, self-assembling agent swarm (see the frozen functiona
 
 ## Related
 
-- Functional brainstorm: Tasktracker brainstorm `SWARM — Functional Design (2026-07-22)`.
-- Architecture components registered in Tasktracker project SWARM (Dashboard, Control Plane API, Agent Runtime Worker, Model Router, Memory Fabric, Job Queue, Model Backends).
+- Functional brainstorm: Tasktracker brainstorm `Artifex — Functional Design (2026-07-22)`.
+- Architecture components registered in Tasktracker project Artifex (Dashboard, Control Plane API, Agent Runtime Worker, Model Router, Memory Fabric, Job Queue, Model Backends).

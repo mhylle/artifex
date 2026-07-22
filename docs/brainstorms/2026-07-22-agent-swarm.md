@@ -1,11 +1,11 @@
-# Brainstorm: SWARM — Self-Assembling Agent Swarm
+# Brainstorm: Artifex — Self-Assembling Agent Swarm
 
 **Date**: 2026-07-22
 **Status**: Ready for Planning
 
 ## Executive Summary
 
-SWARM is a self-assembling, self-improving agent system: a permanent four-agent meta-layer (Orchestrator, Agent Creator, Reviewer, Learning Agent) that atomizes any mission into thousands of contracted, individually verifiable tasks, conjures the minimal specialist workforce at runtime, verifies every task at both ends (atomicity before execution, contract compliance after), folds results back up the decomposition tree, and mines a universal audit trail to improve itself — with full self-modification bounded only by a small immutable constitution guarding how success is measured.
+Artifex is a self-assembling, self-improving agent system: a permanent four-agent meta-layer (Orchestrator, Agent Creator, Reviewer, Learning Agent) that atomizes any mission into thousands of contracted, individually verifiable tasks, conjures the minimal specialist workforce at runtime, verifies every task at both ends (atomicity before execution, contract compliance after), folds results back up the decomposition tree, and mines a universal audit trail to improve itself — with full self-modification bounded only by a small immutable constitution guarding how success is measured.
 
 ## Idea Evolution
 

@@ -31,7 +31,7 @@ Domain expertise is not built in — it is a thing the system *manufactures*, an
 
 **Design stage.** This repository holds the **functional solution description** (a 7-page HTML dossier in [`solution/`](solution/)) and the architecture decisions. There is no implementation code yet.
 
-- **Functional design** — [`solution/index.html`](solution/index.html) and its sibling pages (Architecture, Mission Lifecycle, Agents, Memory & Learning, Observability, Risks). *(The dossier still carries the project's original working title, "SWARM".)*
+- **Functional design** — [`solution/index.html`](solution/index.html) and its sibling pages (Architecture, Mission Lifecycle, Agents, Memory & Learning, Observability, Risks).
 - **Source brainstorm** — [`docs/brainstorms/2026-07-22-agent-swarm.md`](docs/brainstorms/2026-07-22-agent-swarm.md)
 - **Decisions** — [`docs/decisions/`](docs/decisions/): [ADR-0001 (stack)](docs/decisions/ADR-0001-implementation-stack.md), [ADR-0002 (model tiering & inference)](docs/decisions/ADR-0002-model-tiering-and-inference.md)
 
