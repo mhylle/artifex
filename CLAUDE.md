@@ -51,7 +51,7 @@ For multi-step tasks, state a brief plan with a verify step per item. Strong suc
 
 - **Name:** SWARM — a self-assembling, self-improving multi-agent system (currently a design-stage functional specification).
 - **What it is:** SWARM (Self-organizing Workforce with Adaptive Roles & Memory) is a functional solution description for an agent system whose only permanent employees are four meta-agents — Orchestrator, Agent Creator, Reviewer, Learning Agent — that take any mission, atomize it into individually-verifiable tasks, design a disposable specialist workforce at runtime, verify every task at both ends, fold results back into one outcome, and mine the audit trail to improve before the next mission. **Current phase: functional scope only (v1.1, 22 July 2026)** — technology, security, and performance are deliberately out of scope. The concrete artifacts are a 7-page HTML dossier in `solution/` and the source brainstorm in `docs/brainstorms/`. No implementation code exists yet.
-- **Remote:** none — commit AND push after each finalized unit of work (commit alone is not enough). *(No git remote configured yet; add one before the first push.)*
+- **Remote:** `origin` → https://github.com/mhylle/agent-swarm (public, Apache-2.0) — commit AND push after each finalized unit of work (commit alone is not enough).
 
 ## Repository Map
 

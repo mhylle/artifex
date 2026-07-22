@@ -13,7 +13,7 @@
 - **Provenance:** outcome of a structured brainstorm (Socratic clarification → research → Six Hats / SCAMPER / premortem), source in `docs/brainstorms/2026-07-22-agent-swarm.md`, by Martin Hylleberg.
 - **Design locked this brainstorm:** domain-neutral missions; maximal atomization (atomicity is itself verified); recursive fold-up integration; contract-first definition of done; escalation-ladder failure handling; earned agent permanence; constitutional self-improvement (immutable metric/review/audit/budget core); per-mission autonomy dial; earned knowledge commons; instance-per-mission + shared brain; mediated context broker; two-speed learning; budgeted swarm; surrender as a first-class outcome; audit-ledger-driven observability cockpit.
 - **System of record:** Tasktracker project **"SWARM"** (id `faf7e141-4cad-4e53-ab65-e490cba4e5a5`). Holds: the frozen functional brainstorm, 7 registered architecture components + relationships, and a genesis phase (id `84676257-…`). No requirements or implementation phases entered yet.
-- **Version control:** git initialized 2026-07-22 during adoption; no remote configured yet.
+- **Version control:** git `main` → **public** repo https://github.com/mhylle/agent-swarm (Apache-2.0, © 2026 Martin Hylleberg). Open source.
 
 ## Next-Phase Options (user's call)
 
@@ -24,7 +24,7 @@
 
 ## Known Loose Ends
 
-- No git remote configured — first push has nowhere to go until one is added.
 - The functional brainstorm is frozen in Tasktracker but also lives as markdown (`docs/brainstorms/`); project `brainstormPolicy` is `optional`.
+- Public open-source repo has no CONTRIBUTING / issue templates / CI yet — add when real code lands.
 - Genesis phase `84676257-…` is a container, not yet linked to any requirement (no requirements exist yet).
 - ADR-0001 open items (model tier policy, local model choice, Python science-loop seam) are recommendations, not yet locked — the subject of next-step option 1.

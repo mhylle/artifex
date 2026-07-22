@@ -19,5 +19,6 @@ Everything predating this history system. SWARM began as a structured brainstorm
 |---|------|----------|---------|------|
 | 001 | 2026-07-22 | configuration | Adopted claude-project-setup methodology — memory bank, history system, core rules, Tasktracker project | [history/2026-07-22_001_configuration_adopt-methodology.md](history/2026-07-22_001_configuration_adopt-methodology.md) |
 | 002 | 2026-07-22 | decision | Chose implementation stack (ADR-0001): all-TS Angular + NestJS + Postgres/pgvector, separate agent-runtime worker, provider-neutral Model Router for multi-model (local + Claude) | [history/2026-07-22_002_decision_implementation-stack.md](history/2026-07-22_002_decision_implementation-stack.md) |
+| 003 | 2026-07-22 | configuration | Published as public open-source repo github.com/mhylle/agent-swarm (Apache-2.0) with README + LICENSE | [history/2026-07-22_003_configuration_open-source-repo.md](history/2026-07-22_003_configuration_open-source-repo.md) |
 
 ---
