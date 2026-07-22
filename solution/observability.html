@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWARM — Observability</title>
+<style>
+:root{
+  color-scheme: light;
+  --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+  --c-orch:#2a78d6; --t-orch:#eaf2fb;
+  --c-creator:#eb6834; --t-creator:#fdf0ea;
+  --c-review:#1baf7a; --t-review:#e8f7f1;
+  --c-learn:#eda100; --t-learn:#fdf6e3;
+  --c-fabric:#4a3aa7; --t-fabric:#edebf6;
+  --c-const:#e34948; --t-const:#fcecec;
+  --c-human:#e87ba4; --t-human:#fbeff4;
+  --c-broker:#008300; --t-broker:#e6f2e6;
+  --c-worker:#898781; --t-worker:#f0efec;
+  --s-good:#0ca30c; --s-warn:#fab219; --s-serious:#ec835a; --s-crit:#d03b3b;
+  --link:#1c5cab;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.55;font-size:15.5px}
+.wrap{max-width:1040px;margin:0 auto;padding:0 28px}
+header.site{background:var(--surface);border-bottom:1px solid var(--grid)}
+.bar{display:flex;align-items:baseline;justify-content:space-between;gap:24px;padding:18px 0;flex-wrap:wrap}
+.brand{font-weight:700;letter-spacing:.4px;font-size:15px}
+.brand small{font-weight:400;color:var(--muted);margin-left:10px;letter-spacing:0}
+nav.top{display:flex;gap:18px;flex-wrap:wrap}
+nav.top a{color:var(--ink2);text-decoration:none;font-size:13.5px;padding:3px 0;border-bottom:2px solid transparent}
+nav.top a:hover{color:var(--ink)}
+nav.top a[aria-current]{color:var(--ink);border-bottom-color:var(--ink)}
+main{padding:52px 0 20px}
+.kicker{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+h1{font-size:clamp(28px,3.8vw,36px);line-height:1.14;margin:0 0 16px;letter-spacing:-.015em}
+h2{font-size:23px;margin:56px 0 6px;letter-spacing:-.01em}
+h3{font-size:16.5px;margin:26px 0 8px}
+.lede{font-size:17.5px;color:var(--ink2);max-width:74ch;margin:0 0 8px}
+p{max-width:76ch}
+a{color:var(--link)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 22px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:20px 0}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:20px 0}
+.card h3{margin:0 0 8px;font-size:15.5px}
+.card p{font-size:14px;color:var(--ink2);margin:0 0 8px}
+.card p:last-child{margin:0}
+figure{margin:26px 0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px;overflow-x:auto}
+figcaption{font-size:12.5px;color:var(--muted);margin-top:14px;line-height:1.5}
+svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+table{width:100%;border-collapse:collapse;margin:20px 0;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;font-size:14px}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);text-align:left;font-weight:600;padding:12px 14px;border-bottom:1px solid var(--grid)}
+td{padding:11px 14px;border-bottom:1px solid var(--grid);vertical-align:top;color:var(--ink2)}
+td:first-child{color:var(--ink);font-weight:600;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+footer{border-top:1px solid var(--grid);margin-top:70px;padding:26px 0 44px;color:var(--muted);font-size:12.5px}
+.pn{display:flex;justify-content:space-between;gap:16px;margin-top:56px}
+.pn a{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;text-decoration:none;color:var(--ink);font-size:13.5px}
+.pn a span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+ul.tight{padding-left:20px;margin:8px 0}
+ul.tight li{margin:5px 0;color:var(--ink2);font-size:14.5px}
+ul.tight li strong{color:var(--ink)}
+
+/* ============ dashboard mock ============ */
+.mock{border:1px solid #d5d4cc;border-radius:12px;overflow:hidden;background:#f2f1ed;box-shadow:0 1px 4px rgba(11,11,11,.06);width:980px;min-width:980px}
+.mock *{line-height:1.35}
+.m-top{display:flex;align-items:center;gap:14px;background:#fff;border-bottom:1px solid var(--grid);padding:10px 16px;flex-wrap:nowrap}
+.m-title{font-weight:700;font-size:13.5px;white-space:nowrap}
+.m-title small{display:block;font-weight:400;color:var(--muted);font-size:10.5px}
+.m-chip{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:12px;white-space:nowrap}
+.m-live{background:#e8f7f1;color:#0a7a3d;border:1px solid #bfe7d4}
+.m-live b{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--s-good);margin-right:5px;vertical-align:1px}
+.m-prog{flex:1;min-width:120px}
+.m-prog .pl{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px}
+.m-bar{height:8px;background:#eceae4;border-radius:4px;position:relative;overflow:hidden}
+.m-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--c-orch);border-radius:0 4px 4px 0;width:58%}
+.m-bar i.b2{background:var(--s-warn);left:58%;width:9%;border-radius:0 4px 4px 0}
+.m-stat{font-size:10px;color:var(--muted);white-space:nowrap;text-align:right}
+.m-stat b{display:block;font-size:12.5px;color:var(--ink);font-weight:700}
+.m-scrub{display:flex;align-items:center;gap:8px;background:#fff;border-top:0;border-bottom:1px solid var(--grid);padding:6px 16px;font-size:10.5px;color:var(--muted)}
+.m-scrub .sb{flex:1;height:5px;background:#eceae4;border-radius:3px;position:relative}
+.m-scrub .sb i{position:absolute;left:0;top:0;bottom:0;width:96%;background:#c9c7bf;border-radius:3px}
+.m-scrub .sb u{position:absolute;left:96%;top:-4px;width:13px;height:13px;border-radius:50%;background:#fff;border:2px solid var(--c-orch);transform:translateX(-6px)}
+.m-body{display:grid;grid-template-columns:168px 560px 252px;min-height:430px}
+.m-inner{position:relative;width:560px;height:430px}
+.m-rail{background:#fff;border-right:1px solid var(--grid);padding:12px}
+.m-rail h5{margin:0 0 8px;font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.m-mi{border:1px solid var(--grid);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px}
+.m-mi.sel{border-color:var(--c-orch);background:var(--t-orch)}
+.m-mi b{display:block;font-size:11px}
+.m-mi span{color:var(--muted);font-size:9.5px}
+.m-fleet{margin-top:14px;border-top:1px solid var(--grid);padding-top:10px;font-size:10px;color:var(--muted)}
+.m-fleet b{color:var(--ink);font-weight:700}
+.m-canvas{position:relative;background:radial-gradient(circle,#d9d7cf 1px,transparent 1.2px);background-size:18px 18px;background-color:#f4f3ef;overflow:hidden}
+.m-crumb{position:absolute;top:10px;left:12px;background:#fff;border:1px solid var(--grid);border-radius:7px;padding:4px 10px;font-size:10px;color:var(--ink2);z-index:3}
+.m-zoom{position:absolute;bottom:12px;left:12px;background:#fff;border:1px solid var(--grid);border-radius:7px;font-size:12px;color:var(--ink2);z-index:3;display:flex}
+.m-zoom span{padding:3px 9px;border-right:1px solid var(--grid)}
+.m-zoom span:last-child{border-right:none}
+.m-mini{position:absolute;bottom:12px;right:12px;width:86px;height:56px;background:#fff;border:1px solid var(--grid);border-radius:6px;z-index:3;opacity:.92}
+.m-mini i{position:absolute;background:#d5d4cc;border-radius:2px}
+.m-mini u{position:absolute;border:1.5px solid var(--c-orch);border-radius:3px;left:26%;top:18%;width:52%;height:60%}
+.node{position:absolute;width:158px;background:#fff;border:1.5px solid var(--grid);border-radius:9px;padding:8px 10px 7px;font-size:11px;z-index:2;box-shadow:0 1px 3px rgba(11,11,11,.07)}
+.node b{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:-.01em}
+.node .cat{display:inline-block;margin-top:5px;font-size:8.5px;font-weight:600;color:#6b6963;background:#f0efec;padding:1px 7px;border-radius:9px}
+.node .st{display:flex;align-items:center;gap:5px;margin-top:6px;font-size:9.5px;font-weight:600}
+.node .np{height:4px;background:#eceae4;border-radius:2px;margin-top:6px;position:relative;overflow:hidden}
+.node .np i{position:absolute;left:0;top:0;bottom:0;border-radius:0 2px 2px 0}
+.n-done{border-color:#9fd8b6}
+.n-done .st{color:#0a7a3d}
+.n-run{border-color:var(--c-orch);box-shadow:0 0 0 3px rgba(42,120,214,.14)}
+.n-run .st{color:#1c5cab}
+.n-queue{border-style:dashed}
+.n-queue .st{color:var(--muted)}
+.n-esc{border-color:var(--s-serious);box-shadow:0 0 0 3px rgba(236,131,90,.16)}
+.n-esc .st{color:#b35127}
+.n-fail{border-color:var(--s-crit)}
+.n-fail .st{color:#a02c2c}
+.n-rev{border-color:var(--c-review)}
+.n-rev .st{color:#0f7a55}
+.m-insp{background:#fff;border-left:1px solid var(--grid);padding:12px;font-size:11px}
+.m-insp h5{margin:0 0 2px;font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.m-insp .it{font-size:12.5px;font-weight:700;margin-bottom:2px}
+.m-insp .is{font-size:10px;color:#1c5cab;font-weight:700;margin-bottom:8px}
+.m-sec{border-top:1px solid var(--grid);margin-top:9px;padding-top:8px}
+.m-kv{display:flex;justify-content:space-between;font-size:10px;color:var(--ink2);margin:3px 0}
+.m-kv em{color:var(--muted);font-style:normal}
+.m-crit{font-size:10px;color:var(--ink2);margin:3px 0}
+.m-btns{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.m-btn{font-size:9.5px;font-weight:700;border:1px solid var(--grid);border-radius:6px;padding:4px 8px;background:#fff;color:var(--ink2)}
+.m-btn.pri{background:var(--t-orch);border-color:var(--c-orch);color:#1c5cab}
+.m-btn.warn{background:var(--t-const);border-color:#e8b3b3;color:#a02c2c}
+.m-ev{font-size:9.5px;color:var(--ink2);margin:5px 0;display:flex;gap:6px}
+.m-ev tt{color:var(--muted);font-family:ui-monospace,Consolas,monospace;font-size:9px;white-space:nowrap}
+.m-tick{background:#fff;border-top:1px solid var(--grid);padding:8px 16px}
+.m-tick h5{margin:0 0 6px;font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.trow{display:flex;gap:10px;align-items:baseline;font-size:10.5px;color:var(--ink2);padding:3px 0;border-top:1px dashed #eceae4}
+.trow:first-of-type{border-top:none}
+.trow tt{font-family:ui-monospace,Consolas,monospace;font-size:9.5px;color:var(--muted);white-space:nowrap}
+.tb{font-size:8.5px;font-weight:800;letter-spacing:.06em;padding:1px 7px;border-radius:9px;white-space:nowrap}
+.tb.v{background:#e8f7f1;color:#0a7a3d}.tb.e{background:#fdeee6;color:#b35127}.tb.s{background:#fdf0ea;color:#c14e1f}.tb.b{background:#e6f2e6;color:#0b6b0b}.tb.h{background:#fbeff4;color:#b03e6e}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:14px 0 0;font-size:12px;color:var(--ink2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.lg{width:13px;height:13px;border-radius:4px;background:#fff;border:1.5px solid var(--grid)}
+</style>
+</head>
+<body>
+<header class="site"><div class="wrap"><div class="bar">
+  <div class="brand">SWARM<small>Functional Solution Description</small></div>
+  <nav class="top">
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="lifecycle.html">Mission Lifecycle</a>
+    <a href="agents.html">The Agents</a>
+    <a href="learning.html">Memory &amp; Learning</a>
+    <a href="observability.html" aria-current="page">Observability</a>
+    <a href="risks.html">Risks &amp; Safeguards</a>
+  </nav>
+</div></div></header>
+
+<main class="wrap">
+  <p class="kicker">Chapter 5 · Observability</p>
+  <h1>Watching the swarm think</h1>
+  <p class="lede">A swarm you cannot see is a swarm you cannot trust, steer, or debug. Observability in SWARM is not a bolt-on monitoring layer — it is the second consumer of the same audit substrate the Learning Agent feeds on: the machine learns from the ledger, and humans <em>watch and steer</em> through it, live, on a visual mission-control surface inspired by node-canvas tools like n8n.</p>
+
+  <h2>Three principles</h2>
+  <div class="grid3">
+    <div class="card" style="border-top:3px solid var(--c-fabric)">
+      <h3>A view, never a second truth</h3>
+      <p>The dashboard renders ledger events and nothing else. It holds no state of its own, computes no facts the ledger doesn't contain, and can therefore never disagree with the audit trail. If it's on screen, there is an event behind it.</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-orch)">
+      <h3>Every pixel is drillable</h3>
+      <p>Node → task → contract → verdicts → individual events: any visual element opens into the evidence beneath it. The dashboard's job is not to summarize away detail but to make the full depth reachable in two clicks.</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-human)">
+      <h3>Watching is also acting</h3>
+      <p>Mission control is a cockpit, not a window. Humans approve escalations, answer clarifications, pause subtrees, top up budgets and turn the autonomy dial from here — and every such act is itself a ledger event, first-class and attributable like everything the agents do.</p>
+    </div>
+  </div>
+
+  <h2>One substrate, three consumers</h2>
+  <figure>
+    <svg viewBox="0 0 900 190" width="100%" role="img" aria-label="The audit ledger streams to three consumers: the Learning Agent, mission control, and the requester view">
+      <defs><marker id="oa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a3aa7"/></marker>
+      <marker id="ob" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker></defs>
+      <rect x="20" y="58" width="220" height="74" rx="10" fill="var(--t-fabric)" stroke="var(--c-fabric)" stroke-width="1.6"/>
+      <text x="130" y="88" text-anchor="middle" font-size="13" font-weight="700">Audit Ledger</text>
+      <text x="130" y="106" text-anchor="middle" font-size="10" fill="#52514e">typed events, streamed as they happen</text>
+      <line x1="240" y1="76" x2="322" y2="46" stroke="#4a3aa7" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#oa)"/>
+      <line x1="240" y1="95" x2="322" y2="95" stroke="#4a3aa7" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#oa)"/>
+      <line x1="240" y1="114" x2="322" y2="146" stroke="#4a3aa7" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#oa)"/>
+      <rect x="326" y="24" width="230" height="44" rx="8" fill="var(--t-learn)" stroke="var(--c-learn)" stroke-width="1.4"/>
+      <text x="441" y="43" text-anchor="middle" font-size="11.5" font-weight="700">Learning Agent</text>
+      <text x="441" y="58" text-anchor="middle" font-size="9.5" fill="#52514e">mines it between missions, watches it live</text>
+      <rect x="326" y="74" width="230" height="44" rx="8" fill="var(--t-orch)" stroke="var(--c-orch)" stroke-width="1.4"/>
+      <text x="441" y="93" text-anchor="middle" font-size="11.5" font-weight="700">Mission Control (operator)</text>
+      <text x="441" y="108" text-anchor="middle" font-size="9.5" fill="#52514e">live canvas · workforce · cockpit controls</text>
+      <rect x="326" y="124" width="230" height="44" rx="8" fill="var(--t-human)" stroke="var(--c-human)" stroke-width="1.4"/>
+      <text x="441" y="143" text-anchor="middle" font-size="11.5" font-weight="700">Requester view</text>
+      <text x="441" y="158" text-anchor="middle" font-size="9.5" fill="#52514e">progress · questions for you · assumptions</text>
+      <path d="M 556 95 H 640" fill="none" stroke="#52514e" stroke-width="1.4" marker-end="url(#ob)"/>
+      <rect x="644" y="58" width="240" height="74" rx="10" fill="#fff" stroke="#c3c2b7"/>
+      <text x="764" y="84" text-anchor="middle" font-size="11.5" font-weight="700">Human interventions</text>
+      <text x="764" y="100" text-anchor="middle" font-size="9.5" fill="#52514e">approvals · answers · pauses · budget grants</text>
+      <text x="764" y="114" text-anchor="middle" font-size="9.5" fill="#52514e">→ written back as ledger events</text>
+      <path d="M 764 132 V 168 H 130 V 136" fill="none" stroke="#52514e" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#ob)"/>
+    </svg>
+    <figcaption><strong>Same events, three readers.</strong> Nothing is instrumented twice: the ledger the Learning Agent needs is the ledger the dashboard renders is the ledger the requester's progress view filters. Human acts taken in the cockpit close the loop by becoming events themselves.</figcaption>
+  </figure>
+
+  <h2>Mission control — the canvas</h2>
+  <p>The centerpiece is a live node canvas in the n8n tradition: the mission's task graph laid out as connected nodes, executing left to right, each node wearing its state openly — with icon and label, never color alone. The mock below shows one mission mid-flight, drilled one level into the tree:</p>
+
+  <figure>
+    <div class="mock" role="img" aria-label="Mockup of the SWARM mission control dashboard: header with progress and budget, mission rail, live task canvas with status nodes, inspector panel and event ticker">
+      <div class="m-top">
+        <div class="m-title">SWARM Mission Control<small>M-0142 · Competitive landscape dossier</small></div>
+        <span class="m-chip m-live"><b></b>LIVE</span>
+        <div class="m-prog"><div class="pl"><span>Tasks 812 / 1,412 verified</span><span>58%</span></div><div class="m-bar"><i></i><i class="b2"></i></div></div>
+        <div class="m-stat"><b>41%</b>budget spent</div>
+        <div class="m-stat"><b>37</b>agents active</div>
+        <div class="m-stat"><b>Supervised</b>autonomy dial</div>
+      </div>
+      <div class="m-scrub"><span>⏮</span><span>⏯</span><div class="sb"><i></i><u></u></div><span>14:32:10 · now</span><span style="color:#c9c7bf">|</span><span>time-travel: drag to any past moment</span></div>
+      <div class="m-body">
+        <div class="m-rail">
+          <h5>Missions</h5>
+          <div class="m-mi sel"><b>M-0142 · Competitive dossier</b><span>▶ running · 58% · 37 agents</span></div>
+          <div class="m-mi"><b>M-0141 · Data migration audit</b><span>✓ delivering · 100%</span></div>
+          <div class="m-mi"><b>M-0139 · Patent scan</b><span>▲ surrendered · dossier ready</span></div>
+          <div class="m-fleet">
+            <h5>Fleet</h5>
+            <div><b>3</b> missions · <b>128</b> agents</div>
+            <div><b>3,204</b> tasks today</div>
+            <div><b>2</b> items need a human ⚠</div>
+          </div>
+        </div>
+        <div class="m-canvas" style="min-height:430px">
+          <div class="m-crumb">task zero ▸ B · Deep-dive profiles ▸ <b>canvas</b> · workforce · timeline · learning · ledger</div>
+          <div class="m-inner">
+            <svg style="position:absolute;inset:0;z-index:1" width="560" height="430" viewBox="0 0 560 430">
+              <path d="M 174 125 C 196 125 190 81 210 81" fill="none" stroke="#9fd8b6" stroke-width="1.8"/>
+              <path d="M 174 125 C 196 125 190 190 210 190" fill="none" stroke="#9fd8b6" stroke-width="1.8"/>
+              <path d="M 174 125 C 200 125 194 291 210 291" fill="none" stroke="#b9b7ae" stroke-width="1.8"/>
+              <path d="M 368 81 C 386 81 382 126 396 130" fill="none" stroke="#9fd8b6" stroke-width="1.8"/>
+              <path d="M 368 190 C 386 190 382 142 396 138" fill="none" stroke="#2a78d6" stroke-width="1.8" stroke-dasharray="6 4"/>
+              <path d="M 368 291 C 390 291 386 152 396 146" fill="none" stroke="#b9b7ae" stroke-width="1.8" stroke-dasharray="3 3"/>
+              <path d="M 174 342 C 196 342 198 310 210 300" fill="none" stroke="#e8a488" stroke-width="1.8" stroke-dasharray="6 4"/>
+              <path d="M 475 174 C 475 196 475 210 475 228" fill="none" stroke="#b9b7ae" stroke-width="1.8" stroke-dasharray="3 3"/>
+            </svg>
+            <div class="node n-done" style="left:16px;top:88px">
+              <b>✓ Map competitor field</b><span class="cat">category · market-scan</span>
+              <div class="st">✓ verified · 5/5 criteria</div>
+            </div>
+            <div class="node n-done" style="left:210px;top:44px">
+              <b>✓ Profile: Acme Corp</b><span class="cat">category · deep-research</span>
+              <div class="st">✓ verified · pass² consistent</div>
+            </div>
+            <div class="node n-run" style="left:210px;top:146px">
+              <b>▶ Profile: Beta GmbH</b><span class="cat">category · deep-research</span>
+              <div class="st">▶ running · analyst.v7</div>
+              <div class="np"><i style="width:64%;background:var(--c-orch)"></i></div>
+            </div>
+            <div class="node n-esc" style="left:210px;top:252px">
+              <b>⚠ Profile: Gamma ApS</b><span class="cat">category · deep-research</span>
+              <div class="st">⚠ escalated · rung 2: new agent</div>
+            </div>
+            <div class="node n-fail" style="left:16px;top:300px">
+              <b>✕ Validate pricing data</b><span class="cat">category · fact-check</span>
+              <div class="st">✕ failed C-3 · retrying</div>
+            </div>
+            <div class="node n-rev" style="left:396px;top:96px">
+              <b>◇ Cross-compare</b><span class="cat">category · synthesis</span>
+              <div class="st">◇ Gate B · in review</div>
+            </div>
+            <div class="node n-queue" style="left:396px;top:232px">
+              <b>… Assemble dossier</b><span class="cat">fold-up · parent task</span>
+              <div class="st">… queued · awaits 2 siblings</div>
+            </div>
+          </div>
+          <div class="m-zoom"><span>−</span><span>fit</span><span>+</span></div>
+          <div class="m-mini"><i style="left:8%;top:22%;width:14%;height:12%"></i><i style="left:30%;top:12%;width:14%;height:12%"></i><i style="left:30%;top:34%;width:14%;height:12%"></i><i style="left:30%;top:56%;width:14%;height:12%"></i><i style="left:56%;top:28%;width:14%;height:12%"></i><i style="left:56%;top:52%;width:14%;height:12%"></i><i style="left:12%;top:70%;width:14%;height:12%"></i><u></u></div>
+        </div>
+        <div class="m-insp">
+          <h5>Inspector</h5>
+          <div class="it">Profile: Beta GmbH</div>
+          <div class="is">▶ RUNNING · task 4.2.2 · depth 3</div>
+          <div class="m-sec">
+            <h5>Contract</h5>
+            <div class="m-crit">Objective: evidence-based company profile per pinned template</div>
+            <div class="m-crit">✓ C-1 sources: ≥5 independent</div>
+            <div class="m-crit">✓ C-2 claims carry citations</div>
+            <div class="m-crit">○ C-3 finances cross-checked</div>
+          </div>
+          <div class="m-sec">
+            <h5>Effort</h5>
+            <div class="m-kv"><em>budget</em><span><b>340</b> / 600 spent</span></div>
+            <div class="m-kv"><em>agent</em><span>analyst-competitive.v7</span></div>
+            <div class="m-kv"><em>attempts</em><span>1st · no stalls</span></div>
+          </div>
+          <div class="m-sec">
+            <h5>Recent events</h5>
+            <div class="m-ev"><tt>14:31:51</tt><span>BROKER granted sibling output A-map</span></div>
+            <div class="m-ev"><tt>14:29:12</tt><span>restated contract · no ambiguities</span></div>
+            <div class="m-ev"><tt>14:28:58</tt><span>spawned from library (clade ★ 0.87)</span></div>
+          </div>
+          <div class="m-btns"><span class="m-btn pri">Open contract</span><span class="m-btn">Pause</span><span class="m-btn">Top up</span><span class="m-btn warn">Cancel subtree</span></div>
+        </div>
+      </div>
+      <div class="m-tick">
+        <h5>Event stream — all missions</h5>
+        <div class="trow"><tt>14:32:07</tt><span class="tb v">VERDICT</span><span>Gate B pass · “Profile: Acme Corp” · 5/5 criteria, consistency check held (2/2 runs agree)</span></div>
+        <div class="trow"><tt>14:32:04</tt><span class="tb e">ESCALATION</span><span>“Profile: Gamma ApS” → rung 2 · error class: capability-mismatch · differently-designed agent requested</span></div>
+        <div class="trow"><tt>14:31:58</tt><span class="tb s">SPAWN</span><span>Agent Creator staffed 2× analyst-competitive.v7 · category deep-research · reuse (no-bid: 0)</span></div>
+        <div class="trow"><tt>14:31:44</tt><span class="tb h">HUMAN</span><span>Operator approved budget top-up +200 on “Validate pricing data” · logged as economic event</span></div>
+      </div>
+    </div>
+    <figcaption><strong>Mission control, mid-mission.</strong> Header: live progress against the verified-task count, budget burn, active agents and the current dial setting, with the time-travel scrubber beneath. Left: mission rail and fleet totals, including the attention count. Center: the live canvas — nodes carry icon + label + category, edges show the dependency flow, the amber-flagged and failed branches are visible at a glance, and breadcrumbs/zoom/minimap handle thousand-node trees. Right: the inspector for the selected task — its contract criteria ticking off live, effort, recent events, and the cockpit actions. Bottom: the raw event stream, one row per ledger event.</figcaption>
+  </figure>
+
+  <div class="legend">
+    <span><span class="lg" style="border-color:#9fd8b6"></span>✓ verified</span>
+    <span><span class="lg" style="border-color:var(--c-orch);box-shadow:0 0 0 2px rgba(42,120,214,.15)"></span>▶ running</span>
+    <span><span class="lg" style="border-style:dashed"></span>… queued</span>
+    <span><span class="lg" style="border-color:var(--c-review)"></span>◇ in review</span>
+    <span><span class="lg" style="border-color:var(--s-serious)"></span>⚠ escalated</span>
+    <span><span class="lg" style="border-color:var(--s-crit)"></span>✕ failed / retrying</span>
+    <span style="color:var(--muted)">state = border + icon + label, never color alone</span>
+  </div>
+
+  <h2>The five lenses</h2>
+  <p>One dashboard, five ways of looking at the same ledger — switchable per mission, shareable as links, identical truth underneath:</p>
+  <div class="grid3">
+    <div class="card" style="border-top:3px solid var(--c-orch)">
+      <h3>1 · Canvas</h3>
+      <p>The n8n-style task graph above: structure, states and flow. Collapse/expand subtrees; the breadcrumb drills through depth; heat mode tints nodes by budget burn or retry count when you need to see where effort pools.</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-creator)">
+      <h3>2 · Workforce</h3>
+      <p>Agent-centric: every specialist currently alive, grouped by category — which design and version, which task it holds, how long it's run, its live compliance rate. The "who is working right now" view, with lineage one click away.</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-worker)">
+      <h3>3 · Timeline</h3>
+      <p>Swimlanes per subtree: when tasks started, waited, ran, got reviewed, escalated. The lens that exposes stalls, review queues and the critical path — where wall-clock time actually went.</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-learn)">
+      <h3>4 · Learning observatory</h3>
+      <p>The swarm improving itself: experiments in flight with their pre-registered metrics, adoptions and reverts on the ratchet, library growth, per-category compliance trends, amendment petitions pending. Watching the institution evolve is a first-class view, not a log file.</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-fabric)">
+      <h3>5 · Ledger explorer</h3>
+      <p>The raw substrate, queryable: filter by event family, error class, agent, criterion, time range. Where investigations end and where every drill-down from the other four lenses lands.</p>
+    </div>
+  </div>
+
+  <h2>The cockpit — what a human can do from here</h2>
+  <p>Mission control is where the autonomy dial cashes out. Every control below writes a ledger event with the operator's identity attached — the swarm's rule that <em>nothing acts without leaving a trail</em> applies to humans too:</p>
+  <table>
+    <tr><th style="width:230px">Control</th><th>Behavior</th></tr>
+    <tr><td>Answer &amp; approve</td><td>The attention queue surfaces everything waiting on a human: escalations that reached the ladder's top rung, clarification requests, flagged assumptions that started to matter, surrender-threshold confirmations, amendment ratifications. Each item shows its full context inline — the contract, the verdicts, what was tried — so deciding never requires an investigation.</td></tr>
+    <tr><td>Pause / resume / cancel</td><td>Any node or whole subtree. Pausing is graceful — running workers finish their current attempt; cancellation triggers the same accounting a surrender does, so cancelled work still teaches.</td></tr>
+    <tr><td>Budget grants</td><td>Top up a task or subtree from the mission reserve, or extend the mission budget itself (which may require requester approval per the dial). Grants are economic events — visible in every later cost analysis.</td></tr>
+    <tr><td>Turn the dial mid-flight</td><td>Tighten or loosen autonomy while a mission runs — e.g. drop to closely-supervised after a suspicious pattern, or release a smoothly-running mission to full autonomy. Takes effect at the next gate, never retroactively.</td></tr>
+    <tr><td>Nudge the record</td><td>Attach operator annotations to any task or verdict — context the Learning Agent will see when it mines this mission. Humans teaching the swarm through the same channel the swarm teaches itself.</td></tr>
+  </table>
+
+  <h2>Time travel</h2>
+  <p>Because the ledger is append-only and complete, any past moment of any mission is reconstructable: drag the scrubber and the whole dashboard — canvas, workforce, budgets, inspector — renders exactly as it stood then. Functionally this gives three capabilities beyond curiosity: <strong>post-mortems</strong> replay a failure from before it was visible, watching the early-warning signs the risk register says to look for; <strong>before/after diffing</strong> compares any two moments — or the same mission slice before and after a learning adoption, which is how the Learning Observatory shows an improvement rather than asserting it; and <strong>honest demos</strong> — a delivered mission can be replayed for its requester end to end, which is the pedigree promise of <a href="lifecycle.html">Stage 6</a> made visible.</p>
+
+  <h2>Who sees what</h2>
+  <table>
+    <tr><th style="width:210px">Audience</th><th>View</th><th style="width:250px">Can act?</th></tr>
+    <tr><td>Operator</td><td>Everything above — all missions, all lenses, the raw ledger, the attention queue.</td><td>Full cockpit, per their role and the dial.</td></tr>
+    <tr><td>Requester</td><td>Their mission only, simplified: progress against the mission contract's criteria (not internal task counts), flagged assumptions, questions addressed to them, budget consumed vs. granted, the delivery or surrender dossier as it forms.</td><td>Answer questions; approve budget extensions; adjust their own mission's dial within limits set at intake.</td></tr>
+    <tr><td>Learning observer</td><td>The Learning Observatory across all missions: experiments, adoptions, library and commons health, compliance trends. The view of the swarm as an evolving institution rather than a task machine.</td><td>Read-only — improvement acts belong to the Learning Agent and the amendment protocol, never to a dashboard click.</td></tr>
+  </table>
+
+  <h2>What lights up when — events to views</h2>
+  <p>The dashboard adds no instrumentation of its own; each family from the <a href="learning.html">event taxonomy</a> already drives specific surfaces:</p>
+  <table>
+    <tr><th style="width:170px">Event family</th><th>Where it appears live</th></tr>
+    <tr><td>Decision</td><td>Canvas structure changes (splits, delegate-whole badges), plan-rewrite markers on the timeline.</td></tr>
+    <tr><td>Contract</td><td>Node creation, criteria checklists in the inspector, bounce-backs flagged on the canvas edge.</td></tr>
+    <tr><td>Staffing</td><td>Workforce roster changes, spawn ticker rows, no-bid warnings in the attention queue.</td></tr>
+    <tr><td>Execution</td><td>Node progress, broker-exchange lines in the inspector, live agent activity in Workforce.</td></tr>
+    <tr><td>Verification</td><td>Node state flips (review / verified / failed), red-flag markers, Gate A results on the tree itself.</td></tr>
+    <tr><td>Economic</td><td>Header burn bar, per-node heat mode, floor/ceiling alerts, grant rows in the ticker.</td></tr>
+    <tr><td>Escalation</td><td>Amber/red node states with the rung shown, stall-cluster alerts, surrender countdowns in the attention queue.</td></tr>
+    <tr><td>Learning</td><td>The Observatory: experiment cards, ratchet adoptions/reverts, hot-fix badges on affected categories — visible even mid-mission when a fast-loop patch lands.</td></tr>
+  </table>
+
+  <h2>Functional requirements, summarized</h2>
+  <ul class="tight">
+    <li><strong>Live streaming:</strong> the dashboard reflects ledger events as they land — running missions are watched, not polled into staleness.</li>
+    <li><strong>Scale handling:</strong> the canvas stays legible at thousands of nodes — collapse by subtree, aggregate node badges ("142 tasks · 3 escalated"), breadcrumb drill-down, minimap navigation.</li>
+    <li><strong>Two-click depth:</strong> from any visual element to its underlying events in at most two interactions.</li>
+    <li><strong>Attention queue:</strong> one place listing everything that waits on a human, ranked by what it blocks; nothing addressed to a human may exist only as a buried event.</li>
+    <li><strong>Symmetric acts:</strong> every human action available in the cockpit produces a ledger event with actor identity; there is no invisible steering.</li>
+    <li><strong>Time travel:</strong> full reconstruction of any past dashboard state; diff view between any two moments.</li>
+    <li><strong>Audience filtering:</strong> operator, requester and learning-observer views draw from the same events with entitlement filters — the requester's simplicity is a filter, not a separate pipeline.</li>
+    <li><strong>No second truth:</strong> the dashboard persists nothing the ledger doesn't; deleting the dashboard loses no information.</li>
+  </ul>
+
+  <div class="pn">
+    <a href="learning.html"><span>Previous</span>← Memory &amp; Learning</a>
+    <a href="risks.html"><span>Next</span>Risks &amp; Safeguards →</a>
+  </div>
+</main>
+<footer><div class="wrap">SWARM · Functional Solution Description v1.1 · 22 July 2026 · Observability</div></footer>
+</body>
+</html>

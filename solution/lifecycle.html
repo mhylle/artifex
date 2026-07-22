@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWARM — Mission Lifecycle</title>
+<style>
+:root{
+  color-scheme: light;
+  --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+  --c-orch:#2a78d6; --t-orch:#eaf2fb;
+  --c-creator:#eb6834; --t-creator:#fdf0ea;
+  --c-review:#1baf7a; --t-review:#e8f7f1;
+  --c-learn:#eda100; --t-learn:#fdf6e3;
+  --c-fabric:#4a3aa7; --t-fabric:#edebf6;
+  --c-const:#e34948; --t-const:#fcecec;
+  --c-human:#e87ba4; --t-human:#fbeff4;
+  --c-broker:#008300; --t-broker:#e6f2e6;
+  --c-worker:#898781; --t-worker:#f0efec;
+  --link:#1c5cab;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.55;font-size:15.5px}
+.wrap{max-width:1040px;margin:0 auto;padding:0 28px}
+header.site{background:var(--surface);border-bottom:1px solid var(--grid)}
+.bar{display:flex;align-items:baseline;justify-content:space-between;gap:24px;padding:18px 0;flex-wrap:wrap}
+.brand{font-weight:700;letter-spacing:.4px;font-size:15px}
+.brand small{font-weight:400;color:var(--muted);margin-left:10px;letter-spacing:0}
+nav.top{display:flex;gap:18px;flex-wrap:wrap}
+nav.top a{color:var(--ink2);text-decoration:none;font-size:13.5px;padding:3px 0;border-bottom:2px solid transparent}
+nav.top a:hover{color:var(--ink)}
+nav.top a[aria-current]{color:var(--ink);border-bottom-color:var(--ink)}
+main{padding:52px 0 20px}
+.kicker{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+h1{font-size:clamp(28px,3.8vw,36px);line-height:1.14;margin:0 0 16px;letter-spacing:-.015em}
+h2{font-size:23px;margin:56px 0 6px;letter-spacing:-.01em}
+h3{font-size:16.5px;margin:26px 0 8px}
+.lede{font-size:17.5px;color:var(--ink2);max-width:74ch;margin:0 0 8px}
+p{max-width:76ch}
+a{color:var(--link)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 22px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:20px 0}
+.card h3{margin:0 0 8px;font-size:15.5px}
+.card p{font-size:14px;color:var(--ink2);margin:0 0 8px}
+.card p:last-child{margin:0}
+figure{margin:26px 0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px;overflow-x:auto}
+figcaption{font-size:12.5px;color:var(--muted);margin-top:14px;line-height:1.5}
+svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+footer{border-top:1px solid var(--grid);margin-top:70px;padding:26px 0 44px;color:var(--muted);font-size:12.5px}
+.pn{display:flex;justify-content:space-between;gap:16px;margin-top:56px}
+.pn a{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;text-decoration:none;color:var(--ink);font-size:13.5px}
+.pn a span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+ul.tight{padding-left:20px;margin:8px 0}
+ul.tight li{margin:5px 0;color:var(--ink2);font-size:14.5px}
+ul.tight li strong{color:var(--ink)}
+.stage{border-left:3px solid var(--baseline);padding:2px 0 2px 20px;margin:26px 0}
+.stage h3{margin:0 0 6px}
+.stage .who{font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:6px}
+.stage p{color:var(--ink2);font-size:14.5px}
+.contract{max-width:760px;margin:26px 0;background:#fff;border:1.5px solid var(--ink);border-radius:10px;overflow:hidden}
+.contract .chead{padding:16px 22px;border-bottom:1.5px solid var(--ink);display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px}
+.contract .chead .t{font-weight:700;font-size:16px}
+.contract .chead .id{font-size:12px;color:var(--muted)}
+.crow{display:grid;grid-template-columns:190px 1fr;border-bottom:1px solid var(--grid)}
+.crow:last-child{border-bottom:none}
+.crow .k{padding:12px 0 12px 22px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink2)}
+.crow .v{padding:12px 22px;font-size:13.5px;color:var(--ink2)}
+.crow .v em{color:var(--muted);font-style:normal;font-size:12px;display:block;margin-top:3px}
+@media(max-width:640px){.crow{grid-template-columns:1fr}.crow .k{padding:12px 22px 0}}
+</style>
+</head>
+<body>
+<header class="site"><div class="wrap"><div class="bar">
+  <div class="brand">SWARM<small>Functional Solution Description</small></div>
+  <nav class="top">
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="lifecycle.html" aria-current="page">Mission Lifecycle</a>
+    <a href="agents.html">The Agents</a>
+    <a href="learning.html">Memory &amp; Learning</a>
+    <a href="observability.html">Observability</a>
+    <a href="risks.html">Risks &amp; Safeguards</a>
+  </nav>
+</div></div></header>
+
+<main class="wrap">
+  <p class="kicker">Chapter 2 · Mission Lifecycle</p>
+  <h1>From raw goal to verified result<br>— or an honest surrender</h1>
+  <p class="lede">Every mission travels the same seven stages. Two review gates guard the pipeline — one on the way into execution, one on the way out — and at any point the mission can branch to the surrender path, which is a deliverable in its own right, not a failure to deliver.</p>
+
+  <figure>
+    <svg viewBox="0 0 940 268" width="100%" role="img" aria-label="Seven-stage mission pipeline with two review gates and a surrender branch">
+      <defs><marker id="pa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker>
+      <marker id="par" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c2452f"/></marker></defs>
+      <!-- stages -->
+      <g>
+        <rect x="14" y="60" width="108" height="56" rx="9" fill="var(--t-human)" stroke="var(--c-human)" stroke-width="1.5"/>
+        <text x="68" y="84" text-anchor="middle" font-size="12" font-weight="700">1 · Intake</text>
+        <text x="68" y="100" text-anchor="middle" font-size="9.5" fill="#52514e">mission contract</text>
+        <line x1="122" y1="88" x2="146" y2="88" stroke="#52514e" stroke-width="1.5" marker-end="url(#pa)"/>
+        <rect x="150" y="60" width="108" height="56" rx="9" fill="var(--t-orch)" stroke="var(--c-orch)" stroke-width="1.5"/>
+        <text x="204" y="84" text-anchor="middle" font-size="12" font-weight="700">2 · Decompose</text>
+        <text x="204" y="100" text-anchor="middle" font-size="9.5" fill="#52514e">recursive, contracted</text>
+        <line x1="258" y1="88" x2="282" y2="88" stroke="#52514e" stroke-width="1.5" marker-end="url(#pa)"/>
+        <!-- gate 1 -->
+        <path d="M 316 60 L 348 88 L 316 116 L 284 88 Z" fill="var(--t-review)" stroke="var(--c-review)" stroke-width="1.5"/>
+        <text x="316" y="84" text-anchor="middle" font-size="10" font-weight="700">Gate A</text>
+        <text x="316" y="97" text-anchor="middle" font-size="8.5" fill="#52514e">atomicity</text>
+        <line x1="348" y1="88" x2="372" y2="88" stroke="#52514e" stroke-width="1.5" marker-end="url(#pa)"/>
+        <rect x="376" y="60" width="108" height="56" rx="9" fill="var(--t-creator)" stroke="var(--c-creator)" stroke-width="1.5"/>
+        <text x="430" y="84" text-anchor="middle" font-size="12" font-weight="700">3 · Staff</text>
+        <text x="430" y="100" text-anchor="middle" font-size="9.5" fill="#52514e">reuse or create agents</text>
+        <line x1="484" y1="88" x2="508" y2="88" stroke="#52514e" stroke-width="1.5" marker-end="url(#pa)"/>
+        <rect x="512" y="60" width="108" height="56" rx="9" fill="var(--t-worker)" stroke="#898781" stroke-width="1.5"/>
+        <text x="566" y="84" text-anchor="middle" font-size="12" font-weight="700">4 · Execute</text>
+        <text x="566" y="100" text-anchor="middle" font-size="9.5" fill="#52514e">contract + broker only</text>
+        <line x1="620" y1="88" x2="644" y2="88" stroke="#52514e" stroke-width="1.5" marker-end="url(#pa)"/>
+        <!-- gate 2 -->
+        <path d="M 678 60 L 710 88 L 678 116 L 646 88 Z" fill="var(--t-review)" stroke="var(--c-review)" stroke-width="1.5"/>
+        <text x="678" y="84" text-anchor="middle" font-size="10" font-weight="700">Gate B</text>
+        <text x="678" y="97" text-anchor="middle" font-size="8.5" fill="#52514e">contract met</text>
+        <line x1="710" y1="88" x2="734" y2="88" stroke="#52514e" stroke-width="1.5" marker-end="url(#pa)"/>
+        <rect x="738" y="60" width="94" height="56" rx="9" fill="var(--t-orch)" stroke="var(--c-orch)" stroke-width="1.5"/>
+        <text x="785" y="84" text-anchor="middle" font-size="12" font-weight="700">5 · Fold up</text>
+        <text x="785" y="100" text-anchor="middle" font-size="9.5" fill="#52514e">parents assemble</text>
+        <line x1="832" y1="88" x2="856" y2="88" stroke="#52514e" stroke-width="1.5" marker-end="url(#pa)"/>
+        <rect x="860" y="60" width="70" height="56" rx="9" fill="var(--t-review)" stroke="var(--c-review)" stroke-width="1.5"/>
+        <text x="895" y="84" text-anchor="middle" font-size="11.5" font-weight="700">6 · Deliver</text>
+        <text x="895" y="100" text-anchor="middle" font-size="9.5" fill="#52514e">vs task zero</text>
+      </g>
+      <!-- retry loop from gate B back to execute/staff -->
+      <path d="M 678 116 V 152 H 430 V 120" fill="none" stroke="#52514e" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#pa)"/>
+      <text x="554" y="146" text-anchor="middle" font-size="9.5" fill="#898781">rejection → escalation ladder (retry · restaff · redesign · re-decompose)</text>
+      <!-- gate A back to decompose -->
+      <path d="M 316 116 V 134 H 204 V 120" fill="none" stroke="#52514e" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#pa)"/>
+      <text x="257" y="130" text-anchor="middle" font-size="9.5" fill="#898781">not atomic → re-split</text>
+      <!-- surrender lane -->
+      <path d="M 68 116 V 214 H 738" fill="none" stroke="#c2452f" stroke-width="1.3" stroke-dasharray="6 4"/>
+      <path d="M 204 134 V 214 M 430 120 V 214 M 566 116 V 214 M 678 152 V 214" fill="none" stroke="#c2452f" stroke-width="1" stroke-dasharray="6 4" opacity=".55"/>
+      <rect x="742" y="188" width="188" height="52" rx="9" fill="var(--t-const)" stroke="#c2452f" stroke-width="1.5"/>
+      <text x="836" y="210" text-anchor="middle" font-size="12" font-weight="700">7 · Surrender dossier</text>
+      <text x="836" y="226" text-anchor="middle" font-size="9.5" fill="#52514e">"not achievable as specified"</text>
+      <line x1="738" y1="214" x2="738" y2="214" stroke="none"/>
+      <path d="M 730 214 L 742 214" fill="none" stroke="#c2452f" stroke-width="1.3" marker-end="url(#par)"/>
+      <text x="80" y="240" font-size="9.5" fill="#a04a3a">any stage may conclude the mission is impossible as specified — reaching that conclusion honestly is a success mode</text>
+    </svg>
+    <figcaption><strong>The pipeline.</strong> Two review gates: Gate A verifies the <em>decomposition</em> (is every task atomic, contracted, correctly bounded?) before a single worker exists; Gate B verifies every <em>execution</em> against its contract. The dashed red lane is the surrender path — reachable from anywhere, ending in a dossier, never in silence.</figcaption>
+  </figure>
+
+  <h2>The seven stages</h2>
+
+  <div class="stage" style="border-color:var(--c-human)">
+    <div class="who" style="color:var(--c-human)">Stage 1 · Intake — mission becomes task zero</div>
+    <p>No mission starts without its own contract. The intake dialogue interrogates the requester until the mission has testable success criteria, explicit scope boundaries, an autonomy-dial setting, and an effort budget. Ambiguities are surfaced as explicit open questions — never silently assumed away; if the dial permits, low-stakes ambiguities may be carried into the run as flagged assumptions, escalated the moment they start to matter. This stage exists because the evidence is brutal: bad specification is the single largest failure source in multi-agent systems (44% in the MAST study), and "failing to ask for clarification" is a measured top-ten failure mode. The mission contract is task zero — the root of the tree, judged at delivery exactly as every other task is judged.</p>
+  </div>
+
+  <div class="stage" style="border-color:var(--c-orch)">
+    <div class="who" style="color:var(--c-orch)">Stage 2 · Decomposition — the tree is built, contract by contract</div>
+    <p>The Orchestrator recursively splits the mission into subtasks, guided by decomposition templates from the Asset Registry — reusable "how to split this kind of work" recipes that are themselves learnable assets. Every node it creates is born as a full contract (anatomy below). Splitting continues until each leaf carries exactly <strong>one responsibility</strong> with <strong>one verifiable outcome</strong> — and no further. Dependencies between siblings are declared at creation time, so the tree is really a tree plus a typed dependency graph, and anything not dependent on anything else is free to run in parallel.</p>
+    <p>Crucially, atomization is a weapon to aim, not a reflex. At every node the Orchestrator applies the <strong>decompose-or-delegate gate</strong>: work that is inherently sequential and constraint-entangled is measurably <em>damaged</em> by splitting (−39% to −70% in controlled studies), so such subtrees are deliberately kept whole and handed to a single agent with a larger budget. The gate's decision — split or keep — is itself recorded, reviewable, and learnable.</p>
+  </div>
+
+  <div class="stage" style="border-color:var(--c-review)">
+    <div class="who" style="color:var(--c-review)">Gate A · Atomicity review — the task graph is the first deliverable</div>
+    <p>Before any worker exists, the Reviewer audits the decomposition itself: Is each task truly atomic? Is every contract testable as written? Are boundaries non-overlapping and exhaustive? Are stopping conditions present? Are cross-cutting decisions pinned wherever siblings must fit together? Was the decompose-or-delegate gate applied sensibly? A rejected decomposition goes back to Stage 2 with a structured verdict. This is the design's answer to the largest documented failure class — specification errors are caught while they are still cheap, on paper, before they become a thousand misdirected executions.</p>
+  </div>
+
+  <div class="stage" style="border-color:var(--c-creator)">
+    <div class="who" style="color:var(--c-creator)">Stage 3 · Staffing — reuse first, creation second</div>
+    <p>The Agent Creator clusters the approved tasks into <strong>capability categories</strong> — groups solvable by the same kind of specialist — so a thousand tasks might need twelve designs, not a thousand. For each category it searches the Asset Registry for proven designs whose capability descriptions match; candidates effectively <em>bid</em> with their track record on similar work. Only where no design can credibly serve the category — a <strong>no-bid</strong> — does it design a new specialist: role instructions, capability manifest, what context it may request, and the validation harness that will later decide whether the design earns permanence. A systematic pattern of no-bids across the tree is an early surrender signal: the swarm can tell it lacks the capability for a mission <em>before</em> burning the budget discovering it the hard way.</p>
+  </div>
+
+  <div class="stage" style="border-color:var(--c-worker)">
+    <div class="who" style="color:#6b6963">Stage 4 · Execution — contracts, broker, budgets, stall counters</div>
+    <p>Workers execute their contracts in parallel wherever the dependency graph allows. Each worker sees its contract and nothing else; extra context comes only through the Context Broker, logged. Before starting, a worker must restate its task and surface ambiguities — a contract it cannot restate is a contract it must bounce back, not improvise around. Budgets bind in both directions: a floor that prevents drive-by shallow work, a ceiling that prevents runaway effort. A per-task stall counter watches for no-progress loops — the same task attempted the same way twice triggers the escalation ladder rather than a third identical attempt.</p>
+  </div>
+
+  <div class="stage" style="border-color:var(--c-review)">
+    <div class="who" style="color:var(--c-review)">Gate B · Completion review — two tiers, scaled to blast radius</div>
+    <p>Every delivered task is verified in two tiers. <strong>Mechanical:</strong> do the contract's testable criteria pass — checks that execute, not opinions? <strong>Semantic:</strong> does the output actually serve the parent's intent — the tier that catches the program that compiles but plays chess wrongly? Verification <em>depth</em> scales with blast radius: an output that many downstream tasks depend on gets redundant independent execution and consistency checks (multiple runs must agree — a lucky pass is not a pass), while a low-stakes leaf gets a single rigorous check. Suspicious structure — output that fits the letter of the criteria too neatly while smelling nothing like the work — is red-flagged and discarded even if it technically passes. Every verdict is structured: which criterion failed, at which step, in which error class. Verdicts are the audit trail's most valuable records: they drive the escalation ladder now and the Learning Agent later.</p>
+  </div>
+
+  <div class="stage" style="border-color:var(--c-orch)">
+    <div class="who" style="color:var(--c-orch)">Stage 5 · Fold-up — integration is the tree in reverse</div>
+    <p>As leaves complete, each parent assembles its children's verified outputs into its own deliverable — reconciling, smoothing, and resolving what the pinned decisions didn't prevent. The parent is the single writer for its assembly. A conflict it cannot reconcile is not hand-waved: it becomes a new task (with its own contract) or climbs the ladder. Then the parent's own output faces Gate B like everything else, and the wave rolls upward until the root task — the mission itself — is assembled.</p>
+  </div>
+
+  <div class="stage" style="border-color:var(--c-review)">
+    <div class="who" style="color:var(--c-review)">Stage 6 · Delivery — the mission meets its own contract</div>
+    <p>The assembled result is verified against the mission contract from Stage 1 — the same two tiers, at maximum rigor. What ships to the requester is the result plus its pedigree: what was done, what was verified and how, which assumptions were flagged, what the mission cost against its budget. Depending on the dial, delivery may include the human checkpoint negotiated at intake.</p>
+  </div>
+
+  <div class="stage" style="border-color:#c2452f">
+    <div class="who" style="color:#c2452f">Stage 7 · Surrender — a first-class outcome</div>
+    <p>When escalations are exhausted, criteria prove contradictory, capability no-bids pile up, or the budget can't survive the remaining work, the mission concludes as <strong>"not achievable as specified"</strong> — deliberately, at thresholds set by the autonomy dial, never by silent stall. The dossier contains: everything that <em>was</em> completed and verified; the precise blockers with evidence; the full escalation history; budget spent versus value delivered; and — most usefully — what would have to change for the mission to become achievable: relaxed criteria, added capability, more budget, a decision from the requester. For the Learning Agent, surrender dossiers are the richest meals in the ledger: each one maps exactly where the swarm's competence ends.</p>
+  </div>
+
+  <h2>Anatomy of a task contract</h2>
+  <p>The contract is SWARM's atom. Every field exists to kill a documented failure mode — nothing here is ceremony.</p>
+
+  <div class="contract">
+    <div class="chead"><span class="t">Task Contract</span><span class="id">id · parent · category · depth — full lineage back to task zero</span></div>
+    <div class="crow"><div class="k">Objective</div><div class="v">The one responsibility this task carries, stated so a stranger could execute it.<em>kills: vague delegation → duplicated & misinterpreted work</em></div></div>
+    <div class="crow"><div class="k">Acceptance criteria</div><div class="v">Testable conditions, written before execution by the level above. The Reviewer checks these — exactly these.<em>kills: superficial verification; moving goalposts; "looks fine" reviews</em></div></div>
+    <div class="crow"><div class="k">Boundaries / anti-scope</div><div class="v">What this task must NOT do, and which sibling owns each neighboring concern.<em>kills: overlap, duplication, scope creep across siblings</em></div></div>
+    <div class="crow"><div class="k">Inputs &amp; pinned decisions</div><div class="v">Everything the worker is entitled to, plus parent-made cross-cutting choices (interfaces, formats, conventions) it must honor.<em>kills: integration conflicts from implicit decisions — discovered at fold-up when they're expensive</em></div></div>
+    <div class="crow"><div class="k">Dependencies</div><div class="v">Which sibling outputs this task consumes; what it may request via the broker.<em>kills: hidden coupling; premature starts on stale inputs</em></div></div>
+    <div class="crow"><div class="k">Stopping conditions</div><div class="v">What "done" looks like AND what "stop trying" looks like — max attempts, stall limits, give-up criteria.<em>kills: step repetition (15.7% of observed failures) and unaware-of-stopping-conditions loops (12.4%)</em></div></div>
+    <div class="crow"><div class="k">Effort budget</div><div class="v">Floor and ceiling. Spent effort is logged against the task; escalation rungs each carry their own cost.<em>kills: runaway spawning; drive-by shallow work; unaccountable cost</em></div></div>
+    <div class="crow"><div class="k">Escalation policy</div><div class="v">Which ladder applies, per error class; where the human sits per the autonomy dial.<em>kills: blind identical retries; failures that die silently</em></div></div>
+    <div class="crow"><div class="k">Verification plan</div><div class="v">Verification depth for this task (single check / redundant runs / consistency requirement), set by blast radius. Never visible to the executing worker in its gameable detail.<em>kills: lucky passes gating big subtrees; score-gaming (43× worse when the scorer is visible)</em></div></div>
+    <div class="crow"><div class="k">Audit binding</div><div class="v">Every event this task generates carries the contract id — the contract is also the key into the ledger.<em>enables: attribution, replay, per-clause compliance rates, learning</em></div></div>
+  </div>
+
+  <h2>The decomposition tree — down, then up</h2>
+  <figure>
+    <svg viewBox="0 0 920 400" width="100%" role="img" aria-label="Decomposition tree: contracts flow down the tree, verified results fold back up the same tree">
+      <defs>
+        <marker id="da" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2a78d6"/></marker>
+        <marker id="ua" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0f7a55"/></marker>
+      </defs>
+      <text x="24" y="34" font-size="11" fill="#2a78d6" font-weight="700">▼ DECOMPOSITION — contracts flow down</text>
+      <text x="896" y="34" font-size="11" fill="#0f7a55" font-weight="700" text-anchor="end">RESULTS FOLD UP — assembly flows up ▲</text>
+      <!-- root -->
+      <rect x="385" y="48" width="150" height="46" rx="9" fill="#fff" stroke="#0b0b0b" stroke-width="1.4"/>
+      <text x="460" y="68" text-anchor="middle" font-size="12" font-weight="700">Mission — task zero</text>
+      <text x="460" y="84" text-anchor="middle" font-size="9.5" fill="#52514e">assembles everything · judged last</text>
+      <!-- level 1 -->
+      <g>
+        <rect x="120" y="150" width="150" height="44" rx="8" fill="var(--t-orch)" stroke="var(--c-orch)" stroke-width="1.3"/>
+        <text x="195" y="169" text-anchor="middle" font-size="11.5" font-weight="600">Subtask A</text>
+        <text x="195" y="184" text-anchor="middle" font-size="9" fill="#52514e">assembles A1–A3 · then Gate B</text>
+        <rect x="385" y="150" width="150" height="44" rx="8" fill="var(--t-orch)" stroke="var(--c-orch)" stroke-width="1.3"/>
+        <text x="460" y="169" text-anchor="middle" font-size="11.5" font-weight="600">Subtask B</text>
+        <text x="460" y="184" text-anchor="middle" font-size="9" fill="#52514e">assembles B1–B2 · then Gate B</text>
+        <rect x="650" y="150" width="150" height="44" rx="8" fill="var(--t-worker)" stroke="#898781" stroke-width="1.3"/>
+        <text x="725" y="169" text-anchor="middle" font-size="11.5" font-weight="600">Subtask C — kept whole</text>
+        <text x="725" y="184" text-anchor="middle" font-size="9" fill="#52514e">sequential work · delegate-whole gate</text>
+      </g>
+      <!-- edges root to level1: down on left side, up on right side of each pair -->
+      <line x1="420" y1="94" x2="200" y2="146" stroke="#2a78d6" stroke-width="1.4" marker-end="url(#da)"/>
+      <line x1="212" y1="150" x2="432" y2="98" stroke="#0f7a55" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#ua)"/>
+      <line x1="455" y1="94" x2="455" y2="146" stroke="#2a78d6" stroke-width="1.4" marker-end="url(#da)"/>
+      <line x1="467" y1="150" x2="467" y2="98" stroke="#0f7a55" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#ua)"/>
+      <line x1="500" y1="94" x2="718" y2="146" stroke="#2a78d6" stroke-width="1.4" marker-end="url(#da)"/>
+      <line x1="730" y1="150" x2="512" y2="98" stroke="#0f7a55" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#ua)"/>
+      <!-- level 2 leaves -->
+      <g>
+        <rect x="40" y="262" width="100" height="40" rx="7" fill="#fff" stroke="#898781" stroke-width="1.2"/>
+        <text x="90" y="279" text-anchor="middle" font-size="10.5" font-weight="600">Leaf A1</text>
+        <text x="90" y="293" text-anchor="middle" font-size="8.5" fill="#52514e">one responsibility</text>
+        <rect x="152" y="262" width="100" height="40" rx="7" fill="#fff" stroke="#898781" stroke-width="1.2"/>
+        <text x="202" y="279" text-anchor="middle" font-size="10.5" font-weight="600">Leaf A2</text>
+        <text x="202" y="293" text-anchor="middle" font-size="8.5" fill="#52514e">one outcome</text>
+        <rect x="264" y="262" width="100" height="40" rx="7" fill="#fff" stroke="#898781" stroke-width="1.2"/>
+        <text x="314" y="279" text-anchor="middle" font-size="10.5" font-weight="600">Leaf A3</text>
+        <text x="314" y="293" text-anchor="middle" font-size="8.5" fill="#52514e">verified alone</text>
+        <rect x="396" y="262" width="100" height="40" rx="7" fill="#fff" stroke="#898781" stroke-width="1.2"/>
+        <text x="446" y="279" text-anchor="middle" font-size="10.5" font-weight="600">Leaf B1</text>
+        <text x="446" y="293" text-anchor="middle" font-size="8.5" fill="#52514e">‖ parallel with B2</text>
+        <rect x="508" y="262" width="100" height="40" rx="7" fill="#fff" stroke="#898781" stroke-width="1.2"/>
+        <text x="558" y="279" text-anchor="middle" font-size="10.5" font-weight="600">Leaf B2</text>
+        <text x="558" y="293" text-anchor="middle" font-size="8.5" fill="#52514e">deps declared</text>
+      </g>
+      <!-- edges level1 to leaves -->
+      <line x1="165" y1="194" x2="95" y2="258" stroke="#2a78d6" stroke-width="1.3" marker-end="url(#da)"/>
+      <line x1="104" y1="262" x2="174" y2="198" stroke="#0f7a55" stroke-width="1.3" stroke-dasharray="5 3" marker-end="url(#ua)"/>
+      <line x1="192" y1="194" x2="200" y2="258" stroke="#2a78d6" stroke-width="1.3" marker-end="url(#da)"/>
+      <line x1="212" y1="262" x2="204" y2="198" stroke="#0f7a55" stroke-width="1.3" stroke-dasharray="5 3" marker-end="url(#ua)"/>
+      <line x1="222" y1="194" x2="308" y2="258" stroke="#2a78d6" stroke-width="1.3" marker-end="url(#da)"/>
+      <line x1="320" y1="262" x2="234" y2="198" stroke="#0f7a55" stroke-width="1.3" stroke-dasharray="5 3" marker-end="url(#ua)"/>
+      <line x1="435" y1="194" x2="441" y2="258" stroke="#2a78d6" stroke-width="1.3" marker-end="url(#da)"/>
+      <line x1="453" y1="262" x2="447" y2="198" stroke="#0f7a55" stroke-width="1.3" stroke-dasharray="5 3" marker-end="url(#ua)"/>
+      <line x1="482" y1="194" x2="550" y2="258" stroke="#2a78d6" stroke-width="1.3" marker-end="url(#da)"/>
+      <line x1="562" y1="262" x2="494" y2="198" stroke="#0f7a55" stroke-width="1.3" stroke-dasharray="5 3" marker-end="url(#ua)"/>
+      <!-- worker dots under leaves -->
+      <g fill="var(--t-worker)" stroke="#898781"><circle cx="90" cy="330" r="9"/><circle cx="202" cy="330" r="9"/><circle cx="314" cy="330" r="9"/><circle cx="446" cy="330" r="9"/><circle cx="558" cy="330" r="9"/><circle cx="725" cy="330" r="9"/></g>
+      <text x="90" y="356" text-anchor="middle" font-size="8.5" fill="#898781">worker</text>
+      <text x="202" y="356" text-anchor="middle" font-size="8.5" fill="#898781">worker</text>
+      <text x="314" y="356" text-anchor="middle" font-size="8.5" fill="#898781">worker</text>
+      <text x="446" y="356" text-anchor="middle" font-size="8.5" fill="#898781">worker</text>
+      <text x="558" y="356" text-anchor="middle" font-size="8.5" fill="#898781">worker</text>
+      <text x="725" y="356" text-anchor="middle" font-size="8.5" fill="#898781">one agent, bigger budget</text>
+      <line x1="725" y1="194" x2="725" y2="318" stroke="#898781" stroke-width="1.2" stroke-dasharray="2 3"/>
+      <line x1="90" y1="318" x2="90" y2="304" stroke="#898781" stroke-width="1" stroke-dasharray="2 3"/>
+      <line x1="202" y1="318" x2="202" y2="304" stroke="#898781" stroke-width="1" stroke-dasharray="2 3"/>
+      <line x1="314" y1="318" x2="314" y2="304" stroke="#898781" stroke-width="1" stroke-dasharray="2 3"/>
+      <line x1="446" y1="318" x2="446" y2="304" stroke="#898781" stroke-width="1" stroke-dasharray="2 3"/>
+      <line x1="558" y1="318" x2="558" y2="304" stroke="#898781" stroke-width="1" stroke-dasharray="2 3"/>
+      <text x="24" y="388" font-size="10" fill="#898781">Solid blue: contracts descending at decomposition. Dashed green: verified outputs ascending at fold-up — the same edges, walked in reverse. Note Subtask C: the decompose-or-delegate gate chose to keep it whole.</text>
+    </svg>
+    <figcaption><strong>Integration is not a separate phase bolted on at the end — it is the decomposition tree walked backwards.</strong> Whoever split the work owns reassembling it, level by level, and every assembly faces the same review gate the leaves did.</figcaption>
+  </figure>
+
+  <h2>The escalation ladder</h2>
+  <p>A rejection at Gate B never triggers a blind retry. The Reviewer's structured verdict names an error class, and the error class picks the rung — execution slips start low; planning and specification faults jump straight to re-decomposition, because retrying a task that was specified wrong just burns budget rehearsing the same mistake.</p>
+  <figure>
+    <svg viewBox="0 0 920 258" width="100%" role="img" aria-label="Five-rung escalation ladder from feedback retry to human or surrender">
+      <defs><marker id="ea" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker></defs>
+      <!-- steps ascending -->
+      <rect x="20" y="188" width="164" height="52" rx="8" fill="#eaf2fb" stroke="#2a78d6" stroke-width="1.4"/>
+      <text x="102" y="209" text-anchor="middle" font-size="11.5" font-weight="700">1 · Retry with feedback</text>
+      <text x="102" y="226" text-anchor="middle" font-size="9.5" fill="#52514e">same agent + the verdict</text>
+      <rect x="200" y="146" width="164" height="52" rx="8" fill="#d9e8f8" stroke="#2a78d6" stroke-width="1.4"/>
+      <text x="282" y="167" text-anchor="middle" font-size="11.5" font-weight="700">2 · Different agent</text>
+      <text x="282" y="184" text-anchor="middle" font-size="9.5" fill="#52514e">another design takes the task</text>
+      <rect x="380" y="104" width="164" height="52" rx="8" fill="#fdf0ea" stroke="#eb6834" stroke-width="1.4"/>
+      <text x="462" y="125" text-anchor="middle" font-size="11.5" font-weight="700">3 · Redesign the agent</text>
+      <text x="462" y="142" text-anchor="middle" font-size="9.5" fill="#52514e">Agent Creator builds a new specialist</text>
+      <rect x="560" y="62" width="164" height="52" rx="8" fill="#fbe3da" stroke="#eb6834" stroke-width="1.4"/>
+      <text x="642" y="83" text-anchor="middle" font-size="11.5" font-weight="700">4 · Re-decompose</text>
+      <text x="642" y="100" text-anchor="middle" font-size="9.5" fill="#52514e">Orchestrator re-splits the task</text>
+      <rect x="740" y="20" width="164" height="52" rx="8" fill="var(--t-const)" stroke="#c2452f" stroke-width="1.4"/>
+      <text x="822" y="41" text-anchor="middle" font-size="11.5" font-weight="700">5 · Human / surrender</text>
+      <text x="822" y="58" text-anchor="middle" font-size="9.5" fill="#52514e">per the autonomy dial</text>
+      <!-- connectors -->
+      <line x1="184" y1="200" x2="196" y2="186" stroke="#52514e" stroke-width="1.4" marker-end="url(#ea)"/>
+      <line x1="364" y1="158" x2="376" y2="144" stroke="#52514e" stroke-width="1.4" marker-end="url(#ea)"/>
+      <line x1="544" y1="116" x2="556" y2="102" stroke="#52514e" stroke-width="1.4" marker-end="url(#ea)"/>
+      <line x1="724" y1="74" x2="736" y2="60" stroke="#52514e" stroke-width="1.4" marker-end="url(#ea)"/>
+      <!-- annotations -->
+      <text x="20" y="118" font-size="10.5" fill="#52514e">Every rung:</text>
+      <text x="20" y="134" font-size="10.5" fill="#52514e">· spends budget, visibly</text>
+      <text x="20" y="150" font-size="10.5" fill="#52514e">· is logged with its verdict</text>
+      <text x="20" y="166" font-size="10.5" fill="#52514e">· feeds the Learning Agent</text>
+      <text x="380" y="34" font-size="10.5" fill="#52514e">Error class picks the entry rung:</text>
+      <text x="380" y="50" font-size="10.5" fill="#52514e">execution slip → rung 1 · wrong specialist → rung 2–3 · spec/planning fault → rung 4</text>
+    </svg>
+    <figcaption><strong>The escalation ladder.</strong> Five rungs, each more expensive than the last, each logged. A ladder fully climbed without success is one of the defined triggers for the surrender path.</figcaption>
+  </figure>
+
+  <h2>What the requester receives</h2>
+  <div class="grid2">
+    <div class="card" style="border-top:3px solid var(--c-review)">
+      <h3>On success — the result and its pedigree</h3>
+      <p>The assembled deliverable, verified against the mission contract; the record of what was checked and how deeply; every flagged assumption; effort spent against budget; and pointers into the audit trail for anyone who wants to inspect any part of the work down to the individual task.</p>
+    </div>
+    <div class="card" style="border-top:3px solid #c2452f">
+      <h3>On surrender — the dossier</h3>
+      <p>Everything completed and verified so far; the precise blockers with evidence; the escalation history showing what was tried; budget accounting; and the "what it would take" section — relaxed criteria, missing capabilities, added budget, or a decision only the requester can make. A surrendered mission can be re-entered at intake with the dossier as its starting context.</p>
+    </div>
+  </div>
+
+  <div class="pn">
+    <a href="architecture.html"><span>Previous</span>← Architecture</a>
+    <a href="agents.html"><span>Next</span>The Agents →</a>
+  </div>
+</main>
+<footer><div class="wrap">SWARM · Functional Solution Description v1.1 · 22 July 2026 · Mission Lifecycle</div></footer>
+</body>
+</html>

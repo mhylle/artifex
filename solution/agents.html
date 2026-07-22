@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWARM — The Agents</title>
+<style>
+:root{
+  color-scheme: light;
+  --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+  --c-orch:#2a78d6; --t-orch:#eaf2fb;
+  --c-creator:#eb6834; --t-creator:#fdf0ea;
+  --c-review:#1baf7a; --t-review:#e8f7f1;
+  --c-learn:#eda100; --t-learn:#fdf6e3;
+  --c-fabric:#4a3aa7; --t-fabric:#edebf6;
+  --c-const:#e34948; --t-const:#fcecec;
+  --c-human:#e87ba4; --t-human:#fbeff4;
+  --c-broker:#008300; --t-broker:#e6f2e6;
+  --c-worker:#898781; --t-worker:#f0efec;
+  --link:#1c5cab;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.55;font-size:15.5px}
+.wrap{max-width:1040px;margin:0 auto;padding:0 28px}
+header.site{background:var(--surface);border-bottom:1px solid var(--grid)}
+.bar{display:flex;align-items:baseline;justify-content:space-between;gap:24px;padding:18px 0;flex-wrap:wrap}
+.brand{font-weight:700;letter-spacing:.4px;font-size:15px}
+.brand small{font-weight:400;color:var(--muted);margin-left:10px;letter-spacing:0}
+nav.top{display:flex;gap:18px;flex-wrap:wrap}
+nav.top a{color:var(--ink2);text-decoration:none;font-size:13.5px;padding:3px 0;border-bottom:2px solid transparent}
+nav.top a:hover{color:var(--ink)}
+nav.top a[aria-current]{color:var(--ink);border-bottom-color:var(--ink)}
+main{padding:52px 0 20px}
+.kicker{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+h1{font-size:clamp(28px,3.8vw,36px);line-height:1.14;margin:0 0 16px;letter-spacing:-.015em}
+h2{font-size:23px;margin:56px 0 6px;letter-spacing:-.01em}
+h3{font-size:16.5px;margin:26px 0 8px}
+.lede{font-size:17.5px;color:var(--ink2);max-width:74ch;margin:0 0 8px}
+p{max-width:76ch}
+a{color:var(--link)}
+figure{margin:26px 0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px;overflow-x:auto}
+figcaption{font-size:12.5px;color:var(--muted);margin-top:14px;line-height:1.5}
+svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+footer{border-top:1px solid var(--grid);margin-top:70px;padding:26px 0 44px;color:var(--muted);font-size:12.5px}
+.pn{display:flex;justify-content:space-between;gap:16px;margin-top:56px}
+.pn a{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;text-decoration:none;color:var(--ink);font-size:13.5px}
+.pn a span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.role{background:var(--surface);border:1px solid var(--border);border-radius:12px;margin:22px 0;overflow:hidden}
+.role .rhead{padding:18px 24px;display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.role .rhead h3{margin:0;font-size:19px}
+.role .rhead .mandate{font-size:12.5px;color:var(--ink2)}
+.role .rbody{padding:4px 24px 20px;display:grid;grid-template-columns:1.5fr 1fr;gap:24px}
+@media(max-width:760px){.role .rbody{grid-template-columns:1fr}}
+.role .rbody p{font-size:14.5px;color:var(--ink2);margin:0 0 10px}
+.role .rbody ul{padding-left:18px;margin:6px 0}
+.role .rbody li{font-size:13.5px;color:var(--ink2);margin:5px 0}
+.role .rbody li strong{color:var(--ink)}
+.role h4{font-size:11.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:14px 0 6px}
+.role h4:first-child{margin-top:0}
+.chip{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:14px;margin:0 4px 5px 0;background:var(--t-fabric);color:#3a2f86;border:1px solid rgba(74,58,167,.25)}
+.chip.read{background:#f0efec;color:#52514e;border-color:var(--grid)}
+.evi{font-size:12px;color:var(--muted);border-top:1px dashed var(--grid);margin-top:10px;padding-top:8px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:20px 0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 22px}
+.card h3{margin:0 0 8px;font-size:15.5px}
+.card p{font-size:14px;color:var(--ink2);margin:0}
+.spec{max-width:720px;background:#fff;border:1.5px solid var(--c-creator);border-radius:10px;overflow:hidden;margin:24px 0}
+.spec .shead{padding:14px 20px;border-bottom:1.5px solid var(--c-creator);background:var(--t-creator);font-weight:700}
+.srow{display:grid;grid-template-columns:200px 1fr;border-bottom:1px solid var(--grid)}
+.srow:last-child{border-bottom:none}
+.srow .k{padding:11px 0 11px 20px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)}
+.srow .v{padding:11px 20px;font-size:13.5px;color:var(--ink2)}
+@media(max-width:640px){.srow{grid-template-columns:1fr}.srow .k{padding:11px 20px 0}}
+</style>
+</head>
+<body>
+<header class="site"><div class="wrap"><div class="bar">
+  <div class="brand">SWARM<small>Functional Solution Description</small></div>
+  <nav class="top">
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="lifecycle.html">Mission Lifecycle</a>
+    <a href="agents.html" aria-current="page">The Agents</a>
+    <a href="learning.html">Memory &amp; Learning</a>
+    <a href="observability.html">Observability</a>
+    <a href="risks.html">Risks &amp; Safeguards</a>
+  </nav>
+</div></div></header>
+
+<main class="wrap">
+  <p class="kicker">Chapter 3 · The Agents</p>
+  <h1>Four permanent officers,<br>one manufactured workforce</h1>
+  <p class="lede">The meta-agents are best understood as offices, not individuals — each is a role with a mandate, powers, and hard limits, whose working methods (its playbook) are versioned assets that improve over time while the mandate itself stays fixed.</p>
+
+  <!-- ORCHESTRATOR -->
+  <div class="role" style="border-top:4px solid var(--c-orch)">
+    <div class="rhead"><h3 style="color:#1c5cab">The Orchestrator</h3><span class="mandate">Mandate: turn one mission into many contracts, and many results into one mission.</span></div>
+    <div class="rbody">
+      <div>
+        <h4>What it does</h4>
+        <ul>
+          <li><strong>Runs intake.</strong> Negotiates the mission contract with the requester — success criteria, boundaries, autonomy dial, budget — refusing to start on ambiguity it hasn't either resolved or explicitly flagged.</li>
+          <li><strong>Builds the tree.</strong> Recursively decomposes using templates from the Asset Registry, authoring a complete contract for every node, declaring dependencies, pinning cross-cutting decisions before any fan-out.</li>
+          <li><strong>Aims the atomizer.</strong> At every node, decides decompose-vs-delegate-whole: parallelizable breadth gets split to atoms; sequential, constraint-entangled work stays whole with a bigger budget.</li>
+          <li><strong>Keeps the mission ledger.</strong> A living record per mission: verified facts, open unknowns, flagged assumptions, current plan — rewritten deliberately when progress stalls, so replanning is an explicit recorded act, not drift.</li>
+          <li><strong>Governs escalation.</strong> Owns the ladder; matches verdict error classes to rungs; detects stalls; decides when the surrender threshold is met per the dial.</li>
+          <li><strong>Folds up.</strong> As each subtree completes, assembles its children's verified outputs into the parent deliverable — the single writer at every assembly point — and submits its own work to review like everyone else.</li>
+        </ul>
+        <h4>Hard limits</h4>
+        <ul>
+          <li>Cannot verify its own work — Gate A judges its decompositions, Gate B its assemblies.</li>
+          <li>Cannot exceed the mission budget or grant itself more; can only ask the requester.</li>
+          <li>Cannot design agents — capability gaps go to the Agent Creator as category demands.</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Reads</h4>
+        <span class="chip read">decomposition templates</span><span class="chip read">knowledge commons</span><span class="chip read">verdicts</span><span class="chip read">mission ledger</span>
+        <h4>Writes</h4>
+        <span class="chip">task contracts</span><span class="chip">mission ledger</span><span class="chip">assemblies</span><span class="chip">escalation &amp; surrender decisions</span>
+        <div class="evi">Research lineage: Magentic-One's task/progress ledgers and stall counter; HTN methods as learnable decomposition templates; the Google/MIT "science of scaling" study for the decompose-vs-delegate gate; Anthropic's delegation template (objective · format · tools · boundaries) for contract authoring.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AGENT CREATOR -->
+  <div class="role" style="border-top:4px solid var(--c-creator)">
+    <div class="rhead"><h3 style="color:#c14e1f">The Agent Creator</h3><span class="mandate">Mandate: staff every contract with the cheapest competent specialist — reusing before designing.</span></div>
+    <div class="rbody">
+      <div>
+        <h4>What it does</h4>
+        <ul>
+          <li><strong>Categorizes.</strong> Clusters the approved task graph into capability categories — the unit of staffing. A thousand tasks typically collapse into a dozen categories; the taxonomy itself is a learnable asset.</li>
+          <li><strong>Runs the reuse market.</strong> For each category, searches the Asset Registry; existing designs bid with their capability descriptions and track records on similar categories. Reuse beats creation whenever the record supports it — reuse is also the main cost lever.</li>
+          <li><strong>Designs on no-bid.</strong> When no design credibly serves a category, composes a new specialist from the design playbook's typed building blocks — not blank-page prompt authorship, but assembly from proven components (a constrained design space demonstrably beats freeform generation).</li>
+          <li><strong>Writes the whole spec.</strong> Role instructions, capability manifest, context entitlements, and the validation harness that will later measure whether this design earns permanence (anatomy below).</li>
+          <li><strong>Scales effort.</strong> Applies effort-scaling rules — how many workers a category gets, sized to task class and budget — preventing both fifty-agents-for-a-triviality and one-agent-for-an-avalanche.</li>
+          <li><strong>Staffs verification too.</strong> Conjures specialist verifier agents for the Reviewer's gates — under independence rules the Creator must honor: a verifier never shares design lineage with what it verifies.</li>
+        </ul>
+        <h4>Hard limits</h4>
+        <ul>
+          <li>Cannot execute tasks or judge outputs — it builds the builders and the checkers, never the verdicts.</li>
+          <li>Cannot promote its own designs into the library — promotion belongs to the Learning Agent, on evidence.</li>
+          <li>Cannot design outside a contract's entitlements — no agent gets context its task doesn't warrant.</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Reads</h4>
+        <span class="chip read">approved task graph</span><span class="chip read">asset registry + clade scores</span><span class="chip read">design playbook</span><span class="chip read">budget envelopes</span>
+        <h4>Writes</h4>
+        <span class="chip">agent designs</span><span class="chip">category taxonomy</span><span class="chip">staffing assignments</span><span class="chip">no-bid signals</span>
+        <div class="evi">Research lineage: ADAS meta-agent search (agents designing agents, archive as building blocks); AFlow (typed-operator design spaces beat freeform, at a fraction of the cost); Contract Net Protocol (announce–bid–award, and no-bid as a first-class outcome); Voyager (the validation-harness-per-skill pattern).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- REVIEWER -->
+  <div class="role" style="border-top:4px solid var(--c-review)">
+    <div class="rhead"><h3 style="color:#0f7a55">The Reviewer</h3><span class="mandate">Mandate: nothing counts as done — or as well-formed — until independently verified against its contract.</span></div>
+    <div class="rbody">
+      <div>
+        <h4>What it does</h4>
+        <ul>
+          <li><strong>Guards Gate A.</strong> Audits decompositions before execution: atomicity, testability of criteria, non-overlapping boundaries, stopping conditions present, pinned decisions where siblings must fit, sane use of the delegate-whole gate.</li>
+          <li><strong>Guards Gate B.</strong> Verifies completions in two tiers — mechanical (the contract's executable checks pass) and semantic (the output serves the parent's intent, not just the letter of the criteria).</li>
+          <li><strong>Scales depth to blast radius.</strong> Sets each task's verification plan: single rigorous check for low-stakes leaves; independent redundant runs with required agreement for outputs that gate large subtrees; consistency-across-runs requirements where flakiness is fatal.</li>
+          <li><strong>Red-flags.</strong> Discards outputs whose structure smells wrong even when criteria technically pass — suspiciously exact fits, missing work products, verification-shaped answers.</li>
+          <li><strong>Issues structured verdicts.</strong> Every verdict names the failed criterion, the failing step, and an error class from the shared taxonomy — the record that drives the escalation ladder and feeds learning. Verdicts are immutable once issued.</li>
+          <li><strong>Audits itself.</strong> Runs calibration on its own institution: random re-reviews by independent verifiers, planted known-bad outputs that must get caught, and per-clause compliance sampling. Rubber-stamping is measured, not assumed away.</li>
+        </ul>
+        <h4>Hard limits (constitutional)</h4>
+        <ul>
+          <li>Its independence, verdict immutability, and the meaning of its metrics are constitutional — outside every learner's write scope.</li>
+          <li>Verifiers never share lineage with the verified; workers never see the verification harness in gameable detail.</li>
+          <li>It cannot rewrite contracts — a bad contract is bounced to its author, never quietly reinterpreted.</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Reads</h4>
+        <span class="chip read">contracts</span><span class="chip read">deliverables + evidence bundles</span><span class="chip read">decompositions</span><span class="chip read">verification plans</span>
+        <h4>Writes</h4>
+        <span class="chip">structured verdicts</span><span class="chip">red flags</span><span class="chip">calibration reports</span><span class="chip">certificates per task</span>
+        <div class="evi">Research lineage: MAST (verification failures = 23.5% of all failures; semantic verification worth +15.6%); MAKER (voting and red-flagging as the price of million-step reliability); τ-bench's pass^k (consistency, not lucky passes); Agent-as-a-Judge (trajectory-level judging); METR (why the harness stays hidden).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LEARNING AGENT -->
+  <div class="role" style="border-top:4px solid var(--c-learn)">
+    <div class="rhead"><h3 style="color:#b07900">The Learning Agent</h3><span class="mandate">Mandate: make the next mission measurably better than the last — without ever touching the yardstick.</span></div>
+    <div class="rbody">
+      <div>
+        <h4>What it does — fast loop (during missions)</h4>
+        <ul>
+          <li><strong>Bounded hot-fixes.</strong> When the live ledger shows a pattern — one category failing Gate B repeatedly for the same criterion — it may patch worker-layer assets mid-mission: a category's instructions, a staffing choice, a template parameter. Bounded means: worker layer only, one change at a time, logged as an experiment, auto-reverted if the failure rate doesn't move.</li>
+        </ul>
+        <h4>What it does — science loop (between missions)</h4>
+        <ul>
+          <li><strong>Mines.</strong> Queries the ledger for weak spots: per-category compliance rates, escalation hot spots, budget-versus-value outliers, surrender dossiers.</li>
+          <li><strong>Hypothesizes.</strong> Forms candidate improvements conditioned on the full history of prior experiments — with an explicit out-of-ideas ladder: re-examine evidence, combine near-misses, go more radical.</li>
+          <li><strong>Experiments.</strong> Tests candidates on replay benchmarks — completed tasks from the ledger with known verified outcomes — under a fixed evaluation budget so heterogeneous changes stay comparable. Wins must replicate; a single lucky run adopts nothing.</li>
+          <li><strong>Transfer-tests.</strong> A win measured on one mission slice must hold on a held-out slice before swarm-wide adoption.</li>
+          <li><strong>Adopts by ratchet.</strong> Improvements land as itemized delta edits (never wholesale rewrites) to versioned assets; equal-or-worse auto-reverts; simpler-is-better breaks ties; every adoption keyed to its evidence.</li>
+          <li><strong>Curates.</strong> Promotes designs on lineage performance (clade scores), keeps Pareto sets per category rather than single champions, down-weights instead of deleting, quarantines and expires commons entries.</li>
+          <li><strong>Petitions.</strong> May propose constitutional amendments — argued from ledger evidence, evaluated on sealed benchmarks, ratified only out-of-band.</li>
+        </ul>
+        <h4>Hard limits (constitutional)</h4>
+        <ul>
+          <li>No write access to: metric definitions, review independence rules, the ledger's past, budget enforcement, the amendment protocol.</li>
+          <li>Its own playbook is evolvable — through the very same experiment-and-ratchet discipline, never by shortcut.</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Reads</h4>
+        <span class="chip read">audit ledger (all of it)</span><span class="chip read">verdicts &amp; error classes</span><span class="chip read">clade scores</span><span class="chip read">surrender dossiers</span>
+        <h4>Writes</h4>
+        <span class="chip">delta edits to assets</span><span class="chip">promotions / down-weights</span><span class="chip">experiment records</span><span class="chip">amendment proposals</span>
+        <div class="evi">Research lineage: autoresearch (ledger/ratchet separation, revert-by-default, fixed experiment budgets, history-conditioned hypothesis generation, transfer-testing); GEPA (reflection over traces beats scalar rewards; Pareto sets); ACE (delta edits prevent context collapse); HGM (clade metaproductivity); DGM (why the constitution exists).</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>The supporting cast</h2>
+  <div class="grid2">
+    <div class="card" style="border-top:3px solid var(--c-broker)">
+      <h3>Context Broker</h3>
+      <p>The only channel for context beyond the contract. Serves sibling outputs, mission background and commons entries — filtered to what the requesting task's entitlements allow — and logs every exchange as a first-class audit event. The broker is what makes "no peer-to-peer chatter" livable: coordination without a side channel, and a complete record of who knew what, when.</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-worker)">
+      <h3>Workers — the conjured specialists</h3>
+      <p>Ephemeral, contract-scoped, and deliberately narrow. A worker must restate its contract before starting and bounce it if it can't; it delivers not just an output but an evidence bundle — what it did, what it consulted, what it assumed — because its deliverable must be verifiable by a stranger. Workers hold no standing state: everything worth keeping leaves through the deliverable or the ledger.</p>
+    </div>
+  </div>
+
+  <h2>Anatomy of an agent design</h2>
+  <p>What the Agent Creator actually produces — the artifact that lives or dies in the registry:</p>
+  <div class="spec">
+    <div class="shead">Agent Design · specification</div>
+    <div class="srow"><div class="k">Role instructions</div><div class="v">The system prompt: who this specialist is, how it works, its quality bar, its tone of operation. Composed from playbook building blocks, not freehand.</div></div>
+    <div class="srow"><div class="k">Capability manifest</div><div class="v">What task categories it claims to serve — the description it "bids" with when future missions staff similar work. Retrievable by similarity, honest by measurement.</div></div>
+    <div class="srow"><div class="k">Context entitlements</div><div class="v">What it may request from the broker, and no more. Entitlements derive from the contract, never from the agent's curiosity.</div></div>
+    <div class="srow"><div class="k">Validation harness</div><div class="v">The repeatable checks that measure whether this design performs — the evidence permanence decisions are made on. A design without a harness cannot earn permanence, by rule.</div></div>
+    <div class="srow"><div class="k">Lineage &amp; provenance</div><div class="v">Which designs it descends from, which mission demanded it, which playbook version produced it. Nothing in the registry is anonymous.</div></div>
+    <div class="srow"><div class="k">Performance record</div><div class="v">Filled in by reality: per-category compliance rates, escalation involvement, cost-per-verified-outcome — and the clade score aggregating how its whole lineage performs.</div></div>
+  </div>
+
+  <h2>How a design earns permanence</h2>
+  <figure>
+    <svg viewBox="0 0 920 250" width="100%" role="img" aria-label="Agent design lifecycle from drafted through probation to registered, down-weighted, cold storage, with revival">
+      <defs><marker id="la" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker>
+      <marker id="lav" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a3aa7"/></marker></defs>
+      <rect x="20" y="60" width="150" height="64" rx="9" fill="#fff" stroke="#898781" stroke-width="1.4"/>
+      <text x="95" y="86" text-anchor="middle" font-size="12" font-weight="700">Drafted</text>
+      <text x="95" y="103" text-anchor="middle" font-size="9.5" fill="#52514e">designed for one mission</text>
+      <line x1="170" y1="92" x2="206" y2="92" stroke="#52514e" stroke-width="1.5" marker-end="url(#la)"/>
+      <text x="188" y="80" text-anchor="middle" font-size="9" fill="#898781">deployed</text>
+      <rect x="210" y="60" width="170" height="64" rx="9" fill="var(--t-worker)" stroke="#898781" stroke-width="1.4"/>
+      <text x="295" y="80" text-anchor="middle" font-size="12" font-weight="700">Probation</text>
+      <text x="295" y="96" text-anchor="middle" font-size="9.5" fill="#52514e">performs under live review;</text>
+      <text x="295" y="110" text-anchor="middle" font-size="9.5" fill="#52514e">most designs end here</text>
+      <line x1="380" y1="92" x2="426" y2="92" stroke="#52514e" stroke-width="1.5" marker-end="url(#la)"/>
+      <text x="403" y="72" text-anchor="middle" font-size="9" fill="#898781">replicated wins +</text>
+      <text x="403" y="83" text-anchor="middle" font-size="9" fill="#898781">transfer test</text>
+      <rect x="430" y="52" width="190" height="80" rx="9" fill="var(--t-review)" stroke="var(--c-review)" stroke-width="1.6"/>
+      <text x="525" y="76" text-anchor="middle" font-size="12.5" font-weight="700">Registered</text>
+      <text x="525" y="93" text-anchor="middle" font-size="9.5" fill="#52514e">in the library · reusable by all</text>
+      <text x="525" y="107" text-anchor="middle" font-size="9.5" fill="#52514e">future missions · Pareto set,</text>
+      <text x="525" y="120" text-anchor="middle" font-size="9.5" fill="#52514e">not single champion</text>
+      <line x1="620" y1="92" x2="666" y2="92" stroke="#52514e" stroke-width="1.5" marker-end="url(#la)"/>
+      <text x="643" y="72" text-anchor="middle" font-size="9" fill="#898781">clade score</text>
+      <text x="643" y="83" text-anchor="middle" font-size="9" fill="#898781">declines</text>
+      <rect x="670" y="60" width="150" height="64" rx="9" fill="var(--t-learn)" stroke="var(--c-learn)" stroke-width="1.4"/>
+      <text x="745" y="86" text-anchor="middle" font-size="12" font-weight="700">Down-weighted</text>
+      <text x="745" y="103" text-anchor="middle" font-size="9.5" fill="#52514e">rarely selected, never erased</text>
+      <line x1="820" y1="92" x2="856" y2="92" stroke="#52514e" stroke-width="1.5" marker-end="url(#la)"/>
+      <rect x="860" y="60" width="46" height="64" rx="9" fill="var(--t-fabric)" stroke="var(--c-fabric)" stroke-width="1.4"/>
+      <text x="883" y="88" text-anchor="middle" font-size="10.5" font-weight="700">Cold</text>
+      <text x="883" y="103" text-anchor="middle" font-size="8.5" fill="#52514e">store</text>
+      <!-- probation death -->
+      <line x1="295" y1="124" x2="295" y2="170" stroke="#898781" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#la)"/>
+      <rect x="210" y="174" width="170" height="40" rx="8" fill="none" stroke="#c3c2b7" stroke-dasharray="3 3"/>
+      <text x="295" y="192" text-anchor="middle" font-size="10" fill="#898781">retired with the mission —</text>
+      <text x="295" y="206" text-anchor="middle" font-size="10" fill="#898781">record kept, design discarded</text>
+      <!-- revival -->
+      <path d="M 880 128 V 226 H 100 V 132" fill="none" stroke="#4a3aa7" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#lav)"/>
+      <text x="490" y="220" text-anchor="middle" font-size="10" fill="#4a3aa7">stepping-stone revival: cold designs stay searchable as raw material for new designs — yesterday's dead end is tomorrow's ancestor</text>
+    </svg>
+    <figcaption><strong>Earned permanence.</strong> Promotion requires replicated wins plus a transfer test; standing in the library is continuously re-earned via clade scores (how a design's whole lineage performs, not its own audition); decline means down-weighting, never deletion — evolutionary search needs its stepping stones.</figcaption>
+  </figure>
+
+  <div class="pn">
+    <a href="lifecycle.html"><span>Previous</span>← Mission Lifecycle</a>
+    <a href="learning.html"><span>Next</span>Memory &amp; Learning →</a>
+  </div>
+</main>
+<footer><div class="wrap">SWARM · Functional Solution Description v1.1 · 22 July 2026 · The Agents</div></footer>
+</body>
+</html>

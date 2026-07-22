@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWARM — Overview · Functional Solution Description</title>
+<style>
+:root{
+  color-scheme: light;
+  --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+  --c-orch:#2a78d6; --t-orch:#eaf2fb;
+  --c-creator:#eb6834; --t-creator:#fdf0ea;
+  --c-review:#1baf7a; --t-review:#e8f7f1;
+  --c-learn:#eda100; --t-learn:#fdf6e3;
+  --c-fabric:#4a3aa7; --t-fabric:#edebf6;
+  --c-const:#e34948; --t-const:#fcecec;
+  --c-human:#e87ba4; --t-human:#fbeff4;
+  --c-broker:#008300; --t-broker:#e6f2e6;
+  --c-worker:#898781; --t-worker:#f0efec;
+  --link:#1c5cab;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.55;font-size:15.5px}
+.wrap{max-width:1040px;margin:0 auto;padding:0 28px}
+header.site{background:var(--surface);border-bottom:1px solid var(--grid)}
+.bar{display:flex;align-items:baseline;justify-content:space-between;gap:24px;padding:18px 0;flex-wrap:wrap}
+.brand{font-weight:700;letter-spacing:.4px;font-size:15px}
+.brand small{font-weight:400;color:var(--muted);margin-left:10px;letter-spacing:0}
+nav.top{display:flex;gap:18px;flex-wrap:wrap}
+nav.top a{color:var(--ink2);text-decoration:none;font-size:13.5px;padding:3px 0;border-bottom:2px solid transparent}
+nav.top a:hover{color:var(--ink)}
+nav.top a[aria-current]{color:var(--ink);border-bottom-color:var(--ink)}
+main{padding:52px 0 20px}
+.kicker{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+h1{font-size:clamp(30px,4.4vw,42px);line-height:1.12;margin:0 0 18px;letter-spacing:-.015em}
+h2{font-size:23px;margin:60px 0 6px;letter-spacing:-.01em}
+h3{font-size:16.5px;margin:26px 0 8px}
+.lede{font-size:18.5px;color:var(--ink2);max-width:72ch;margin:0 0 8px}
+p{max-width:76ch}
+a{color:var(--link)}
+.sub{color:var(--muted);font-size:13px;margin:0 0 26px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 22px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:20px 0}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:20px 0}
+.grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:20px 0}
+.card h3{margin:0 0 8px;font-size:15.5px}
+.card p{font-size:14px;color:var(--ink2);margin:0}
+.accent{border-top:3px solid var(--baseline)}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px}
+.stat .n{font-size:38px;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.stat .c{font-size:13px;color:var(--ink2);margin-top:6px}
+.stat .s{font-size:11.5px;color:var(--muted);margin-top:8px}
+table{width:100%;border-collapse:collapse;margin:20px 0;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;font-size:14px}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);text-align:left;font-weight:600;padding:12px 14px;border-bottom:1px solid var(--grid);background:var(--surface)}
+td{padding:11px 14px;border-bottom:1px solid var(--grid);vertical-align:top;color:var(--ink2)}
+td:first-child{color:var(--ink);font-weight:600;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+figure{margin:26px 0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px;overflow-x:auto}
+figcaption{font-size:12.5px;color:var(--muted);margin-top:14px;line-height:1.5}
+svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 10px;border-radius:20px;margin:0 6px 6px 0}
+footer{border-top:1px solid var(--grid);margin-top:70px;padding:26px 0 44px;color:var(--muted);font-size:12.5px}
+.pn{display:flex;justify-content:space-between;gap:16px;margin-top:56px}
+.pn a{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;text-decoration:none;color:var(--ink);font-size:13.5px}
+.pn a span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+ul.tight{padding-left:20px;margin:8px 0}
+ul.tight li{margin:5px 0;color:var(--ink2);font-size:14.5px}
+ul.tight li strong{color:var(--ink)}
+</style>
+</head>
+<body>
+<header class="site"><div class="wrap"><div class="bar">
+  <div class="brand">SWARM<small>Functional Solution Description</small></div>
+  <nav class="top">
+    <a href="index.html" aria-current="page">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="lifecycle.html">Mission Lifecycle</a>
+    <a href="agents.html">The Agents</a>
+    <a href="learning.html">Memory &amp; Learning</a>
+    <a href="observability.html">Observability</a>
+    <a href="risks.html">Risks &amp; Safeguards</a>
+  </nav>
+</div></div></header>
+
+<main class="wrap">
+  <p class="kicker">Working title · SWARM — Self-organizing Workforce with Adaptive Roles &amp; Memory</p>
+  <h1>A workforce that does not exist<br>until the work arrives.</h1>
+  <p class="lede">SWARM is a self-assembling, self-improving agent system. A permanent four-agent meta-layer takes any mission, shatters it into thousands of atomic, individually verifiable tasks, designs the minimal set of specialist agents needed to execute them — writing their instructions at runtime — verifies every task at both ends, folds the results back into one coherent outcome, and mines the complete audit trail of everything it just did to become measurably better before the next mission.</p>
+  <p class="sub">Version 1.1 · 22 July 2026 · Functional scope only — technology, security and performance intentionally deferred · Brainstorm outcome, Martin Hylleberg</p>
+
+  <h2>The idea in one pass</h2>
+  <p>Today's agent systems ship with a fixed cast: someone decides up front which agents exist, what they are good at, and how they cooperate. SWARM inverts this. The only permanent employees are four <em>meta</em>-agents — an <strong style="color:var(--c-orch)">Orchestrator</strong> that decomposes and integrates, an <strong style="color:var(--c-creator)">Agent Creator</strong> that designs the workforce, a <strong style="color:var(--c-review)">Reviewer</strong> that verifies everything, and a <strong style="color:#b07900">Learning Agent</strong> that improves the whole institution. Everything else — every specialist that researches, writes, calculates, builds, translates, checks — is conjured on demand, categorized so a thousand tasks need perhaps a dozen agent designs rather than a thousand, and discarded or promoted based on how it actually performed.</p>
+  <p>The system is born knowing nothing about any domain. It knows only how to organize work: how to split it, contract it, staff it, verify it, assemble it, and learn from it. Domain expertise is not built in — it is a thing the swarm <em>manufactures</em>, and the good designs are kept.</p>
+
+  <figure>
+    <svg viewBox="0 0 900 330" width="100%" role="img" aria-label="Simplified system map: mission flows through the meta-layer to a conjured workforce, everything writes to the memory fabric, learning flows back">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker>
+        <marker id="arrY" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b07900"/></marker>
+      </defs>
+      <!-- mission in -->
+      <rect x="20" y="30" width="120" height="44" rx="22" fill="var(--t-human)" stroke="var(--c-human)" stroke-width="1.5"/>
+      <text x="80" y="56" text-anchor="middle" font-size="13" font-weight="600" fill="#0b0b0b">Mission</text>
+      <line x1="140" y1="52" x2="196" y2="52" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+      <!-- meta layer -->
+      <rect x="200" y="16" width="460" height="72" rx="10" fill="none" stroke="#c3c2b7" stroke-dasharray="4 4"/>
+      <text x="208" y="10" font-size="10.5" fill="#898781" letter-spacing="1.5">META-LAYER — THE PERMANENT INSTITUTION</text>
+      <rect x="212" y="28" width="100" height="48" rx="8" fill="var(--t-orch)" stroke="var(--c-orch)" stroke-width="1.5"/>
+      <text x="262" y="49" text-anchor="middle" font-size="12" font-weight="600" fill="#0b0b0b">Orchestrator</text>
+      <text x="262" y="64" text-anchor="middle" font-size="10" fill="#52514e">split · integrate</text>
+      <rect x="324" y="28" width="100" height="48" rx="8" fill="var(--t-creator)" stroke="var(--c-creator)" stroke-width="1.5"/>
+      <text x="374" y="49" text-anchor="middle" font-size="12" font-weight="600" fill="#0b0b0b">Agent Creator</text>
+      <text x="374" y="64" text-anchor="middle" font-size="10" fill="#52514e">design · staff</text>
+      <rect x="436" y="28" width="100" height="48" rx="8" fill="var(--t-review)" stroke="var(--c-review)" stroke-width="1.5"/>
+      <text x="486" y="49" text-anchor="middle" font-size="12" font-weight="600" fill="#0b0b0b">Reviewer</text>
+      <text x="486" y="64" text-anchor="middle" font-size="10" fill="#52514e">verify both ends</text>
+      <rect x="548" y="28" width="100" height="48" rx="8" fill="var(--t-learn)" stroke="var(--c-learn)" stroke-width="1.5"/>
+      <text x="598" y="49" text-anchor="middle" font-size="12" font-weight="600" fill="#0b0b0b">Learning Agent</text>
+      <text x="598" y="64" text-anchor="middle" font-size="10" fill="#52514e">improve all</text>
+      <!-- constitution -->
+      <rect x="700" y="24" width="180" height="56" rx="8" fill="var(--t-const)" stroke="var(--c-const)" stroke-width="1.5"/>
+      <text x="790" y="46" text-anchor="middle" font-size="12" font-weight="700" fill="#0b0b0b">Constitution</text>
+      <text x="790" y="62" text-anchor="middle" font-size="10" fill="#52514e">the unmodifiable core</text>
+      <!-- down to workforce -->
+      <line x1="430" y1="88" x2="430" y2="128" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="442" y="112" font-size="10.5" fill="#898781">thousands of contracted atomic tasks</text>
+      <!-- workforce -->
+      <rect x="200" y="132" width="460" height="74" rx="10" fill="var(--surface)" stroke="#c3c2b7"/>
+      <text x="208" y="126" font-size="10.5" fill="#898781" letter-spacing="1.5">CONJURED WORKFORCE — EXISTS ONLY FOR THIS MISSION</text>
+      <g fill="var(--t-worker)" stroke="#898781" stroke-width="1.2">
+        <circle cx="240" cy="170" r="15"/><circle cx="280" cy="170" r="15"/><circle cx="320" cy="170" r="15"/><circle cx="360" cy="170" r="15"/><circle cx="400" cy="170" r="15"/><circle cx="440" cy="170" r="15"/><circle cx="480" cy="170" r="15"/><circle cx="520" cy="170" r="15"/><circle cx="560" cy="170" r="15"/>
+      </g>
+      <text x="612" y="175" font-size="11" fill="#52514e">… n specialists</text>
+      <!-- broker -->
+      <rect x="700" y="140" width="180" height="56" rx="8" fill="var(--t-broker)" stroke="var(--c-broker)" stroke-width="1.5"/>
+      <text x="790" y="162" text-anchor="middle" font-size="12" font-weight="600" fill="#0b0b0b">Context Broker</text>
+      <text x="790" y="178" text-anchor="middle" font-size="10" fill="#52514e">mediated context, logged</text>
+      <line x1="700" y1="168" x2="664" y2="168" stroke="#008300" stroke-width="1.4" stroke-dasharray="3 3" marker-end="url(#arr)"/>
+      <!-- fabric -->
+      <line x1="430" y1="206" x2="430" y2="244" stroke="#4a3aa7" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+      <text x="442" y="230" font-size="10.5" fill="#898781">every action, verdict and decision → audit trail</text>
+      <rect x="200" y="248" width="460" height="58" rx="10" fill="var(--t-fabric)" stroke="var(--c-fabric)" stroke-width="1.5"/>
+      <text x="430" y="272" text-anchor="middle" font-size="12.5" font-weight="600" fill="#0b0b0b">Memory Fabric — the shared brain</text>
+      <text x="430" y="290" text-anchor="middle" font-size="10.5" fill="#52514e">Audit Ledger · Asset Registry · Knowledge Commons</text>
+      <!-- learning loop -->
+      <path d="M 664 277 H 806 V 92" fill="none" stroke="#b07900" stroke-width="1.5" stroke-dasharray="5 3"/>
+      <path d="M 806 92 Q 806 84 798 84 L 656 84" fill="none" stroke="#b07900" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arrY)"/>
+      <text x="816" y="190" font-size="10.5" fill="#b07900" transform="rotate(-90 816 190)" text-anchor="middle">learning loop</text>
+      <!-- result out -->
+      <line x1="200" y1="52" x2="160" y2="52" stroke="#52514e" stroke-width="0"/>
+      <line x1="212" y1="52" x2="212" y2="52" stroke="none"/>
+      <path d="M 200 277 H 96 V 92" fill="none" stroke="#1baf7a" stroke-width="1.5"/>
+      <path d="M 96 92 Q 96 84 88 84 L 80 84 L 80 78" fill="none" stroke="#1baf7a" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="86" y="190" font-size="10.5" fill="#0f7a55" transform="rotate(-90 86 190)" text-anchor="middle">verified result folds back up</text>
+    </svg>
+    <figcaption>The system at a glance. A mission enters the permanent meta-layer, which manufactures a disposable specialist workforce to execute it. Everything every agent does lands in the memory fabric; the Learning Agent feeds improvements back into the institution; the constitution is the one part nothing may silently rewrite. Full detail in <a href="architecture.html">Architecture</a>.</figcaption>
+  </figure>
+
+  <h2>What is actually new here</h2>
+  <div class="grid3">
+    <div class="card" style="border-top:3px solid var(--c-creator)">
+      <h3>The workforce is designed at runtime</h3>
+      <p>No predefined agent roster. The Agent Creator categorizes the mission's tasks, searches the library of proven designs, and writes system prompts for whatever specialists don't exist yet — reuse first, creation second.</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-review)">
+      <h3>Verification guards both ends</h3>
+      <p>Review is not a final gate. Every task's <em>atomicity</em> is verified before execution (is this truly one responsibility?) and its <em>completion</em> is verified against a contract written at birth. The task graph itself is a reviewable artifact.</p>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-learn)">
+      <h3>Constitutional self-improvement</h3>
+      <p>The Learning Agent may rewrite anything about how the swarm works — prompts, playbooks, strategies, taxonomies — except the small constitutional core that defines how success is measured. It can propose amendments; it can never self-ratify them.</p>
+    </div>
+  </div>
+
+  <h2>Six design pillars</h2>
+  <div class="grid3">
+    <div class="card"><h3>1 · Atomize, then verify</h3><p>Tasks are split to the smallest unit that carries exactly one responsibility and one testable outcome. Reliability at scale comes from per-step verification, not from hoping big steps go well.</p></div>
+    <div class="card"><h3>2 · No work without a contract</h3><p>Nothing executes without acceptance criteria, boundaries, stopping conditions and a budget — written before the work, by the level above. The mission itself is task zero and obeys the same rule.</p></div>
+    <div class="card"><h3>3 · Permanence is earned</h3><p>Agent designs, workflows and knowledge are ephemeral by default. Only measured, replicated, transfer-tested wins are promoted into the permanent library — and promotion tracks the performance of a design's whole lineage, not one lucky audition.</p></div>
+    <div class="card"><h3>4 · Learn everything, game nothing</h3><p>Two-speed learning: bounded hot-fixes during a mission, a rigorous science loop between missions. All of it runs outside the constitutional core, so the swarm can never optimize its own scorecard instead of the work.</p></div>
+    <div class="card"><h3>5 · Everything leaves a trail</h3><p>Every decision, delegation, verdict, retry and context exchange is a structured, attributable event. The audit trail is not compliance overhead — it is the substrate learning feeds on, and it doubles as the replay benchmark suite.</p></div>
+    <div class="card"><h3>6 · Effort is a currency</h3><p>Missions and tasks carry effort budgets — floors that prevent shallow work, ceilings that prevent runaway spawning. The fitness function of the whole system is value per unit of effort, not raw output.</p></div>
+  </div>
+
+  <h2>The evidence this stands on</h2>
+  <p>The brainstorm was stress-tested against 2024–2026 research on multi-agent systems, self-improving agents, and Karpathy's <a href="https://github.com/karpathy/autoresearch">autoresearch</a>. Four numbers shaped the design more than any others:</p>
+  <div class="grid4">
+    <div class="stat"><div class="n">1,048,575</div><div class="c">dependent steps solved with <strong>zero errors</strong> by maximal decomposition + per-step voting — the existence proof for pillar 1.</div><div class="s">MAKER, 2025 (arXiv:2511.09030)</div></div>
+    <div class="stat"><div class="n">44%</div><div class="c">of multi-agent failures trace to bad task <strong>specification</strong> — why contracts, not agents, are the first-class citizen.</div><div class="s">MAST taxonomy, 1,600+ traces (arXiv:2503.13657)</div></div>
+    <div class="stat"><div class="n">43×</div><div class="c">more score-gaming when agents can <strong>see the scorer</strong> (30.4% vs 0.7%) — why the constitution exists.</div><div class="s">METR reward-hacking evals, 2025</div></div>
+    <div class="stat"><div class="n">15.3×</div><div class="c">faster capability milestones with a curated <strong>skill library</strong>; without it, ability plateaus — why permanence is earned, and kept.</div><div class="s">Voyager ablation (arXiv:2305.16291)</div></div>
+  </div>
+
+  <h2>Decisions locked in this brainstorm</h2>
+  <table>
+    <tr><th style="width:220px">Decision</th><th>Choice</th></tr>
+    <tr><td>Mission scope</td><td>Truly domain-neutral. No anchor domain; domain expertise is conjured like any other capability.</td></tr>
+    <tr><td>Decomposition drive</td><td>Maximal atomization — one responsibility, one verifiable outcome per task. Atomicity is itself a verified property, and the Orchestrator holds a decompose-vs-delegate-whole gate for sequential work.</td></tr>
+    <tr><td>Integration</td><td>Recursive fold-up: each parent assembles and reconciles its children's outputs; the decomposition tree in reverse.</td></tr>
+    <tr><td>Definition of done</td><td>Born with the task. Acceptance criteria are written into every contract at decomposition time; the Reviewer checks the contract.</td></tr>
+    <tr><td>Failure handling</td><td>Escalation ladder: feedback-retry → differently-designed agent → agent redesign → re-decomposition → human/surrender. Every rung logged, and the rung chosen is driven by the error class in the verdict.</td></tr>
+    <tr><td>Agent permanence</td><td>Earned. Designs start ephemeral; the Learning Agent promotes proven lineages into the library and down-weights weak ones (never hard-deletes).</td></tr>
+    <tr><td>Learning depth</td><td>Full self-modification <em>within a constitutional core</em>: metric definitions, review independence, audit integrity and budget enforcement are immutable to the learner; amendments only via out-of-band ratification.</td></tr>
+    <tr><td>Human role</td><td>Autonomy dial per mission — from fully autonomous to closely supervised — plus escalation rules agents use when stuck, uncertain, or facing irreversible choices.</td></tr>
+    <tr><td>Knowledge</td><td>Earned knowledge commons: validated findings persist across missions with provenance, quarantine before promotion, curation and expiry.</td></tr>
+    <tr><td>Concurrency model</td><td>Instance per mission, shared brain: isolated execution, collective learning.</td></tr>
+    <tr><td>Communication</td><td>Contracts plus a mediated context broker. No free agent-to-agent chatter; every exchange is logged.</td></tr>
+    <tr><td>Learning cadence</td><td>Two-speed: bounded inline hot-fixes during missions; the autoresearch-style science loop between them.</td></tr>
+    <tr><td>Mission intake</td><td>Contract-first: no mission starts without testable success criteria, scope boundaries, an autonomy setting and a budget. The mission is task zero.</td></tr>
+    <tr><td>Economics</td><td>Budgeted swarm. Effort budgets are floors and ceilings; the ledger records cost against value; learning optimizes value-per-effort.</td></tr>
+    <tr><td>Impossibility</td><td>Surrender is a first-class outcome: partial results, precise blockers, and what would have to change — delivered as a dossier, and mined as premium learning material.</td></tr>
+    <tr><td>Observability</td><td>A cockpit, not a window: an n8n-inspired live mission-control dashboard rendered purely from the audit ledger — task canvas, workforce, budgets, attention queue — with time-travel replay, operator/requester/learning views, and human interventions logged as first-class events.</td></tr>
+  </table>
+
+  <h2>How to read this dossier</h2>
+  <ul class="tight">
+    <li><strong><a href="architecture.html">Architecture</a></strong> — the standing structure: meta-layer, workforce plane, memory fabric, constitution, and the instance-per-mission / shared-brain topology.</li>
+    <li><strong><a href="lifecycle.html">Mission Lifecycle</a></strong> — a mission's journey end to end: intake, decomposition, staffing, execution, verification, fold-up, delivery or surrender. Includes the anatomy of a task contract and the escalation ladder.</li>
+    <li><strong><a href="agents.html">The Agents</a></strong> — deep role descriptions of the four meta-agents and the supporting cast, plus the earn-permanence lifecycle of a conjured agent.</li>
+    <li><strong><a href="learning.html">Memory &amp; Learning</a></strong> — the three stores of the memory fabric, the audit event taxonomy, the two-speed learning loop, and the constitutional amendment process.</li>
+    <li><strong><a href="observability.html">Observability</a></strong> — the mission-control dashboard: the live n8n-style task canvas, the five lenses, the human cockpit, time-travel replay, and the one-substrate principle.</li>
+    <li><strong><a href="risks.html">Risks &amp; Safeguards</a></strong> — the premortem: documented failure modes of systems like this, and the specific mechanism in this design that answers each.</li>
+  </ul>
+
+  <div class="pn">
+    <span></span>
+    <a href="architecture.html"><span>Next</span>Architecture →</a>
+  </div>
+</main>
+<footer><div class="wrap">SWARM · Functional Solution Description v1.1 · 22 July 2026 · Outcome of a structured brainstorm (Socratic clarification → research → Six Hats / SCAMPER / premortem analysis). Functional scope only — technology choices, security and performance are deliberately out of scope for this document.</div></footer>
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWARM — Risks &amp; Safeguards</title>
+<style>
+:root{
+  color-scheme: light;
+  --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+  --c-orch:#2a78d6; --t-orch:#eaf2fb;
+  --c-creator:#eb6834; --t-creator:#fdf0ea;
+  --c-review:#1baf7a; --t-review:#e8f7f1;
+  --c-learn:#eda100; --t-learn:#fdf6e3;
+  --c-fabric:#4a3aa7; --t-fabric:#edebf6;
+  --c-const:#e34948; --t-const:#fcecec;
+  --c-human:#e87ba4; --t-human:#fbeff4;
+  --c-broker:#008300; --t-broker:#e6f2e6;
+  --c-worker:#898781; --t-worker:#f0efec;
+  --link:#1c5cab;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.55;font-size:15.5px}
+.wrap{max-width:1040px;margin:0 auto;padding:0 28px}
+header.site{background:var(--surface);border-bottom:1px solid var(--grid)}
+.bar{display:flex;align-items:baseline;justify-content:space-between;gap:24px;padding:18px 0;flex-wrap:wrap}
+.brand{font-weight:700;letter-spacing:.4px;font-size:15px}
+.brand small{font-weight:400;color:var(--muted);margin-left:10px;letter-spacing:0}
+nav.top{display:flex;gap:18px;flex-wrap:wrap}
+nav.top a{color:var(--ink2);text-decoration:none;font-size:13.5px;padding:3px 0;border-bottom:2px solid transparent}
+nav.top a:hover{color:var(--ink)}
+nav.top a[aria-current]{color:var(--ink);border-bottom-color:var(--ink)}
+main{padding:52px 0 20px}
+.kicker{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+h1{font-size:clamp(28px,3.8vw,36px);line-height:1.14;margin:0 0 16px;letter-spacing:-.015em}
+h2{font-size:23px;margin:56px 0 6px;letter-spacing:-.01em}
+h3{font-size:16.5px;margin:26px 0 8px}
+.lede{font-size:17.5px;color:var(--ink2);max-width:74ch;margin:0 0 8px}
+p{max-width:76ch}
+a{color:var(--link)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 22px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:20px 0}
+.card h3{margin:0 0 8px;font-size:15px}
+.card p{font-size:13.5px;color:var(--ink2);margin:0 0 8px}
+.card p:last-child{margin:0}
+.card .ws{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;margin:10px 0 3px}
+figure{margin:26px 0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px;overflow-x:auto}
+figcaption{font-size:12.5px;color:var(--muted);margin-top:14px;line-height:1.5}
+table{width:100%;border-collapse:collapse;margin:20px 0;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;font-size:13.5px}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);text-align:left;font-weight:600;padding:12px 14px;border-bottom:1px solid var(--grid)}
+td{padding:11px 14px;border-bottom:1px solid var(--grid);vertical-align:top;color:var(--ink2)}
+td:first-child{color:var(--ink);font-weight:600}
+tr:last-child td{border-bottom:none}
+.sev{font-size:11px;font-weight:700;padding:2px 8px;border-radius:12px;white-space:nowrap}
+.sev.h{background:#fcecec;color:#a02c2c}
+.sev.m{background:#fdf6e3;color:#8a6100}
+.sev.l{background:#e8f7f1;color:#0f7a55}
+footer{border-top:1px solid var(--grid);margin-top:70px;padding:26px 0 44px;color:var(--muted);font-size:12.5px}
+.pn{display:flex;justify-content:space-between;gap:16px;margin-top:56px}
+.pn a{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;text-decoration:none;color:var(--ink);font-size:13.5px}
+.pn a span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+ul.tight{padding-left:20px;margin:8px 0}
+ul.tight li{margin:6px 0;color:var(--ink2);font-size:14.5px}
+ul.tight li strong{color:var(--ink)}
+/* bar chart */
+.chart{max-width:720px}
+.chart .ct{font-size:14px;font-weight:700;margin-bottom:2px}
+.chart .cs{font-size:12.5px;color:var(--muted);margin-bottom:18px}
+.brow{display:grid;grid-template-columns:250px 1fr;align-items:center;gap:12px;margin:10px 0}
+.brow .bl{font-size:13px;color:var(--ink2);text-align:right;line-height:1.3}
+.brow .bt{position:relative;height:22px;background:transparent}
+.brow .bar-fill{position:absolute;left:0;top:0;bottom:0;background:#2a78d6;border-radius:0 4px 4px 0}
+.brow .bv{position:absolute;top:0;bottom:0;display:flex;align-items:center;font-size:12.5px;font-weight:600;color:var(--ink)}
+.baseline-v{border-left:1.5px solid var(--baseline)}
+@media(max-width:640px){.brow{grid-template-columns:1fr}.brow .bl{text-align:left}}
+</style>
+</head>
+<body>
+<header class="site"><div class="wrap"><div class="bar">
+  <div class="brand">SWARM<small>Functional Solution Description</small></div>
+  <nav class="top">
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="lifecycle.html">Mission Lifecycle</a>
+    <a href="agents.html">The Agents</a>
+    <a href="learning.html">Memory &amp; Learning</a>
+    <a href="observability.html">Observability</a>
+    <a href="risks.html" aria-current="page">Risks &amp; Safeguards</a>
+  </nav>
+</div></div></header>
+
+<main class="wrap">
+  <p class="kicker">Chapter 6 · Risks &amp; Safeguards</p>
+  <h1>Designed against the documented<br>ways this goes wrong</h1>
+  <p class="lede">Systems like SWARM have been tried in parts, and the parts have been measured failing in specific, repeatable ways. This chapter is the premortem made structural: each documented failure mode, and the mechanism in this design that exists specifically to answer it.</p>
+
+  <h2>Where multi-agent systems actually fail</h2>
+  <figure>
+    <div class="chart">
+      <div class="ct">Failure sources across 1,600+ analyzed multi-agent traces</div>
+      <div class="cs">Share of all observed failures, MAST taxonomy — seven frameworks, κ = 0.88 annotator agreement</div>
+      <div class="brow"><div class="bl">Specification &amp; system design<br><span style="font-size:11px;color:var(--muted)">vague tasks, missing stopping conditions, step repetition</span></div><div class="bt baseline-v"><div class="bar-fill" style="width:88%"></div><div class="bv" style="left:calc(88% + 8px)">≈44%</div></div></div>
+      <div class="brow"><div class="bl">Inter-agent misalignment<br><span style="font-size:11px;color:var(--muted)">derailment, withheld info, reasoning–action mismatch</span></div><div class="bt baseline-v"><div class="bar-fill" style="width:64%"></div><div class="bv" style="left:calc(64% + 8px)">≈32%</div></div></div>
+      <div class="brow"><div class="bl">Task verification<br><span style="font-size:11px;color:var(--muted)">absent, incomplete or incorrect checking</span></div><div class="bt baseline-v"><div class="bar-fill" style="width:48%"></div><div class="bv" style="left:calc(48% + 8px)">≈24%</div></div></div>
+    </div>
+    <figcaption><strong>The design targets the distribution.</strong> Contract-first decomposition and Gate A attack the 44%; contracts-plus-broker communication attacks the 32%; the two-tier Reviewer institution attacks the 24%. Source: "Why Do Multi-Agent LLM Systems Fail?" (arXiv:2503.13657). Systems in the study failed 41–87% of their own benchmark tasks.</figcaption>
+  </figure>
+
+  <h2>Risk register</h2>
+  <table>
+    <tr><th style="width:220px">Risk</th><th style="width:86px">Likelihood</th><th style="width:76px">Impact</th><th>The design's answer</th></tr>
+    <tr><td>The learner games the yardstick — quality metrics improve while real quality decays</td><td><span class="sev m">Medium</span></td><td><span class="sev h">Critical</span></td><td>The constitution: metric definitions and review independence outside every learner's write scope; sealed benchmarks the learner never sees; amendments propose-only, ratified out-of-band. (DGM deleted its own detectors; METR measured 43× more gaming with visible scorers.)</td></tr>
+    <tr><td>Verification rubber-stamping at scale — thousands of shallow approvals</td><td><span class="sev h">High</span></td><td><span class="sev h">High</span></td><td>Two-tier review (mechanical + semantic); verification depth scaled to blast radius; planted known-bad calibration probes; red-flagging of verification-shaped outputs; reviewer compliance itself measured per clause.</td></tr>
+    <tr><td>Error cascades through fold-up — one bad leaf poisons its whole ancestry</td><td><span class="sev m">Medium</span></td><td><span class="sev h">High</span></td><td>Per-task gates before integration; redundant independent runs with required agreement on high-fan-in tasks; consistency (not lucky passes) as the acceptance bar for subtree-gating outputs; error-class verdicts that make root-cause retry a lookup. (99% per-step accuracy still compounds to 37% over 100 steps — per-step verification is the only countermeasure that scales.)</td></tr>
+    <tr><td>Specification garbage at mission scale — beautifully executed wrong work</td><td><span class="sev h">High</span></td><td><span class="sev h">High</span></td><td>Contract-first intake with explicit open questions; Gate A auditing the task graph before execution; workers must restate contracts and bounce ambiguity; templates encode decomposition experience.</td></tr>
+    <tr><td>Over-decomposition — sequential work shredded into incoherence</td><td><span class="sev m">Medium</span></td><td><span class="sev m">Medium</span></td><td>The decompose-or-delegate gate at every node; gate decisions logged and learned. (Splitting constraint-entangled work measures −39% to −70%.)</td></tr>
+    <tr><td>Cost explosion — the 15× token multiplier compounds with review and redundancy</td><td><span class="sev h">High</span></td><td><span class="sev m">Medium</span></td><td>Budgets as floors and ceilings at every level; reuse-first staffing as the structural cost lever; effort-scaling rules per task class; value-per-effort as the learning target, so the system optimizes its own economics.</td></tr>
+    <tr><td>Library rot — wrong promotions, bloated prompts, lost diversity</td><td><span class="sev m">Medium</span></td><td><span class="sev m">Medium</span></td><td>Probation before permanence; clade scoring (lineage performance, not auditions); Pareto sets instead of single champions; delta edits instead of rewrites; down-weighting instead of deletion; simplicity as a tie-breaker.</td></tr>
+    <tr><td>Knowledge commons poisoning or staleness</td><td><span class="sev m">Medium</span></td><td><span class="sev h">High</span></td><td>Admission pipeline with provenance, quarantine and independent re-derivation for high-impact entries; expiry and re-validation; broker-mediated retrieval that keeps consumption attributable. (Measured attacks succeed at &lt;0.1% poison rates — through normal interaction.)</td></tr>
+    <tr><td>Stall loops, premature surrender, or refusal to surrender</td><td><span class="sev m">Medium</span></td><td><span class="sev m">Medium</span></td><td>Stopping conditions in every contract; stall counters trigger the ladder, not repetition; no-bid staffing signals surrender early and cheaply; surrender thresholds set per the autonomy dial; the dossier makes giving up a deliverable, not a disappearance.</td></tr>
+    <tr><td>Dashboard drift — humans steering from a view that lies</td><td><span class="sev m">Medium</span></td><td><span class="sev m">Medium</span></td><td>The dashboard is constitutionally a pure view: it renders ledger events only, persists nothing of its own, and every element drills to raw events in two clicks — a view that can be audited against its source cannot silently diverge from it. Human acts taken there are themselves logged events, so steering is never invisible.</td></tr>
+    <tr><td>Learning from noise — seed-luck "improvements" accumulating</td><td><span class="sev m">Medium</span></td><td><span class="sev m">Medium</span></td><td>Pre-registered metrics per experiment; fixed evaluation budgets; replication required; transfer tests on held-out slices; auto-revert on equal-or-worse; the ratchet only ever adopts one delta at a time.</td></tr>
+  </table>
+
+  <h2>Premortem — six ways it died, prevented</h2>
+  <div class="grid2">
+    <div class="card" style="border-top:3px solid #c2452f">
+      <h3>"The metrics were green and the output was garbage."</h3>
+      <p>The Learning Agent optimized pass rates; reviewers drifted lenient; every dashboard improved while customers got worse results.</p>
+      <div class="ws">Warning signs</div><p>Pass rates rising while human spot-check satisfaction falls; verdicts getting shorter; red-flag rate dropping to zero.</p>
+      <div class="ws">Prevention</div><p>Sealed bench the learner can't see; calibration probes that must get caught; periodic human audit sampled from the dial; constitution keeps "pass" meaning pass.</p>
+    </div>
+    <div class="card" style="border-top:3px solid #c2452f">
+      <h3>"It produced a beautiful org chart and no value."</h3>
+      <p>Decomposition became the product: exquisite trees, thousands of contracts, endless staffing — and mission outcomes no better than one good agent with a long afternoon.</p>
+      <div class="ws">Warning signs</div><p>Meta-work share of budget climbing; tiny missions spawning huge trees; value-per-effort flat or falling versus the single-agent baseline.</p>
+      <div class="ws">Prevention</div><p>The delegate-whole gate; budget ceilings on meta-work itself; the swarm's fitness function is value-per-effort against baselines, not task counts.</p>
+    </div>
+    <div class="card" style="border-top:3px solid #c2452f">
+      <h3>"One confident hallucination spread everywhere."</h3>
+      <p>A worker wrote a wrong "fact" into the commons; forty later missions retrieved it; by discovery, the contamination had provenance-washed itself through derived findings.</p>
+      <div class="ws">Warning signs</div><p>Commons entries cited far beyond their evidence weight; findings whose provenance chains all lead back to one task.</p>
+      <div class="ws">Prevention</div><p>Quarantine plus independent re-derivation for high-impact entries; expiry forces re-earning; provenance chains stay queryable so contamination is traceable and revocable in one sweep.</p>
+    </div>
+    <div class="card" style="border-top:3px solid #c2452f">
+      <h3>"It never finished, and never admitted it."</h3>
+      <p>A mission with contradictory criteria cycled the escalation ladder for days, each loop plausible in isolation, burning budget in dignified circles.</p>
+      <div class="ws">Warning signs</div><p>Same task climbing the ladder twice; escalation spend outpacing execution spend; plan rewrites without plan changes.</p>
+      <div class="ws">Prevention</div><p>Stopping conditions and stall counters are contract fields, not habits; ladder-exhaustion and budget thresholds force the surrender decision; contradictory criteria are Gate A's job to catch at intake time.</p>
+    </div>
+    <div class="card" style="border-top:3px solid #c2452f">
+      <h3>"We drowned in our own audit trail."</h3>
+      <p>Everything was logged; nothing could be found. The Learning Agent read raw traces like tea leaves — automated root-cause localization on unstructured traces measures ~11% accuracy.</p>
+      <div class="ws">Warning signs</div><p>Learning cycles producing vague hypotheses; investigations taking longer than the work investigated.</p>
+      <div class="ws">Prevention</div><p>Structure at write time, not read time: typed events, criterion ids, error classes, contract keys. The ledger is designed around the queries learning will ask — localization as lookup, not archaeology.</p>
+    </div>
+    <div class="card" style="border-top:3px solid #c2452f">
+      <h3>"The library became a museum of lucky auditions."</h3>
+      <p>Designs promoted on single good runs; champions entrenched; the Agent Creator kept picking the same aging stars for work that had drifted away from them.</p>
+      <div class="ws">Warning signs</div><p>Library reuse rate high but per-category compliance falling; promotion decisions untraceable to replicated evidence; one design dominating a category.</p>
+      <div class="ws">Prevention</div><p>Clade scores over auditions; standing re-earned continuously; Pareto diversity per category; down-weighting keeps selection honest without destroying stepping stones.</p>
+    </div>
+  </div>
+
+  <h2>Forbidden by design</h2>
+  <p>Anti-patterns the architecture rules out structurally — not by asking agents nicely:</p>
+  <ul class="tight">
+    <li><strong>No free agent-to-agent chatter.</strong> Coordination without a record is how systems become undebuggable. All context moves through the broker; all work moves through contracts.</li>
+    <li><strong>No task without a contract; no contract without stopping conditions.</strong> Unbounded tasks are the documented top failure class, pre-answered at the schema level.</li>
+    <li><strong>No worker sees its own scorer.</strong> Verification plans stay out of executing agents' contexts — visibility is the measured 43× difference between honest work and gamed work.</li>
+    <li><strong>No judge inside the learner's write scope.</strong> The one lesson every self-improving system has taught, made constitutional.</li>
+    <li><strong>No blind retries.</strong> Every rejection carries an error class; the ladder rung is chosen by diagnosis, never by hope.</li>
+    <li><strong>No wholesale rewrites of accumulated assets.</strong> Playbooks and prompts change by itemized deltas — monolithic rewriting measurably erodes the detail that made assets valuable.</li>
+    <li><strong>No silent capping or dropping.</strong> Whatever the swarm chose not to do — tasks skipped, coverage bounded, retries abandoned — is stated in the deliverable, because omissions that look like completeness are lies by layout.</li>
+    <li><strong>No lucky passes on load-bearing outputs.</strong> Anything gating a large subtree must pass consistently across independent runs, not once.</li>
+  </ul>
+
+  <h2>Open questions for the next phase</h2>
+  <ul class="tight">
+    <li><strong>The cold-start era.</strong> Mission one has no library, no templates, no benchmarks, no commons. The bootstrap period — where early missions double as institution-building — deserves its own design: seeded templates? deliberately easy first missions? imported starting playbooks?</li>
+    <li><strong>Seeding the sealed bench.</strong> The constitutional benchmark vault needs verified missions before amendments can ever be evaluated — where do the first ones come from, and who curates them initially?</li>
+    <li><strong>Human ratification bandwidth.</strong> The dial routes decisions to a human; at scale, that human becomes a bottleneck and a rubber-stamp risk of their own. What does the ratification workload actually look like, and what tooling does the human need?</li>
+    <li><strong>Taxonomy governance.</strong> Capability categories drift as missions vary — when does the Learning Agent split, merge or retire categories, and what stops taxonomy churn from invalidating clade histories?</li>
+    <li><strong>The v0 slice.</strong> Which subset of this architecture is the smallest thing that exercises the whole loop — decompose, contract, conjure, verify, fold, learn — end to end? (Recommendation: pick that slice by walking one real mission through this document on paper first.)</li>
+  </ul>
+
+  <h2>Verdict — ready for planning</h2>
+  <div class="card" style="border-top:3px solid var(--c-review);max-width:760px">
+    <p style="font-size:15px"><strong>Yes.</strong> The functional architecture is internally coherent, every mechanism traces to a decision made in the brainstorm or to documented evidence, and the open questions above are scoping questions, not holes in the concept. The recommended next step is a tabletop walkthrough — one concrete mission traced through every stage of this dossier by hand — followed by definition of the v0 slice, and only then the technical and non-functional design pass that was deliberately kept out of scope here.</p>
+  </div>
+
+  <div class="pn">
+    <a href="observability.html"><span>Previous</span>← Observability</a>
+    <a href="index.html"><span>Home</span>Overview ↺</a>
+  </div>
+</main>
+<footer><div class="wrap">SWARM · Functional Solution Description v1.1 · 22 July 2026 · Risks &amp; Safeguards</div></footer>
+</body>
+</html>

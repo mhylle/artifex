@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWARM — Memory &amp; Learning</title>
+<style>
+:root{
+  color-scheme: light;
+  --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+  --c-orch:#2a78d6; --t-orch:#eaf2fb;
+  --c-creator:#eb6834; --t-creator:#fdf0ea;
+  --c-review:#1baf7a; --t-review:#e8f7f1;
+  --c-learn:#eda100; --t-learn:#fdf6e3;
+  --c-fabric:#4a3aa7; --t-fabric:#edebf6;
+  --c-const:#e34948; --t-const:#fcecec;
+  --c-human:#e87ba4; --t-human:#fbeff4;
+  --c-broker:#008300; --t-broker:#e6f2e6;
+  --c-worker:#898781; --t-worker:#f0efec;
+  --link:#1c5cab;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.55;font-size:15.5px}
+.wrap{max-width:1040px;margin:0 auto;padding:0 28px}
+header.site{background:var(--surface);border-bottom:1px solid var(--grid)}
+.bar{display:flex;align-items:baseline;justify-content:space-between;gap:24px;padding:18px 0;flex-wrap:wrap}
+.brand{font-weight:700;letter-spacing:.4px;font-size:15px}
+.brand small{font-weight:400;color:var(--muted);margin-left:10px;letter-spacing:0}
+nav.top{display:flex;gap:18px;flex-wrap:wrap}
+nav.top a{color:var(--ink2);text-decoration:none;font-size:13.5px;padding:3px 0;border-bottom:2px solid transparent}
+nav.top a:hover{color:var(--ink)}
+nav.top a[aria-current]{color:var(--ink);border-bottom-color:var(--ink)}
+main{padding:52px 0 20px}
+.kicker{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+h1{font-size:clamp(28px,3.8vw,36px);line-height:1.14;margin:0 0 16px;letter-spacing:-.015em}
+h2{font-size:23px;margin:56px 0 6px;letter-spacing:-.01em}
+h3{font-size:16.5px;margin:26px 0 8px}
+.lede{font-size:17.5px;color:var(--ink2);max-width:74ch;margin:0 0 8px}
+p{max-width:76ch}
+a{color:var(--link)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 22px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:20px 0}
+.card h3{margin:0 0 8px;font-size:15.5px}
+.card p{font-size:14px;color:var(--ink2);margin:0 0 8px}
+.card p:last-child{margin:0}
+.card ul{padding-left:18px;margin:6px 0}
+.card li{font-size:13.5px;color:var(--ink2);margin:4px 0}
+figure{margin:26px 0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px;overflow-x:auto}
+figcaption{font-size:12.5px;color:var(--muted);margin-top:14px;line-height:1.5}
+svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+table{width:100%;border-collapse:collapse;margin:20px 0;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;font-size:14px}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);text-align:left;font-weight:600;padding:12px 14px;border-bottom:1px solid var(--grid)}
+td{padding:11px 14px;border-bottom:1px solid var(--grid);vertical-align:top;color:var(--ink2)}
+td:first-child{color:var(--ink);font-weight:600;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+footer{border-top:1px solid var(--grid);margin-top:70px;padding:26px 0 44px;color:var(--muted);font-size:12.5px}
+.pn{display:flex;justify-content:space-between;gap:16px;margin-top:56px}
+.pn a{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;text-decoration:none;color:var(--ink);font-size:13.5px}
+.pn a span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+ul.tight{padding-left:20px;margin:8px 0}
+ul.tight li{margin:5px 0;color:var(--ink2);font-size:14.5px}
+ul.tight li strong{color:var(--ink)}
+</style>
+</head>
+<body>
+<header class="site"><div class="wrap"><div class="bar">
+  <div class="brand">SWARM<small>Functional Solution Description</small></div>
+  <nav class="top">
+    <a href="index.html">Overview</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="lifecycle.html">Mission Lifecycle</a>
+    <a href="agents.html">The Agents</a>
+    <a href="learning.html" aria-current="page">Memory &amp; Learning</a>
+    <a href="observability.html">Observability</a>
+    <a href="risks.html">Risks &amp; Safeguards</a>
+  </nav>
+</div></div></header>
+
+<main class="wrap">
+  <p class="kicker">Chapter 4 · Memory &amp; Learning</p>
+  <h1>The trail is the treasure</h1>
+  <p class="lede">SWARM's audit trail is not compliance paperwork — it is the raw material the system is refined from. Three stores with deliberately different rules keep evidence, earned capability, and earned knowledge separate; two learning loops with deliberately different speeds turn that material into improvement — and the very same event stream renders live to humans in <a href="observability.html">mission control</a>.</p>
+
+  <h2>Three stores, three rulebooks</h2>
+  <p>The separation is borrowed directly from what makes autoresearch work: <em>evidence</em> (every attempt, including failures), <em>adopted capability</em> (only measured wins), and <em>raw output</em> live in different places with different retention, different consumers, and different write rules. Mixing them is how systems end up either learning from noise or losing their history.</p>
+
+  <div class="grid3">
+    <div class="card" style="border-top:3px solid var(--c-fabric)">
+      <h3>Audit Ledger</h3>
+      <p><strong>Rule: everything, forever, append-only.</strong></p>
+      <ul>
+        <li>Every decision, contract, exchange, attempt, verdict, budget movement and learning act — successes and failures alike, keyed by contract id and actor.</li>
+        <li>Failures are first-class: the sequence of what <em>didn't</em> work is exactly what the Learning Agent plans its next hypotheses from.</li>
+        <li>No agent can edit the past — including the Learning Agent. Tamper-evidence is constitutional.</li>
+        <li>Structured for querying, not archaeology: events carry typed error classes and criterion ids, so "which categories fail which clauses" is a lookup, not an investigation.</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-review)">
+      <h3>Asset Registry</h3>
+      <p><strong>Rule: only measured wins enter; every entry is versioned.</strong></p>
+      <ul>
+        <li>Agent designs, decomposition templates, category taxonomies, meta-agent playbooks, effort heuristics — the swarm's earned capability.</li>
+        <li>A ratchet: assets advance one validated delta at a time; equal-or-worse reverts automatically; simpler-is-better breaks ties.</li>
+        <li>Every version keyed to the ledger evidence that justified it — capability with a paper trail.</li>
+        <li>Retirement is down-weighting, never deletion; cold assets remain searchable as stepping stones.</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top:3px solid var(--c-learn)">
+      <h3>Knowledge Commons</h3>
+      <p><strong>Rule: knowledge is earned, sourced, and mortal.</strong></p>
+      <ul>
+        <li>Validated findings about the world — facts, references, domain maps — reusable across missions.</li>
+        <li>Every entry carries provenance: which agent, which mission, which evidence, which verification.</li>
+        <li>New findings sit in quarantine until validated; high-impact findings require independent re-derivation before promotion.</li>
+        <li>Entries expire: knowledge has a shelf life and must periodically re-earn its place — stale certainty is worse than honest absence.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>What gets recorded — the event taxonomy</h2>
+  <table>
+    <tr><th style="width:190px">Event family</th><th>Recorded acts</th><th style="width:290px">What it enables</th></tr>
+    <tr><td>Decision</td><td>Decompose-vs-delegate choices, template selections, pinned cross-cutting decisions, plan rewrites</td><td>Learning where decomposition strategy wins and loses; replaying judgment, not just output</td></tr>
+    <tr><td>Contract</td><td>Contracts issued, amended, bounced back with questions</td><td>Per-clause compliance rates; measuring specification quality — the top failure source</td></tr>
+    <tr><td>Staffing</td><td>Category formation, library searches, bids and track-record matches, new designs, no-bids</td><td>Reuse economics; capability-gap maps; taxonomy learning</td></tr>
+    <tr><td>Execution</td><td>Task restatements, broker requests and grants, work acts, deliverables with evidence bundles</td><td>Attribution of who knew what; cost accounting; workflow mining from successful trajectories</td></tr>
+    <tr><td>Verification</td><td>Gate A and Gate B verdicts with criterion ids and error classes, red flags, calibration probes</td><td>The escalation ladder's steering signal; the learning loop's ground truth; reviewer honesty measurement</td></tr>
+    <tr><td>Economic</td><td>Budget grants, spend per act, floor/ceiling hits, exhaustion events</td><td>Value-per-effort as a computable fitness function; cost attribution to the task level</td></tr>
+    <tr><td>Escalation</td><td>Ladder rungs taken, stall counter trips, surrender threshold evaluations</td><td>Failure-recovery economics; early-warning patterns before missions sour</td></tr>
+    <tr><td>Learning</td><td>Hot-fixes with their bounds, experiments with pre-registered metrics, adoptions, reverts, promotions, amendment petitions</td><td>The improvement process is itself auditable and improvable — learning leaves the same trail everything else does</td></tr>
+  </table>
+
+  <h2>Two speeds of learning</h2>
+  <figure>
+    <svg viewBox="0 0 920 330" width="100%" role="img" aria-label="Two learning loops: a small fast inline loop during missions and a large science loop between missions, both grounded in the memory fabric">
+      <defs>
+        <marker id="ka" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b07900"/></marker>
+        <marker id="kg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker>
+      </defs>
+      <!-- fast loop -->
+      <text x="180" y="34" text-anchor="middle" font-size="12.5" font-weight="700" fill="#b07900">FAST LOOP — during a mission (reflexes)</text>
+      <ellipse cx="180" cy="130" rx="150" ry="82" fill="none" stroke="#b07900" stroke-width="1.6" stroke-dasharray="6 4"/>
+      <rect x="105" y="58" width="150" height="34" rx="7" fill="var(--t-learn)" stroke="var(--c-learn)"/><text x="180" y="79" text-anchor="middle" font-size="10.5" font-weight="600">detect live pattern</text>
+      <rect x="252" y="112" width="130" height="34" rx="7" fill="var(--t-learn)" stroke="var(--c-learn)"/><text x="317" y="133" text-anchor="middle" font-size="10.5" font-weight="600">bounded patch</text>
+      <rect x="105" y="168" width="150" height="34" rx="7" fill="var(--t-learn)" stroke="var(--c-learn)"/><text x="180" y="189" text-anchor="middle" font-size="10.5" font-weight="600">measure effect</text>
+      <rect x="-15" y="112" width="130" height="34" rx="7" fill="var(--t-learn)" stroke="var(--c-learn)" transform="translate(30 0)"/><text x="80" y="133" text-anchor="middle" font-size="10.5" font-weight="600">keep or revert</text>
+      <path d="M 258 92 Q 300 98 315 110" fill="none" stroke="#b07900" stroke-width="1.4" marker-end="url(#ka)"/>
+      <path d="M 300 148 Q 275 172 258 178" fill="none" stroke="#b07900" stroke-width="1.4" marker-end="url(#ka)"/>
+      <path d="M 102 178 Q 72 168 62 150" fill="none" stroke="#b07900" stroke-width="1.4" marker-end="url(#ka)"/>
+      <path d="M 62 110 Q 78 84 100 76" fill="none" stroke="#b07900" stroke-width="1.4" marker-end="url(#ka)"/>
+      <text x="180" y="128" text-anchor="middle" font-size="10" fill="#52514e">worker layer only</text>
+      <text x="180" y="143" text-anchor="middle" font-size="10" fill="#52514e">one change at a time</text>
+      <text x="180" y="158" text-anchor="middle" font-size="10" fill="#52514e">auto-revert on no effect</text>
+      <!-- science loop -->
+      <text x="650" y="34" text-anchor="middle" font-size="12.5" font-weight="700" fill="#b07900">SCIENCE LOOP — between missions (research)</text>
+      <ellipse cx="650" cy="140" rx="240" ry="100" fill="none" stroke="#b07900" stroke-width="1.8"/>
+      <rect x="560" y="52" width="180" height="34" rx="7" fill="var(--t-fabric)" stroke="var(--c-fabric)"/><text x="650" y="73" text-anchor="middle" font-size="10.5" font-weight="600">mine the ledger for weak spots</text>
+      <rect x="800" y="100" width="112" height="46" rx="7" fill="var(--t-learn)" stroke="var(--c-learn)"/><text x="856" y="119" text-anchor="middle" font-size="10.5" font-weight="600">hypothesize</text><text x="856" y="134" text-anchor="middle" font-size="9" fill="#52514e">history-conditioned</text>
+      <rect x="790" y="176" width="122" height="46" rx="7" fill="var(--t-learn)" stroke="var(--c-learn)"/><text x="851" y="195" text-anchor="middle" font-size="10.5" font-weight="600">experiment</text><text x="851" y="210" text-anchor="middle" font-size="9" fill="#52514e">on replay benchmarks</text>
+      <rect x="570" y="216" width="160" height="40" rx="7" fill="var(--t-learn)" stroke="var(--c-learn)"/><text x="650" y="234" text-anchor="middle" font-size="10.5" font-weight="600">replicate + transfer-test</text><text x="650" y="249" text-anchor="middle" font-size="9" fill="#52514e">held-out slice must confirm</text>
+      <rect x="396" y="176" width="122" height="46" rx="7" fill="var(--t-review)" stroke="var(--c-review)"/><text x="457" y="195" text-anchor="middle" font-size="10.5" font-weight="600">adopt by ratchet</text><text x="457" y="210" text-anchor="middle" font-size="9" fill="#52514e">delta edit · else discard</text>
+      <rect x="400" y="100" width="118" height="46" rx="7" fill="var(--t-fabric)" stroke="var(--c-fabric)"/><text x="459" y="119" text-anchor="middle" font-size="10.5" font-weight="600">monitor in the wild</text><text x="459" y="134" text-anchor="middle" font-size="9" fill="#52514e">auto-revert stands ready</text>
+      <path d="M 744 78 Q 820 84 850 98" fill="none" stroke="#52514e" stroke-width="1.4" marker-end="url(#kg)"/>
+      <path d="M 856 146 L 854 174" fill="none" stroke="#52514e" stroke-width="1.4" marker-end="url(#kg)"/>
+      <path d="M 788 210 Q 760 226 734 232" fill="none" stroke="#52514e" stroke-width="1.4" marker-end="url(#kg)"/>
+      <path d="M 566 234 Q 520 230 500 224" fill="none" stroke="#52514e" stroke-width="1.4" marker-end="url(#kg)"/>
+      <path d="M 455 174 L 458 148" fill="none" stroke="#52514e" stroke-width="1.4" marker-end="url(#kg)"/>
+      <path d="M 512 98 Q 548 82 556 80" fill="none" stroke="#52514e" stroke-width="1.4" marker-end="url(#kg)"/>
+      <text x="460" y="294" text-anchor="middle" font-size="10.5" fill="#52514e">Fast-loop results become science-loop hypotheses. Both loops write every act to the ledger —</text>
+      <text x="460" y="310" text-anchor="middle" font-size="10.5" fill="#52514e">learning is as auditable as the work it improves.</text>
+    </svg>
+    <figcaption><strong>Two-speed learning.</strong> The fast loop is a bounded reflex: worker-layer patches with automatic reversion, applied while a mission runs. The science loop is deliberate research between missions — the autoresearch discipline generalized: pre-registered metrics, fixed evaluation budgets, replication, transfer tests, and adoption only through the ratchet.</figcaption>
+  </figure>
+
+  <h2>Replay benchmarks — the trail as test bench</h2>
+  <p>Every completed task in the ledger — its contract, its inputs, its verified outcome — is a potential benchmark. The Learning Agent evaluates candidate improvements by replaying them against work the swarm has already done, where ground truth is known. This gives the science loop what autoresearch had in its five-minute training runs: a fixed, comparable, affordable yardstick for every experiment.</p>
+  <ul class="tight">
+    <li><strong>The open bench</strong> is drawn from the general ledger and used freely for experimentation.</li>
+    <li><strong>The sealed bench</strong> is a reserved slice of verified missions the Learning Agent never sees and never trains against — the constitutional instrument used to evaluate amendment petitions and to calibrate the Reviewer. Nothing that optimizes against a benchmark may also own it.</li>
+    <li><strong>Benchmarks age out</strong> as the mission mix drifts — the bench is curated like the commons, not accumulated like the ledger.</li>
+  </ul>
+
+  <h2>Admission to the Knowledge Commons</h2>
+  <figure>
+    <svg viewBox="0 0 920 150" width="100%" role="img" aria-label="Knowledge admission pipeline: candidate finding, provenance check, quarantine, independent re-derivation for high impact, published with expiry, re-validation or decay">
+      <defs><marker id="ca" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker></defs>
+      <rect x="14" y="42" width="136" height="62" rx="8" fill="#fff" stroke="#898781" stroke-width="1.3"/>
+      <text x="82" y="66" text-anchor="middle" font-size="11" font-weight="700">Candidate finding</text>
+      <text x="82" y="82" text-anchor="middle" font-size="9" fill="#52514e">produced inside a</text>
+      <text x="82" y="94" text-anchor="middle" font-size="9" fill="#52514e">verified task</text>
+      <line x1="150" y1="73" x2="172" y2="73" stroke="#52514e" stroke-width="1.4" marker-end="url(#ca)"/>
+      <rect x="176" y="42" width="136" height="62" rx="8" fill="var(--t-fabric)" stroke="var(--c-fabric)" stroke-width="1.3"/>
+      <text x="244" y="66" text-anchor="middle" font-size="11" font-weight="700">Provenance check</text>
+      <text x="244" y="82" text-anchor="middle" font-size="9" fill="#52514e">who found it, from what</text>
+      <text x="244" y="94" text-anchor="middle" font-size="9" fill="#52514e">evidence, verified how</text>
+      <line x1="312" y1="73" x2="334" y2="73" stroke="#52514e" stroke-width="1.4" marker-end="url(#ca)"/>
+      <rect x="338" y="42" width="136" height="62" rx="8" fill="var(--t-learn)" stroke="var(--c-learn)" stroke-width="1.3"/>
+      <text x="406" y="66" text-anchor="middle" font-size="11" font-weight="700">Quarantine</text>
+      <text x="406" y="82" text-anchor="middle" font-size="9" fill="#52514e">usable only with its</text>
+      <text x="406" y="94" text-anchor="middle" font-size="9" fill="#52514e">unproven label showing</text>
+      <line x1="474" y1="73" x2="496" y2="73" stroke="#52514e" stroke-width="1.4" marker-end="url(#ca)"/>
+      <rect x="500" y="42" width="150" height="62" rx="8" fill="var(--t-review)" stroke="var(--c-review)" stroke-width="1.3"/>
+      <text x="575" y="66" text-anchor="middle" font-size="11" font-weight="700">Independent re-derivation</text>
+      <text x="575" y="82" text-anchor="middle" font-size="9" fill="#52514e">for high-impact entries: a</text>
+      <text x="575" y="94" text-anchor="middle" font-size="9" fill="#52514e">stranger must find it again</text>
+      <line x1="650" y1="73" x2="672" y2="73" stroke="#52514e" stroke-width="1.4" marker-end="url(#ca)"/>
+      <rect x="676" y="42" width="120" height="62" rx="8" fill="var(--t-broker)" stroke="var(--c-broker)" stroke-width="1.3"/>
+      <text x="736" y="66" text-anchor="middle" font-size="11" font-weight="700">Published</text>
+      <text x="736" y="82" text-anchor="middle" font-size="9" fill="#52514e">retrievable via broker,</text>
+      <text x="736" y="94" text-anchor="middle" font-size="9" fill="#52514e">with expiry date</text>
+      <line x1="796" y1="73" x2="818" y2="73" stroke="#52514e" stroke-width="1.4" marker-end="url(#ca)"/>
+      <rect x="822" y="42" width="86" height="62" rx="8" fill="#fff" stroke="#898781" stroke-width="1.3" stroke-dasharray="4 3"/>
+      <text x="865" y="66" text-anchor="middle" font-size="11" font-weight="700">Re-earn</text>
+      <text x="865" y="82" text-anchor="middle" font-size="9" fill="#52514e">re-validate</text>
+      <text x="865" y="94" text-anchor="middle" font-size="9" fill="#52514e">or decay out</text>
+      <text x="460" y="132" text-anchor="middle" font-size="10" fill="#898781">Poisoning defense in depth: measured attacks corrupt shared knowledge stores at poison rates under 0.1% — via perfectly normal-looking interactions — so admission control, provenance and expiry are functional requirements, not hygiene.</text>
+    </svg>
+    <figcaption><strong>Knowledge is guilty until proven useful.</strong> The commons is treated as an adversarial surface even in a well-behaved swarm: a hallucinated "fact" written by one confused worker propagates through retrieval exactly like a poisoned record would.</figcaption>
+  </figure>
+
+  <h2>What learning may touch</h2>
+  <table>
+    <tr><th style="width:250px">Target</th><th style="width:190px">Access</th><th>Mechanism</th></tr>
+    <tr><td>Worker instructions &amp; category assets</td><td>Direct (fast loop)</td><td>Bounded hot-fixes: one logged change at a time, auto-revert on no measured effect.</td></tr>
+    <tr><td>Agent designs &amp; the library</td><td>Experiment + ratchet</td><td>Promotion, down-weighting and design deltas on replicated, transfer-tested evidence; Pareto sets per category.</td></tr>
+    <tr><td>Decomposition templates &amp; taxonomies</td><td>Experiment + ratchet</td><td>New templates trialed on replay benchmarks before entering the registry.</td></tr>
+    <tr><td>Meta-agent playbooks (incl. its own)</td><td>Experiment + ratchet</td><td>The institution's methods evolve through the same science loop — no shortcut for the learner's own habits.</td></tr>
+    <tr><td>Reviewer rubric <em>thresholds</em></td><td>Experiment + ratchet, sealed-bench validated</td><td>Tuning how strict, never what "pass" means; every change validated against the sealed bench it cannot see.</td></tr>
+    <tr><td>Metric definitions · review independence · ledger integrity · budget enforcement · amendment protocol</td><td><strong>Propose only</strong></td><td>Constitutional. Petitions argued from evidence, evaluated on the sealed bench, ratified out-of-band per the autonomy dial.</td></tr>
+  </table>
+
+  <div class="pn">
+    <a href="agents.html"><span>Previous</span>← The Agents</a>
+    <a href="observability.html"><span>Next</span>Observability →</a>
+  </div>
+</main>
+<footer><div class="wrap">SWARM · Functional Solution Description v1.1 · 22 July 2026 · Memory &amp; Learning</div></footer>
+</body>
+</html>

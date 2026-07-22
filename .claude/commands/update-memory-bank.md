@@ -1,0 +1,1 @@
+Update the memory bank: refresh CLAUDE-activeContext.md to reflect the current project state, create a CLAUDE-history.md entry if a meaningful state transition occurred since the last one (follow the procedure in CLAUDE.md), check CLAUDE.md itself for drift, and mirror key new facts into native auto memory.
