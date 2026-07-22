@@ -49,9 +49,9 @@ For multi-step tasks, state a brief plan with a verify step per item. Strong suc
 
 ## Project Overview
 
-- **Name:** SWARM — a self-assembling, self-improving multi-agent system (currently a design-stage functional specification).
-- **What it is:** SWARM (Self-organizing Workforce with Adaptive Roles & Memory) is a functional solution description for an agent system whose only permanent employees are four meta-agents — Orchestrator, Agent Creator, Reviewer, Learning Agent — that take any mission, atomize it into individually-verifiable tasks, design a disposable specialist workforce at runtime, verify every task at both ends, fold results back into one outcome, and mine the audit trail to improve before the next mission. **Current phase: functional scope only (v1.1, 22 July 2026)** — technology, security, and performance are deliberately out of scope. The concrete artifacts are a 7-page HTML dossier in `solution/` and the source brainstorm in `docs/brainstorms/`. No implementation code exists yet.
-- **Remote:** `origin` → https://github.com/mhylle/agent-swarm (public, Apache-2.0) — commit AND push after each finalized unit of work (commit alone is not enough).
+- **Name:** Artifex (Latin: "master craftsman / maker") — a self-assembling, self-improving multi-agent system. Working-titled "SWARM" through the functional-design phase; the `solution/` dossier still carries that title.
+- **What it is:** Artifex is an agent system whose only permanent employees are four meta-agents — Orchestrator, Agent Creator, Reviewer, Learning Agent — that take any mission, atomize it into individually-verifiable tasks, craft a disposable specialist workforce at runtime, verify every task at both ends, fold results back into one outcome, and mine the audit trail to improve before the next mission. **Design stage:** functional design frozen (v1.1 dossier), stack + model/inference decisions locked (ADR-0001/0002); no implementation code yet. Security and performance still out of scope.
+- **Remote:** `origin` → https://github.com/mhylle/artifex (public, Apache-2.0) — commit AND push after each finalized unit of work (commit alone is not enough).
 
 ## Repository Map
 
@@ -80,7 +80,7 @@ Dual-memory architecture. Memory bank files are git-shared and read **on demand*
 
 ## Tasktracker (Mandatory)
 
-Tasktracker MCP project **"SWARM"** (id `faf7e141-4cad-4e53-ab65-e490cba4e5a5`) is the system of record for requirements, architecture, and phased implementation plans — not markdown files, and not this file. **Before writing or trusting any state claim** here or in `CLAUDE-activeContext.md` (tech stack decided or not, architecture exists or not, planning started or not) — run `tasktracker_getProjectBrief` (verbosity `fat`) **and** `tasktracker_getProjectReadiness` on this project. `tasktracker_listProjects`' one-line description is not enough: a project can already hold a finalized architecture/stack decision and hundreds of tasks even when the local checkout is empty or new. Re-run this check at the start of any session where you're about to assert what state the project is in.
+Tasktracker MCP project **"Artifex"** (id `faf7e141-4cad-4e53-ab65-e490cba4e5a5`) is the system of record for requirements, architecture, and phased implementation plans — not markdown files, and not this file. **Before writing or trusting any state claim** here or in `CLAUDE-activeContext.md` (tech stack decided or not, architecture exists or not, planning started or not) — run `tasktracker_getProjectBrief` (verbosity `fat`) **and** `tasktracker_getProjectReadiness` on this project. `tasktracker_listProjects`' one-line description is not enough: a project can already hold a finalized architecture/stack decision and hundreds of tasks even when the local checkout is empty or new. Re-run this check at the start of any session where you're about to assert what state the project is in.
 
 **MUST use the tasktracker-native (`tt-*`) skills for all planning/implementation work on this project — never the file-based equivalents:**
 
