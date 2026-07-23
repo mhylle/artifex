@@ -61,7 +61,9 @@ For multi-step tasks, state a brief plan with a verify step per item. Strong suc
 | `solution/` | The functional solution dossier — 7 linked HTML pages: `index.html` (Overview), `architecture.html`, `lifecycle.html`, `agents.html`, `learning.html`, `observability.html`, `risks.html` |
 | `docs/brainstorms/` | Source brainstorm that produced the dossier (`2026-07-22-agent-swarm.md`) |
 | `docs/decisions/` | Architecture Decision Records (`ADR-*.md`) |
-| `.claude/` | Session config — `rules/`, `commands/`, `agents/`, `settings.local.json` |
+| `.claude/` | Session config — `rules/`, `commands/`, `agents/` (incl. `artifex-explorer`), `skills/` (glob-scoped guardrails), `hooks/`, `settings.json` |
+| `packages/*/CLAUDE.md` | Per-module AI-Layer guides (shared-types, model-router, api, worker, dashboard) — loaded only when working in that package |
+| `tools/codebase-search/` | AST codebase-search MCP over the TS monorepo (registered in `.mcp.json`) |
 | `history/` | Development history entries (index: `CLAUDE-history.md`) |
 
 ## Memory System
@@ -118,6 +120,19 @@ Do NOT dump full details into `CLAUDE-history.md` — it is an index only. Do NO
 - **Quality over speed**, especially for data/document processing
 - **Every iteration beyond base must be brainstormed before implementation** — write this into any implementation plan
 - **Functional-before-technical:** this project deliberately keeps technology, security, and performance out of scope until the functional design is settled — respect that boundary unless the user lifts it
+- **Install via tooling, never hand-edit manifests:** always add or remove dependencies/frameworks with the package manager or its CLI (`npm install <pkg>`, `npm install -D <pkg>`, `npx`, `ng add`, `npm uninstall`, `npm pkg set` for scripts, etc.) — never hand-write dependency entries into `package.json` or edit lockfiles by hand. Let the tool resolve versions, update the lockfile, and run install hooks. (Applies to every ecosystem's manifest, not just npm.)
+
+## AI Layer
+
+Beyond the memory bank, this repo runs the **AI Layer** (methodology piece #6, `docs/ai-layer.md`) — navigation and guardrails for a substantial codebase. Components:
+
+- **CLAUDE.md hierarchy** — a lean `CLAUDE.md` in each package under `packages/` (shared-types · model-router · api · worker · dashboard), loaded only when working there. Read the package's own `CLAUDE.md` before editing it.
+- **Glob-scoped skills** (`.claude/skills/`) — guardrails that surface for matching files: `artifex-invariants` (worker/meta-agents), `artifex-schemas` (shared-types/TypeBox), `artifex-ledger` (append-only ledger/migrations), `artifex-model-tiering` (model-router), `artifex-tdd` (repo-wide test discipline).
+- **Hooks** (`.claude/hooks/`, wired in `.claude/settings.json`) — SessionStart surfaces current state + tasktracker readiness; a self-improving Stop reminds to sync the memory bank / log tasktracker insights.
+- **Codebase-search MCP** (`tools/codebase-search/`, in `.mcp.json`) — AST symbol/def/reference search over the TS; prefer it over grep for "where is X defined/used" once code exists.
+- **Explorer subagent** (`.claude/agents/artifex-explorer.md`) — read-only codebase Q&A that keeps exploration out of the main context.
+
+The invariants these guardrails enforce are canonical in `ARCHITECTURE.md`; the tasktracker `tt-*` discipline (active task, requirement→task links) is part of the layer, not a parallel scheme.
 
 ## Rules Dependency
 
