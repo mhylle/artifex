@@ -29,10 +29,6 @@ jobs:
 
       - name: Unit tests (workspaces)
         run: npm test
-        env:
-          # ubuntu-latest ships google-chrome; the dashboard's Karma launcher
-          # (ChromeHeadlessNoSandbox) uses this to run headless.
-          CHROME_BIN: google-chrome
 
       - name: Integration tests (testcontainers — boots Postgres + Redis)
         run: npm run test:integration
