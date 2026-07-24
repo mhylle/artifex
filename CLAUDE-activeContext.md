@@ -2,11 +2,12 @@
 
 > Current state, goals, and next-phase options. Update at the end of any significant session. This file is the authoritative "where we are".
 
-**Last updated:** 2026-07-22
+**Last updated:** 2026-07-24
 
 ## Where We Are
 
-- **Stage:** Design complete + **v0 plan formed — Tasktracker readiness `ready`** (brainstorm / requirements / architecture / plan all satisfied). No implementation code yet. Security/perf still deferred. **Next: build P0.**
+- **Stage:** Design complete + v0 plan `ready` + **P0 built & verified (2026-07-24) — first implementation code exists.** Security/perf still deferred. **Next: P1 (TypeBox shared-types schemas).**
+- **P0 scaffold (phase `fb7ebb14-…`, complete):** all-TypeScript npm-workspaces monorepo — `@artifex/shared-types` · `@artifex/model-router` · `@artifex/worker` (ESM libs, vitest) · `@artifex/api` (NestJS 11, jest) · `@artifex/dashboard` (**Angular 20** — pinned; Angular 22 needs Node ≥24.15, toolchain is 24.14). Strict `tsconfig.base.json`, `.nvmrc`=24, fan-out root scripts (`build`/`test`/`typecheck`/`test:integration`). `docker-compose.yml` (Postgres+pgvector pg17 · Redis 7 · Ollama, all healthchecked; pgvector initdb) + `.env.example` (host-port defaults 5433/6379/11434, overridable via gitignored `.env`). Root testcontainers harness (`test/integration/`). CI at `.github/workflows/ci.yml` (install→build→typecheck→unit→integration). DoD verified: full green sweep + `docker compose up --wait` all healthy + harness 3/3. **No business logic; no invariants implemented (none violated).**
 - **v0 plan (ADR-0003):** 11 approved requirements (R1–R11) with 26 acceptance criteria; 14 TDD-shaped phases (P0 infra → P1 schemas → P2 ledger → P3 router → P4 constitution/tier → P5–P8 meta-agents → P9 loop → P10 API → P11 learning seam → P12 dashboard → P13 dogfood), each linked to its requirement. Schema encoding = **TypeBox** (ADR-0004). v0 dogfood mission = "structured report from 2–3 sub-questions". Tier-2 = attempt local 32B with Claude fallback via the admission gate.
 - **AI Layer in place (2026-07-23):** per-package `CLAUDE.md` hierarchy · SessionStart/Stop hooks (`.claude/settings.json`) · 5 glob-scoped guardrail skills (`.claude/skills/`) · a working ts-morph **codebase-search MCP** (`tools/codebase-search/`, in `.mcp.json`; `find_symbol`/`find_references`/`list_exports`, auto-builds on `npm install`) · read-only `artifex-explorer` subagent. Guardrails now steer the build. **Convention (also in CLAUDE.md + memory): install deps via the package-manager CLI, never hand-edit `package.json`.**
 - **Stack decided (ADR-0001):** all-TypeScript. Angular dashboard · NestJS control plane · **separate** TS agent-runtime worker (BullMQ) · PostgreSQL + pgvector as the whole Memory Fabric · Redis/BullMQ job queue · a provider-neutral **Model Router** dispatching to Claude + local OpenAI-compatible models (Ollama/vLLM).
@@ -21,12 +22,14 @@
 
 ## Next-Phase Options (user's call)
 
-1. **Start building — `tt-implement-plan` (or `tt-implement-phase` on P0)** — begin execution with P0 (workspace & infra scaffold), then P1 (the TypeBox schemas — the foundation everything feeds). Each phase is TDD-shaped (RED tests from the ACs before implementation).
-2. **Review/adjust the plan first** — the 14 phases and 11 requirements are in Tasktracker; reorder, split, or add before writing code.
+1. **Continue building — `tt-implement-phase` on P1 (TypeBox schemas)** — the foundation everything feeds (contract, ledger event, evidence bundle, verdict, capability manifest; ADR-0004). TDD-shaped: RED tests from R1's ACs first. `@artifex/shared-types` already has the placeholder + a passing vitest test to grow from.
+2. **Review/adjust the plan first** — the remaining P2–P13 phases and 11 requirements are in Tasktracker; reorder, split, or add before continuing.
 
 ## Known Loose Ends
 
 - The two brainstorms are frozen in Tasktracker but the functional one also lives as markdown (`docs/brainstorms/`); project `brainstormPolicy` is `optional`.
-- Public open-source repo has no CONTRIBUTING / issue templates / CI yet — add when real code lands.
+- CI now exists (`.github/workflows/ci.yml`); still no CONTRIBUTING / issue templates — add later.
+- **Deferred from P0:** wire the root workspace tsconfig path aliases into `tools/codebase-search` `loadProject()` so `find_references` resolves cross-package alias imports (do once P1 introduces real cross-package imports).
+- 3 moderate npm-audit advisories from Angular's transitive toolchain — not force-fixed (breaking); revisit on an Angular bump.
 - No requirements exist yet; genesis phase `84676257-…` is an unlinked container.
 - ADR-0002 parking lot: prod concurrency/hardware sizing, per-tier cost-weight calibration, catalog-A/B harness, Tier-2-on-24GB viability.

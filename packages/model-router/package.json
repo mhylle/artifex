@@ -1,0 +1,17 @@
+{
+  "name": "@artifex/model-router",
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "license": "Apache-2.0",
+  "type": "module",
+  "private": true,
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ]
+}

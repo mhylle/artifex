@@ -1,0 +1,68 @@
+# Artifex local infrastructure (dev).
+# Memory Fabric (Postgres + pgvector), Job Queue (Redis), and the local model
+# backend (Ollama). Business services (api, worker) are NOT here yet — this is
+# the P0 infra scaffold. Copy .env.example -> .env, then: `docker compose up -d`.
+name: artifex
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-artifex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-artifex}
+      POSTGRES_DB: ${POSTGRES_DB:-artifex}
+    # Host port defaults to 5433 to avoid clashing with a locally-installed
+    # Postgres (which commonly owns 5432). The container still serves on 5432;
+    # override the host side with POSTGRES_PORT in .env.
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-artifex} -d ${POSTGRES_DB:-artifex}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # Owner hardware is a single 24 GB GPU. For GPU inference uncomment below
+    # (requires the NVIDIA Container Toolkit); CPU-only works for scaffold/dev.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  pgdata:
+  redisdata:
+  ollama_models:

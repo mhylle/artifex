@@ -1,0 +1,40 @@
+{
+  "name": "artifex",
+  "version": "0.0.0",
+  "description": "Artifex — self-assembling, self-improving multi-agent system (all-TypeScript monorepo)",
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mhylle/artifex.git"
+  },
+  "keywords": [],
+  "author": "Martin Hylleberg",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/mhylle/artifex/issues"
+  },
+  "homepage": "https://github.com/mhylle/artifex#readme",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.0.4",
+    "@testcontainers/redis": "^12.0.4",
+    "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0",
+    "ioredis": "^5.11.1",
+    "pg": "^8.22.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
