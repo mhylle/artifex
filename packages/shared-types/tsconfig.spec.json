@@ -1,0 +1,12 @@
+{
+  // The build config excludes tests and fixtures so `dist` stays clean — which
+  // would leave them typechecked by nothing (vitest transpiles without checking).
+  // This config type-checks them, which is what makes the `satisfies` assertions
+  // in the fixtures a real proof that each schema's inferred type is usable.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
