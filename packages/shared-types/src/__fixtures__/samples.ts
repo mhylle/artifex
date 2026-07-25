@@ -14,6 +14,7 @@ import type {
   EvidenceBundle,
   LedgerEvent,
   LedgerEventInput,
+  ModelCatalogEntry,
   TaskContract,
   Verdict,
 } from '../index.js';
@@ -131,6 +132,22 @@ export function validVerdict(): Verdict {
     redFlags: [],
     issuedAt: AT,
   } satisfies Verdict;
+}
+
+export function validModelCatalogEntry(): ModelCatalogEntry {
+  return {
+    logicalTier: 1,
+    provider: 'ollama',
+    model: 'qwen2.5:14b',
+    params: { temperature: 0.2 },
+    contextWindow: 32_768,
+    costWeight: 1,
+    capabilities: ['structured-output', 'tool-calling'],
+    quantization: 'q4_K_M',
+    admitted: true,
+    version: 1,
+    updatedAt: AT,
+  } satisfies ModelCatalogEntry;
 }
 
 export function validCapabilityManifest(): CapabilityManifest {

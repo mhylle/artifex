@@ -1,0 +1,11 @@
+{
+  // The build config excludes tests so `dist` stays clean, which would leave
+  // them typechecked by nothing (vitest transpiles without checking). This
+  // config checks them. Mirrors packages/shared-types.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

@@ -19,4 +19,5 @@ export * from './ledger-event.js';
 export * from './evidence-bundle.js';
 export * from './verdict.js';
 export * from './capability-manifest.js';
+export * from './model-catalog.js';
 export * from './validation.js';

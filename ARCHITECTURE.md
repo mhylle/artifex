@@ -1,6 +1,6 @@
 # Artifex — Architecture
 
-> **This describes the *intended* architecture.** Artifex is at the design stage — there is no implementation code yet. This document is the target that code should be built toward, and the reference for reviewing whether a change fits the design.
+> **This describes the *intended* architecture.** Implementation has started and is early — the workspace, the shared schemas, and the Memory Fabric data layer exist; the meta-agents and the mission loop do not yet. This document remains the target that code is built toward, and the reference for reviewing whether a change fits the design.
 >
 > **Sources of truth:** the functional design in [`solution/`](solution/) (rendered dossier), the decisions in [`docs/decisions/`](docs/decisions/) ([ADR-0001](docs/decisions/ADR-0001-implementation-stack.md), [ADR-0002](docs/decisions/ADR-0002-model-tiering-and-inference.md)), and the Tasktracker project **Artifex** (system of record for components, relationships, and requirements). If this file and an ADR disagree, the ADR wins and this file should be fixed.
 
@@ -168,4 +168,17 @@ These come from the functional design and the constitution — a PR that violate
 
 ## Where things live in the repo (planned)
 
-No code yet. When it lands, the intended shape is one all-TypeScript workspace: shared types (contract + ledger event schemas — the foundation everything else depends on), the Angular `dashboard`, the NestJS `api`, the `worker` (meta-layer + swarm), and the `model-router`. Contributions should trace to a requirement/ADR and preserve the invariants above.
+One all-TypeScript npm workspace under `packages/`:
+
+| Package | Holds |
+|---|---|
+| `shared-types` | The TypeBox contract + ledger-event schemas — the foundation everything else depends on. Dependency-graph leaf; no I/O. |
+| `memory-fabric` | Migrations + repositories for the Memory Fabric stores (audit ledger, model catalog). Shared by `api` and `worker` — see [ADR-0005](docs/decisions/ADR-0005-memory-fabric-package.md). |
+| `model-router` | Provider-neutral dispatch; resolves a logical tier to a concrete model. |
+| `api` | The NestJS control plane. |
+| `worker` | The agent runtime — meta-layer + swarm. |
+| `dashboard` | The Angular cockpit. |
+
+Dependency direction runs one way: `api` and `worker` both depend on `memory-fabric` and `shared-types`; **`api` never depends on `worker`** — the control plane and the agent runtime are separate processes.
+
+Contributions should trace to a requirement/ADR and preserve the invariants above.
