@@ -155,6 +155,22 @@ These come from the functional design and the constitution — a PR that violate
 6. **No peer chatter.** Agents exchange context only through the Context Broker, and every exchange is logged.
 7. **Effort is a currency.** Missions and tasks carry budget floors and ceilings; the fitness function is value-per-effort.
 
+## The four agentic patterns ([ADR-0006](docs/decisions/ADR-0006-agentic-patterns.md))
+
+Artifex is a graph of self-improving agents, and four patterns are treated as load-bearing. Two of them the design already carries; two are acknowledged gaps with requirements against them. They are named here so changes can be tested against them rather than drifting.
+
+| Pattern | Status | Where it lives |
+|---|---|---|
+| **Planning** — decompose before executing | **Core, and exceeded** | Orchestrator recursive decomposition; invariant #2; the plan is a typed artifact (`TaskContract`). Artifex goes further than "plan first": **Gate A verifies the plan itself** before any execution, and spec faults jump straight to re-decomposition rather than retrying |
+| **Multi-agent collaboration** — run a team, not one agent | **Core** | Writer = Worker Swarm · critic = **Reviewer** (a separate meta-agent, not a worker mode) · tester = Tier-0 mechanical Gate B pre-checks + the non-empty `validationHarness`. Orchestrator plans, Agent Creator staffs, Learning Agent improves |
+| **Reflection** — critique your own output before submitting | **Gap → R12** | Today's first correction opportunity is a Gate B rejection, which is expensive twice (review often runs a tier *above* the worker, then costs an escalation rung). A same-tier self-pass is better value-per-effort under invariant #7 |
+| **Tool use** — act, don't only think | **Gap → R13** | Agents can reason and consult context, but cannot act: `entitlements`/`contextEntitlements` grant **context**, the Context Broker is the sole **context** channel, and `EvidenceBundle.actions` is prose *about* what was done. Planned as an **Action Broker** — a sibling of the Context Broker |
+
+Two constraints matter more than the patterns themselves, because they are where a well-meaning implementation would break the constitution:
+
+- **Self-review is never self-verification.** Reflection improves a deliverable; it emits no verdict and no task skips Gate B (invariants #3, #4). It critiques against `acceptanceCriteria` and **never** against the `verificationPlan`, which is deliberately withheld from the worker — reflecting against the grader is how an agent learns to game it.
+- **Tool use is brokered, never direct.** An unmediated tool call is an unlogged side effect, which breaks invariant #1. Every invocation is entitlement-scoped by the contract and appended to the ledger. This gives `blastRadius` a second job: it already drives verification depth and model tier, and must also bound *which tools are reachable*, with the autonomy dial gating the ones that need a human first.
+
 ## A mission, end to end
 
 1. **Intake** (Control Plane API) — contract-first dialogue produces *task zero*: success criteria, boundaries, autonomy dial, budget. Enqueued.
