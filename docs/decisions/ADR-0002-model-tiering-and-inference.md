@@ -4,6 +4,7 @@
 **Date:** 2026-07-22
 **Deciders:** Martin Hylleberg (with Claude as advisor)
 **Supersedes:** the "Open" list in [ADR-0001](ADR-0001-implementation-stack.md).
+**Amended 2026-07-26 (P3):** the named v0 workhorse is no longer the Qwen2.5 family — the local candidates are now **Qwen3.5** and **Gemma 4**. This changes no decision in this ADR: tier remains a computed policy, models remain catalog *data*, and the admission gate remains the only way in. The model names below are illustrative of a generation, not a commitment — which is exactly the swappability this ADR argued for. See [ADR-0008](ADR-0008-admission-gate-semantic-probes.md) for what P3 learned about what the gate must actually test.
 **Source:** Tasktracker brainstorm "Artifex — Technical/Model Pass (on ADR-0001)" (`9885e5b0-e711-427d-8e75-13456334b9af`, frozen).
 
 ## Context

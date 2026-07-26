@@ -188,7 +188,7 @@ export function validModelCatalogEntry(): ModelCatalogEntry {
   return {
     logicalTier: 1,
     provider: 'ollama',
-    model: 'qwen2.5:14b',
+    model: 'gemma4:12b',
     params: { temperature: 0.2 },
     contextWindow: 32_768,
     costWeight: 1,

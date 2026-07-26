@@ -139,7 +139,7 @@ Each agent's model is **computed**, not fixed per agent — a 4-tier ladder keye
 | Tier | Model | Used for |
 |---|---|---|
 | **0** | none (no LLM) | schema / mechanical checks, mechanical Gate B pre-checks |
-| **1** | local small (Qwen2.5 7B–14B) | the bulk of atomic worker tasks — caught by voting/verification |
+| **1** | local small (Qwen3.5 / Gemma 4 class) | the bulk of atomic worker tasks — caught by voting/verification |
 | **2** | local mid (~32B quantized) | Agent Creator authoring, Gate A, mid-blast semantic review, fold-up |
 | **3** | frontier (Claude) | root decomposition, high-blast semantic review, Learning reasoning, surrender |
 

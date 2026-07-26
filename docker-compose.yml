@@ -52,15 +52,18 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    # Owner hardware is a single 24 GB GPU. For GPU inference uncomment below
-    # (requires the NVIDIA Container Toolkit); CPU-only works for scaffold/dev.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    # Owner hardware is a single 24 GB GPU (RTX 3090). Enabled in P3: the
+    # structured-output admission gate runs real local models, and constrained
+    # JSON decoding on CPU is slow enough to be unusable — a 9B candidate did not
+    # finish two probes in ten minutes. Requires the NVIDIA Container Toolkit; if
+    # a contributor lacks it, comment this block out again and expect CPU speeds.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   pgdata:
