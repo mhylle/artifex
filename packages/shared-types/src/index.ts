@@ -16,6 +16,7 @@
 export * from './common.js';
 export * from './contract.js';
 export * from './ledger-event.js';
+export * from './reflection.js';
 export * from './evidence-bundle.js';
 export * from './verdict.js';
 export * from './capability-manifest.js';

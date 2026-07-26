@@ -7,14 +7,17 @@ import {
   validLedgerEvent,
   validLedgerEventInput,
   validModelCatalogEntry,
+  validReflectionRecord,
   validTaskContract,
   validVerdict,
+  validWorkerContractView,
 } from './__fixtures__/samples.js';
 import { CapabilityManifestSchema } from './capability-manifest.js';
-import { TaskContractSchema } from './contract.js';
+import { TaskContractSchema, WorkerContractViewSchema } from './contract.js';
 import { EvidenceBundleSchema } from './evidence-bundle.js';
 import { LedgerEventInputSchema, LedgerEventSchema } from './ledger-event.js';
 import { ModelCatalogEntrySchema } from './model-catalog.js';
+import { ReflectionRecordSchema } from './reflection.js';
 import { toJsonSchema, validate } from './validation.js';
 import { VerdictSchema } from './verdict.js';
 
@@ -34,6 +37,8 @@ const SHARED_SCHEMAS: ReadonlyArray<readonly [string, TSchema, () => unknown]> =
   ['Verdict', VerdictSchema, validVerdict],
   ['CapabilityManifest', CapabilityManifestSchema, validCapabilityManifest],
   ['ModelCatalogEntry', ModelCatalogEntrySchema, validModelCatalogEntry],
+  ['WorkerContractView', WorkerContractViewSchema, validWorkerContractView],
+  ['ReflectionRecord', ReflectionRecordSchema, validReflectionRecord],
 ];
 
 /** Simulates the wire trip: what we hand the model, and what it hands back. */

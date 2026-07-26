@@ -9,7 +9,15 @@
 import { Type } from '@sinclair/typebox';
 import type { Static } from '@sinclair/typebox';
 
-import { IdSchema, TextSchema, TimestampSchema } from './common.js';
+import {
+  ActionOutcomeSchema,
+  IdSchema,
+  SlugIdSchema,
+  TextSchema,
+  TimestampSchema,
+  ToolRiskClassSchema,
+} from './common.js';
+import { ReflectionRecordSchema } from './reflection.js';
 
 export const ConsultedSourceSchema = Type.Object(
   {
@@ -23,6 +31,38 @@ export const ConsultedSourceSchema = Type.Object(
   },
 );
 
+/**
+ * One brokered tool invocation (R13).
+ *
+ * Prose was not verifiable: a reviewer could only believe a sentence claiming
+ * the agent searched. A structured record lets the Reviewer check the claim and
+ * lets the Learning Agent mine which tools actually pay off.
+ *
+ * `viaBrokerGrantId` is **not** nullable — and that asymmetry with
+ * `ConsultedSource` is the point. Context can be granted inline by the contract,
+ * but there is no such thing as an unbrokered action: an unmediated tool call
+ * would be an unlogged side effect, and the ledger must be the complete record
+ * of what happened (invariant #1).
+ */
+export const ActionRecordSchema = Type.Object(
+  {
+    actionId: IdSchema,
+    toolId: SlugIdSchema,
+    riskClass: ToolRiskClassSchema,
+    arguments: Type.Record(Type.String(), Type.Unknown()),
+    /** A digest, not the payload — bundles stay reviewable and bounded. */
+    resultDigest: TextSchema,
+    viaBrokerGrantId: TextSchema,
+    outcome: ActionOutcomeSchema,
+    invokedAt: TimestampSchema,
+  },
+  {
+    additionalProperties: false,
+    description: 'One brokered tool invocation, with the grant that authorised it.',
+  },
+);
+export type ActionRecord = Static<typeof ActionRecordSchema>;
+
 export const EvidenceBundleSchema = Type.Object(
   {
     bundleId: IdSchema,
@@ -30,9 +70,20 @@ export const EvidenceBundleSchema = Type.Object(
     agentId: IdSchema,
     /** The work product itself; its shape is the task's business, not the schema's. */
     deliverable: Type.Unknown(),
-    actions: Type.Array(TextSchema, { minItems: 1 }),
+    /**
+     * Brokered invocations, not prose. No `minItems`: a task that only reasons
+     * legitimately takes no actions, and an empty list is an honest record of
+     * that — unlike the old free-text field, which forced a narrative.
+     */
+    actions: Type.Array(ActionRecordSchema),
     consulted: Type.Array(ConsultedSourceSchema),
     assumptions: Type.Array(TextSchema),
+    /**
+     * Present-and-nullable rather than optional (the `parentTaskId` convention):
+     * "this work was not self-critiqued" is a fact the Reviewer and the Learning
+     * Agent must be able to read, not a field that might be missing.
+     */
+    reflection: Type.Union([ReflectionRecordSchema, Type.Null()]),
     effortSpent: Type.Number({ minimum: 0 }),
     producedAt: TimestampSchema,
   },

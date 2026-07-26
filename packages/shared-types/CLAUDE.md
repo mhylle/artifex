@@ -1,6 +1,13 @@
 # packages/shared-types — CLAUDE.md
 
-**The foundation everything depends on.** TypeBox schemas for the task/mission **contract**, **ledger event**, **evidence bundle**, **verdict**, and **capability manifest**. This is the leaf of the dependency graph — it imports from no other workspace package.
+**The foundation everything depends on.** TypeBox schemas for the task/mission **contract** (+ the worker-facing **contract view**), **ledger event**, **evidence bundle** (incl. structured **action records**), **reflection record**, **verdict**, **capability manifest**, and **model catalog entry**. This is the leaf of the dependency graph — it imports from no other workspace package.
+
+## Two structural guarantees live here, not in calling code
+
+- **`WorkerContractView` withholds the verification plan by construction** (`Type.Omit` + `additionalProperties: false`), so a view still carrying `verificationPlan` *fails validation*. A worker that can read its own rubric learns to satisfy the rubric instead of the objective.
+- **`ReflectionRecord` declares no `gate`, `outcome` or `verdictId`**, and being a closed object it cannot acquire them at runtime. Self-critique is structurally incapable of being mistaken for a verdict — review independence (invariants #3/#4) survives contact with reflection. See [ADR-0007](../../docs/decisions/ADR-0007-r12-r13-sequencing-and-contract-surface.md).
+
+Related: `ActionRecord.viaBrokerGrantId` is **not** nullable (unlike `ConsultedSource`) — context can be granted inline, but there is no unbrokered action.
 
 ## The one rule that defines this package (ADR-0004)
 

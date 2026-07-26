@@ -119,6 +119,40 @@ export const VerificationDepthSchema = StringEnum(VERIFICATION_DEPTHS, {
 });
 export type VerificationDepth = Static<typeof VerificationDepthSchema>;
 
+/**
+ * How consequential a tool is. Reading the world, computing over it, and
+ * changing it are three different risks, so they are three different classes
+ * (ADR-0007) — the three tool kinds ADR-0006 names: search, code execution, APIs.
+ */
+export const TOOL_RISK_CLASSES = ['read', 'compute', 'write'] as const;
+export const ToolRiskClassSchema = StringEnum(TOOL_RISK_CLASSES, {
+  description: 'Consequence class of a tool; bounded by blast radius, gated by the autonomy dial.',
+});
+export type ToolRiskClass = Static<typeof ToolRiskClassSchema>;
+
+/**
+ * How a brokered invocation ended. `denied` is a first-class outcome, not an
+ * absence: a refused tool call is logged, never silently dropped.
+ */
+export const ACTION_OUTCOMES = ['ok', 'denied', 'error'] as const;
+export const ActionOutcomeSchema = StringEnum(ACTION_OUTCOMES, {
+  description: 'Result of a brokered tool invocation; `denied` is logged, never silent.',
+});
+export type ActionOutcome = Static<typeof ActionOutcomeSchema>;
+
+/**
+ * A worker's own read on one of its acceptance criteria during self-critique.
+ *
+ * Deliberately NOT the Verdict vocabulary (`pass`/`fail`): reflection improves a
+ * deliverable, it never rules on one. Sharing the words would be the first step
+ * toward sharing the authority (ADR-0007).
+ */
+export const SELF_ASSESSMENTS = ['met', 'unmet', 'uncertain'] as const;
+export const SelfAssessmentSchema = StringEnum(SELF_ASSESSMENTS, {
+  description: "A worker's own read on a criterion during self-critique. Never a verdict.",
+});
+export type SelfAssessment = Static<typeof SelfAssessmentSchema>;
+
 /** Who performed an act. Every ledger event is attributable. */
 export const ACTOR_KINDS = [
   'orchestrator',
@@ -126,6 +160,7 @@ export const ACTOR_KINDS = [
   'reviewer',
   'learning_agent',
   'context_broker',
+  'action_broker',
   'worker',
   'human',
   'system',

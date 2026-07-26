@@ -20,6 +20,7 @@ import {
   SlugIdSchema,
   TextSchema,
   TimestampSchema,
+  ToolRiskClassSchema,
   VerificationDepthSchema,
 } from './common.js';
 
@@ -57,12 +58,42 @@ export const BoundariesSchema = Type.Object(
 );
 
 /**
+ * One tool this task may invoke, and how consequential it is.
+ *
+ * Tool grants live on the contract and *only* on the contract (ADR-0007): the
+ * level above decides what a task may do, exactly as it decides what a task may
+ * know. Mirroring these onto the capability manifest would create a second
+ * authority over the same question.
+ *
+ * These are deliberately not folded into `entitlements` — reading the world and
+ * acting on it are different channels with different governance (ADR-0006).
+ */
+export const ToolEntitlementSchema = Type.Object(
+  {
+    entitlementId: SlugIdSchema,
+    toolId: SlugIdSchema,
+    riskClass: ToolRiskClassSchema,
+    /** What the grant covers — e.g. which corpus a search may reach. */
+    scope: TextSchema,
+  },
+  {
+    // No `$id` on embedded sub-schemas — ajv rejects registering an id twice.
+    additionalProperties: false,
+    description: 'A grant to invoke one tool, with the consequence class it carries.',
+  },
+);
+export type ToolEntitlement = Static<typeof ToolEntitlementSchema>;
+
+/**
  * Everything the worker is entitled to, plus parent-made cross-cutting choices
  * it must honour — the decisions that otherwise surface at fold-up, expensively.
  */
 export const InputsSchema = Type.Object(
   {
+    /** Context grants — what this task may *know*. Served via the Context Broker. */
     entitlements: Type.Array(TextSchema),
+    /** Tool grants — what this task may *do*. Served via the Action Broker. */
+    toolEntitlements: Type.Array(ToolEntitlementSchema),
     pinnedDecisions: Type.Array(
       Type.Object(
         { id: SlugIdSchema, decision: TextSchema },
@@ -156,3 +187,24 @@ export const TaskContractSchema = Type.Object(
   },
 );
 export type TaskContract = Static<typeof TaskContractSchema>;
+
+/**
+ * The contract as an executing worker is allowed to see it (R12 AC-2).
+ *
+ * The verification plan is withheld — a worker that can read its own grading
+ * rubric learns to satisfy the rubric rather than the objective, which is
+ * exactly what the self-critique pass must not become. `contract.ts` previously
+ * left this to whoever served the contract; deriving a closed view makes it a
+ * *schema guarantee* instead: a view still carrying `verificationPlan` fails
+ * validation rather than depending on someone remembering to strip it.
+ *
+ * Note the distinct `$id` — `validation.ts` compiles against one module-level
+ * ajv instance, and re-registering `TaskContract` would throw.
+ */
+export const WorkerContractViewSchema = Type.Omit(TaskContractSchema, ['verificationPlan'], {
+  $id: 'WorkerContractView',
+  additionalProperties: false,
+  description:
+    'A task contract with the verification plan withheld — what a worker may actually see.',
+});
+export type WorkerContractView = Static<typeof WorkerContractViewSchema>;

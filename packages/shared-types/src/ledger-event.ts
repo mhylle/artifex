@@ -20,6 +20,18 @@ export const LEDGER_EVENT_FAMILIES = [
   'contract',
   'staffing',
   'execution',
+  /**
+   * Brokered tool invocations and denials (R13). Its own family rather than an
+   * `action.*` prefix under `execution`, so "reproduce every action this mission
+   * took" is a family lookup instead of a string scan — querying, not archaeology.
+   *
+   * Reflection deliberately stays under `execution`: an action is a side effect
+   * on the world with its own governance, a self-critique is an internal step.
+   * Keeping it out of `verification` leaves that family exclusively the
+   * Reviewer's, which puts "self-review is never self-verification" in the
+   * taxonomy itself.
+   */
+  'action',
   'verification',
   'economic',
   'escalation',

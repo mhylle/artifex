@@ -10,13 +10,16 @@
  * Excluded from the build (see tsconfig.json) — test support only.
  */
 import type {
+  ActionRecord,
   CapabilityManifest,
   EvidenceBundle,
   LedgerEvent,
   LedgerEventInput,
   ModelCatalogEntry,
+  ReflectionRecord,
   TaskContract,
   Verdict,
+  WorkerContractView,
 } from '../index.js';
 
 // Fixed ids/timestamps — fixtures must be deterministic.
@@ -49,6 +52,14 @@ export function validTaskContract(): TaskContract {
     },
     inputs: {
       entitlements: ['The mission brief', 'The shared source list'],
+      toolEntitlements: [
+        {
+          entitlementId: 'te-1',
+          toolId: 'web.search',
+          riskClass: 'read',
+          scope: 'The entitled source list only.',
+        },
+      ],
       pinnedDecisions: [
         { id: 'pd-1', decision: 'Cite sources as "Author (Year), URL".' },
       ],
@@ -96,18 +107,57 @@ export function validLedgerEvent(): LedgerEvent {
   } satisfies LedgerEvent;
 }
 
+export function validWorkerContractView(): WorkerContractView {
+  // Built by withholding, so the fixture cannot drift from the full contract.
+  const { verificationPlan: _withheld, ...view } = validTaskContract();
+
+  return view satisfies WorkerContractView;
+}
+
+export function validActionRecord(): ActionRecord {
+  return {
+    actionId: '5e4d3c2b-1a09-4f8e-7d6c-5b4a39281706',
+    toolId: 'web.search',
+    riskClass: 'read',
+    arguments: { query: 'seat adoption rate Q1 2026', limit: 5 },
+    resultDigest: '5 hits; top: vendor report Q1 2026 (sha256:9f2c4b…)',
+    viaBrokerGrantId: 'grant-91',
+    outcome: 'ok',
+    invokedAt: AT,
+  } satisfies ActionRecord;
+}
+
+export function validReflectionRecord(): ReflectionRecord {
+  return {
+    reflectionId: '2c1b0a9f-8e7d-4c6b-9a58-4736251409e8',
+    priorDraftEventId: 'f0e1d2c3-b4a5-4968-8776-5a4b3c2d1e0f',
+    critiques: [
+      { criterionId: 'ac-1', assessment: 'met', note: 'Rate and date are both stated.' },
+      {
+        criterionId: 'ac-2',
+        assessment: 'unmet',
+        note: 'The 34% claim carried no citation; re-searched and cited the vendor report.',
+      },
+    ],
+    revised: true,
+    effortSpent: 1,
+    performedAt: AT,
+  } satisfies ReflectionRecord;
+}
+
 export function validEvidenceBundle(): EvidenceBundle {
   return {
     bundleId: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
     taskId: TASK_ID,
     agentId: AGENT_ID,
     deliverable: { answer: 'Adoption reached 34% as of Q1 2026.', citations: 2 },
-    actions: ['Restated the contract.', 'Searched the entitled source list.', 'Drafted the answer.'],
+    actions: [validActionRecord()],
     consulted: [
       { source: 'knowledge-commons:adoption-metrics', viaBrokerGrantId: 'grant-77' },
       { source: 'mission-brief', viaBrokerGrantId: null },
     ],
     assumptions: ['"Adoption" means paid seats, per the pinned decision.'],
+    reflection: validReflectionRecord(),
     effortSpent: 4,
     producedAt: AT,
   } satisfies EvidenceBundle;
