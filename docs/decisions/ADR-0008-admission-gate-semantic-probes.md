@@ -4,6 +4,7 @@
 **Date:** 2026-07-26
 **Deciders:** Martin Hylleberg (with Claude as advisor)
 **Context:** P3 (Model Router & structured-output admission gate, R3), building the gate ADR-0002 requires.
+**Amended 2026-07-27 (P3.5):** admission is granted **to a tier**, not in the abstract — probes are selected by the tier a candidate applies for, and a tier with no probes raises rather than admitting. See *Tier-scoped admission* below.
 
 ## Context
 
@@ -55,6 +56,16 @@ The gate only began discriminating once it tested meaning.
 - The gate is now sensitive to prompt wording, since a check like "the verdict answers the prompt" ties to what the probe asked. Probe prompts are part of the contract and should change deliberately.
 - ADR-0002's named workhorse moves off Qwen2.5 to the Qwen3.5 / Gemma 4 generation (amendment noted there). No decision in ADR-0002 changes: models remain data.
 - Two verification traps found alongside, both producing verdicts that look real and mean nothing — recorded as insights: `createOpenAICompatible` needs `supportsStructuredOutputs: true` or it silently drops the schema (every candidate then fails for a reason unrelated to the model), and the compose Ollama needs its GPU block enabled or a 9B candidate cannot finish two probes in ten minutes.
+
+## Amendment — tier-scoped admission (P3.5, 2026-07-27)
+
+The gate above probed every candidate with `Verdict` and `CapabilityManifest`. Both are **meta-agent artifacts**: a Verdict is Reviewer output (Tier 2–3), a manifest is Agent Creator output (Tier 2). ADR-0002 puts a small local model at **Tier 1** — "the bulk of atomic worker tasks" — which emits neither. The gate was refusing Tier-1 candidates for failing a job they would never be given, and `qwen3.5:2b` was refused on exactly that basis.
+
+**Decision:** probes declare a `logicalTier` and are selected by the tier the candidate applies for. Tier 1 is judged on `EvidenceBundle` — what an atomic worker actually produces — with semantic checks on *instruction-following* (the deliverable carries the field the prompt demanded; the bundle accounts for the effort it spent) rather than on meta-agent reasoning. Tier 2 keeps the original probes.
+
+**A tier with no probes raises `NoProbesForTierError`** rather than returning `admitted: true`. Vacuous truth is the same rubber stamp this ADR was written to prevent, and it is indistinguishable from a real pass. Tier 0 is no-LLM, so it legitimately has none.
+
+**What this exposed, and did not fix.** Re-running admission showed the verdicts **do not replicate**: `qwen3.5:2b` was admitted 2 of 3 Tier-1 runs, and admitted at Tier 2 where the P3 run had refused it. The gate takes a single sample of a stochastic process and records it as a permanent catalog fact. That is tracked as an open high-severity defect (`d678cd8c`) with three candidate resolutions, and is deliberately left undecided here because it changes what `admitted` *means*. It also means the single refusal that motivated this amendment was itself weak evidence — the tier-scoping argument stands on the ADR-0002 tier definitions, not on that one run.
 
 ## Related
 

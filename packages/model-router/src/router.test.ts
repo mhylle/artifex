@@ -8,7 +8,7 @@
 import type { ModelCatalogEntry } from '@artifex/shared-types';
 import { describe, expect, it } from 'vitest';
 
-import { ADMISSION_PROBES, runAdmissionGate } from './admission-gate.js';
+import { ADMISSION_PROBES, probesForTier, runAdmissionGate } from './admission-gate.js';
 import { NoModelForTierError } from './errors.js';
 import { ModelRouter } from './router.js';
 import type { CatalogResolver } from './router.js';
@@ -80,7 +80,8 @@ describe('R3 AC-2 — the admission gate refuses a model that cannot hold a real
   it('refuses a candidate returning schema-invalid output', async () => {
     const result = await runAdmissionGate({
       candidate: { provider: 'ollama', model: 'tiny-liar' },
-      probes: ADMISSION_PROBES,
+      logicalTier: 2,
+      probes: probesForTier(2),
       // Returns something plausible-looking but not schema-valid.
       backend: { async generate() { return { nope: true }; } },
     });
@@ -93,7 +94,8 @@ describe('R3 AC-2 — the admission gate refuses a model that cannot hold a real
   it('DISTRACTOR: a candidate returning schema-valid output passes', async () => {
     const result = await runAdmissionGate({
       candidate: { provider: 'ollama', model: 'honest' },
-      probes: ADMISSION_PROBES,
+      logicalTier: 2,
+      probes: probesForTier(2),
       backend: { async generate({ probe }) { return probe.sample(); } },
     });
 
@@ -105,7 +107,8 @@ describe('R3 AC-2 — the admission gate refuses a model that cannot hold a real
     // A crashed probe must never read as "no failures recorded".
     const result = await runAdmissionGate({
       candidate: { provider: 'ollama', model: 'exploder' },
-      probes: ADMISSION_PROBES,
+      logicalTier: 2,
+      probes: probesForTier(2),
       backend: { async generate() { throw new Error('connection refused'); } },
     });
 
@@ -117,7 +120,8 @@ describe('R3 AC-2 — the admission gate refuses a model that cannot hold a real
     // an empty findings array. Shape-only validation would have admitted it.
     const result = await runAdmissionGate({
       candidate: { provider: 'ollama', model: 'shape-only' },
-      probes: ADMISSION_PROBES,
+      logicalTier: 2,
+      probes: probesForTier(2),
       backend: {
         async generate({ probe }) {
           const sample = probe.sample() as Record<string, unknown>;

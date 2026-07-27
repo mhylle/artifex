@@ -13,11 +13,14 @@
  */
 import {
   CapabilityManifestSchema,
+  EvidenceBundleSchema,
   VerdictSchema,
   validate,
 } from '@artifex/shared-types';
-import type { ValidationError } from '@artifex/shared-types';
+import type { LogicalTier, ValidationError } from '@artifex/shared-types';
 import type { TSchema } from '@sinclair/typebox';
+
+import { NoProbesForTierError } from './errors.js';
 
 /**
  * A coherence assertion the schema cannot express.
@@ -38,6 +41,13 @@ export interface SemanticCheck {
 
 export interface AdmissionProbe {
   readonly name: string;
+  /**
+   * The tier this probe judges. Admission is granted **to a tier**, not in the
+   * abstract: a Tier-1 worker produces evidence bundles and never authors a
+   * Verdict, so probing it with one refuses it for failing a job it would never
+   * be given. That is exactly what happened to a 2B candidate in P3.
+   */
+  readonly logicalTier: LogicalTier;
   /** A published shared schema — handed to the model verbatim. */
   readonly schema: TSchema;
   readonly prompt: string;
@@ -61,6 +71,8 @@ export interface AdmissionFailure {
 
 export interface AdmissionResult {
   readonly candidate: { readonly provider: string; readonly model: string };
+  /** The tier this verdict is about — admission is never tier-free. */
+  readonly logicalTier: LogicalTier;
   readonly admitted: boolean;
   readonly failures: AdmissionFailure[];
 }
@@ -71,14 +83,63 @@ const UUID_B = 'c0a8012e-9f43-4b6d-8e1a-2d7f6b5c4e39';
 const UUID_C = '7b2d9e10-4c58-4a3f-b6e2-1f8c0d5a9b47';
 
 /**
- * The admission set. Two schemas from different corners of the vocabulary:
- * `Verdict` exercises closed enums plus a nested array of objects, and
- * `CapabilityManifest` exercises a `minItems` constraint and an integer bound.
- * A model that satisfies both can be trusted with the rest.
+ * The admission set, across all tiers. Select with {@link probesForTier} —
+ * running a candidate against another tier's work is how P3 wrongly refused a
+ * small local model.
+ *
+ * Tier 1 is judged on `EvidenceBundle`, the artifact an atomic worker actually
+ * produces. Tier 2 is judged on `Verdict` (closed enums plus a nested array of
+ * objects) and `CapabilityManifest` (a `minItems` constraint and an integer
+ * bound) — the meta-agent authoring and review work that tier is for.
  */
 export const ADMISSION_PROBES: readonly AdmissionProbe[] = [
   {
+    name: 'worker-evidence-bundle',
+    logicalTier: 1,
+    schema: EvidenceBundleSchema,
+    prompt:
+      'You are a worker that answered the sub-question "what is the current adoption rate?" ' +
+      'using the entitled source list. Emit your evidence bundle as JSON matching the schema. ' +
+      'The deliverable MUST be an object with a non-empty "answer" string and a "citations" number. ' +
+      'Use an empty actions array and null reflection.',
+    sample: () => ({
+      bundleId: UUID_A,
+      taskId: UUID_B,
+      agentId: UUID_C,
+      deliverable: { answer: 'Adoption reached 34% as of Q1 2026.', citations: 2 },
+      actions: [],
+      consulted: [{ source: 'mission-brief', viaBrokerGrantId: null }],
+      assumptions: ['"Adoption" means paid seats.'],
+      reflection: null,
+      effortSpent: 3,
+      producedAt: AT,
+    }),
+    semanticChecks: [
+      {
+        // Instruction-following, which is what a Tier-1 worker is actually for.
+        // `deliverable` is Type.Unknown() in the schema — deliberately, since its
+        // shape is the task's business — so this is unreachable by validation.
+        name: 'the deliverable carries the non-empty "answer" the prompt demanded',
+        holds: (value) => {
+          const bundle = value as { deliverable?: unknown };
+          const answer = (bundle.deliverable as { answer?: unknown } | undefined)?.answer;
+          return typeof answer === 'string' && answer.trim().length > 0;
+        },
+      },
+      {
+        // Effort is a currency (invariant #7). A bundle that produced a
+        // deliverable while spending nothing is not a coherent account of work.
+        name: 'the bundle accounts for the effort it spent',
+        holds: (value) => {
+          const spent = (value as { effortSpent?: unknown }).effortSpent;
+          return typeof spent === 'number' && spent > 0;
+        },
+      },
+    ],
+  },
+  {
     name: 'verdict',
+    logicalTier: 2,
     schema: VerdictSchema,
     prompt:
       'A reviewer checked a task and found that one acceptance criterion failed: a factual ' +
@@ -121,6 +182,7 @@ export const ADMISSION_PROBES: readonly AdmissionProbe[] = [
   },
   {
     name: 'capability-manifest',
+    logicalTier: 2,
     schema: CapabilityManifestSchema,
     prompt:
       'Design a specialist that answers one research sub-question from entitled sources and ' +
@@ -151,19 +213,36 @@ export const ADMISSION_PROBES: readonly AdmissionProbe[] = [
   },
 ];
 
+/** The probes that judge a candidate applying for `logicalTier`. */
+export function probesForTier(logicalTier: LogicalTier): readonly AdmissionProbe[] {
+  return ADMISSION_PROBES.filter((probe) => probe.logicalTier === logicalTier);
+}
+
 /**
- * Run a candidate model against the admission set.
+ * Run a candidate model against the admission set for the tier it is applying for.
  *
- * A probe that *throws* counts as a failure, not as an absence of failures — a
- * crashed or unreachable backend must never read as "nothing went wrong", which
- * would admit a model nobody ever successfully tested.
+ * Two failure modes are deliberately *not* silent:
+ *   - A probe that **throws** counts as a failure, not an absence of failures. A
+ *     crashed or unreachable backend must never read as "nothing went wrong",
+ *     which would admit a model nobody ever successfully tested.
+ *   - A tier with **no probes** raises {@link NoProbesForTierError} rather than
+ *     returning `admitted: true`. Vacuous truth is the rubber stamp this gate
+ *     exists to prevent, and it looks identical to a real pass.
  */
 export async function runAdmissionGate(options: {
   readonly candidate: { readonly provider: string; readonly model: string };
-  readonly probes: readonly AdmissionProbe[];
+  readonly logicalTier: LogicalTier;
+  /** Defaults to the probes registered for this tier. */
+  readonly probes?: readonly AdmissionProbe[];
   readonly backend: StructuredOutputBackend;
 }): Promise<AdmissionResult> {
-  const { candidate, probes, backend } = options;
+  const { candidate, logicalTier, backend } = options;
+  const probes = options.probes ?? probesForTier(logicalTier);
+
+  if (probes.length === 0) {
+    throw new NoProbesForTierError(logicalTier);
+  }
+
   const failures: AdmissionFailure[] = [];
 
   for (const probe of probes) {
@@ -206,5 +285,5 @@ export async function runAdmissionGate(options: {
     }
   }
 
-  return { candidate, admitted: failures.length === 0, failures };
+  return { candidate, logicalTier, admitted: failures.length === 0, failures };
 }

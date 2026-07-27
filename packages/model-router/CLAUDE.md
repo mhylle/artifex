@@ -16,6 +16,14 @@ Provider-neutral dispatch (ADR-0001/0002). Given a `{provider, model, params}` i
 - admission gate refuses a schema-invalid model; accepts a valid one (distractor).
 - Tier-2 with no gate-passing local model → falls back to Claude; a missing entry raises a typed error.
 
+## Admission is granted TO A TIER, not in the abstract
+
+Probes declare a `logicalTier`; `probesForTier()` selects them. Tier 1 is judged on `EvidenceBundle` — what an atomic worker actually produces — and Tier 2 on `Verdict` + `CapabilityManifest`, which are meta-agent artifacts. Probing a Tier-1 candidate with a Verdict refuses it for failing a job it would never be given; that is how P3 wrongly rejected `qwen3.5:2b`.
+
+**A tier with no probes raises `NoProbesForTierError` — never `admitted: true`.** Vacuous truth is the same rubber stamp, and it looks identical to a real pass. Tier 0 is no-LLM, so it has none.
+
+**Known open defect (`d678cd8c`, high): admission verdicts do not replicate.** Each probe runs once against a stochastic model, so borderline candidates get a coin flip recorded as permanent catalog fact — `qwen3.5:2b` was admitted 2/3 Tier-1 runs, and admitted at Tier 2 where P3 refused it. Do not cite a single admission run as evidence about a model. Settle before P6 staffs from the catalog.
+
 ## The gate must test meaning, not just shape
 
 Backends serve structured output by **constrained decoding**, so schema-valid output is near-certain *regardless of model capability*. A shape-only gate measures whether the backend can constrain, not whether the model can reason — it admits almost anything. Every probe therefore carries `semanticChecks`: coherence assertions the schema cannot express, especially conditional ones (`minItems` cannot say "findings must be non-empty *only when* outcome is fail").
