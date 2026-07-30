@@ -240,6 +240,46 @@ function isAtomic(contract: TaskContract): boolean {
   return contract.acceptanceCriteria.length <= 1;
 }
 
+/**
+ * Is this deliverable serialised JSON rather than an answer? (defect 08db92fd)
+ *
+ * Returns the SHAPE that was detected, or null when the answer is fine — the
+ * shape is recorded so the operator can tell the two failure modes apart, and
+ * so the rate of each can be measured from the ledger later.
+ *
+ * Both shapes are taken from real ledger events, not imagined:
+ *
+ *   'document' — a whole nested object where a string was asked for:
+ *                `{"summary": {"purpose": "Explain the mechanism..."}}`
+ *   'fragment' — the model closed the string and kept authoring keys:
+ *                `5", "explanation": "A standard hard-boiled egg...`
+ *
+ * The fragment pattern requires a quote, a comma, a QUOTED KEY and a colon in
+ * that order. Prose uses quotes and colons constantly (`She said "boil it": ...`),
+ * so keying on punctuation alone would burn escalation rungs on good work.
+ */
+function jsonLeak(deliverable: unknown): 'document' | 'fragment' | null {
+  if (typeof deliverable !== 'object' || deliverable === null) return null;
+  const answer = (deliverable as { answer?: unknown }).answer;
+  if (typeof answer !== 'string') return null;
+
+  const trimmed = answer.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (typeof parsed === 'object' && parsed !== null) return 'document';
+    } catch {
+      // An unparseable brace is prose that happens to start with one, or a
+      // truncated document. Truncation still reads as structure, so fall
+      // through to the fragment check rather than declaring it clean.
+    }
+  }
+
+  if (/"\s*,\s*"[A-Za-z_][\w-]*"\s*:/.test(answer)) return 'fragment';
+
+  return null;
+}
+
 export async function runMission(
   mission: TaskContract,
   seams: MissionSeams,
@@ -811,6 +851,40 @@ export async function runMission(
               });
             }
           }
+          continue;
+        }
+
+        // ---- the deliverable must be an ANSWER, not JSON (defect 08db92fd) --
+        // Measured at 2 of 65 executions: the model returns serialised JSON in a
+        // field declared as a plain string, which passes schema validation
+        // because it genuinely IS a non-empty string. Checked BEFORE Gate B for
+        // the same reason as the floor — the reviewer reads the deliverable as
+        // prose and may well find the criterion met, recording a pass on work
+        // that is unreadable.
+        const malformed = jsonLeak(outcome.bundle.deliverable);
+        if (malformed !== null) {
+          record(child.taskId, 'decision', 'task.malformed_deliverable', 'orchestrator', {
+            objective: child.objective,
+            shape: malformed,
+            detail:
+              'The deliverable is serialised JSON rather than an answer — the model wrote structure into a field that asked for prose.',
+          });
+
+          // Costs a rung, not the task. Corruption runs at roughly 3%, so a
+          // retry overwhelmingly returns something good; failing outright would
+          // throw away the other 97%.
+          rungIndex += 1;
+          if (rungIndex >= ladder.length) break;
+          const rung = ladder[rungIndex]!;
+          if (rung === 'retry_higher_tier') tierBump += 1;
+          const toTier = Math.min(manifest.logicalTier + tierBump, FRONTIER_TIER) as LogicalTier;
+          escalations.push({
+            taskId: child.taskId, rung, fromTier: tier, toTier,
+            reason: `delivered ${malformed} instead of an answer`,
+          });
+          record(child.taskId, 'escalation', 'escalation.rung_climbed', 'orchestrator', {
+            rung, fromTier: tier, toTier, reason: 'malformed deliverable',
+          });
           continue;
         }
 
