@@ -11,6 +11,7 @@ import { FormsModule } from '@angular/forms';
 
 import { CanvasNode } from './canvas-node';
 import { Fleet } from './fleet';
+import { Inspector } from './inspector';
 import { LedgerFeed } from './ledger-feed';
 import { MissionIntake, toLines } from './mission-intake';
 import type { TaskNode } from './mission-tree';
@@ -18,7 +19,7 @@ import type { TaskNode } from './mission-tree';
 @Component({
   selector: 'app-mission-control',
   standalone: true,
-  imports: [FormsModule, CanvasNode],
+  imports: [FormsModule, CanvasNode, Inspector],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './mission-control.html',
   styleUrl: './mission-control.css',
@@ -66,6 +67,13 @@ export class MissionControl implements OnInit {
     // A focus that no longer exists falls back to the whole tree rather than
     // rendering an empty canvas the operator cannot explain.
     return node === null ? roots : [node];
+  });
+
+  /** The node the inspector is showing — resolved from the projection, not stored. */
+  readonly selectedTask = computed(() => {
+    const taskId = this.selectedTaskId();
+    if (taskId === null) return null;
+    return findTask(this.feed.tree()?.children ?? [], taskId);
   });
 
   selectTask(taskId: string): void {

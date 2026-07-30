@@ -1,0 +1,34 @@
+/*
+ * Criterion state is icon + word + border, never colour alone — the same rule
+ * the canvas follows, for the same reason.
+ */
+:host { display: block; }
+
+.inspector { border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; margin-top: 1rem; background: #fcfcfd; }
+.inspector.empty { color: #888; }
+h3 { margin: 0 0 .4rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; }
+h4 { margin: 1rem 0 .4rem; font-size: .8rem; display: flex; gap: .6rem; align-items: baseline; }
+.tally { font-weight: 400; color: #666; font-size: .75rem; }
+.objective { margin: 0 0 .75rem; font-weight: 500; }
+
+.facts { display: grid; grid-template-columns: auto 1fr; gap: .3rem .8rem; margin: 0; font-size: .82rem; }
+.facts dt { color: #666; }
+.facts dd { margin: 0; }
+.unknown { color: #999; font-style: italic; }
+
+.bar { display: inline-block; width: 6rem; height: .5rem; margin-left: .5rem; border: 1px solid #ccc; border-radius: 3px; background: linear-gradient(to right, #5a78c8 var(--fill), transparent var(--fill)); vertical-align: middle; }
+
+.criteria { list-style: none; padding: 0; margin: 0; display: grid; gap: .3rem; }
+.criteria li { display: grid; grid-template-columns: 1rem 4.5rem 1fr; gap: .5rem; align-items: baseline; padding: .35rem .5rem; border: 1px solid #eee; border-left-width: 3px; border-radius: 4px; font-size: .82rem; }
+.criteria li[data-state='met']     { border-left-color: #1f6b40; }
+.criteria li[data-state='unmet']   { border-left-color: #9c2b23; border-left-style: solid; }
+.criteria li[data-state='unknown'] { border-left-color: #bbb; border-left-style: dotted; }
+.criteria .state { font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; color: #555; }
+.criteria .detail { grid-column: 3; color: #9c2b23; font-size: .78rem; }
+
+.drill-events { margin-top: .9rem; font-size: .78rem; padding: .3rem .6rem; }
+.events { list-style: none; padding: 0; margin: .5rem 0 0; display: grid; gap: .3rem; max-height: 18rem; overflow-y: auto; }
+.events li { display: grid; grid-template-columns: 3rem 10rem 1fr; gap: .5rem; font-size: .72rem; padding: .3rem .4rem; background: #fff; border: 1px solid #eee; border-radius: 4px; }
+.events code { white-space: pre-wrap; word-break: break-word; color: #444; }
+.events .seq { color: #888; }
+.events .type { color: #33477d; }

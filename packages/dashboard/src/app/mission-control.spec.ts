@@ -336,3 +336,101 @@ describe('MissionControl — canvas lens (R15)', () => {
     expect(component.visibleNodes().length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * R16 — the inspector. Every claim on screen must have a ledger event behind it,
+ * and be reachable from it in two clicks.
+ */
+describe('MissionControl — inspector (R16)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let component: MissionControl;
+  let feed: LedgerFeed;
+
+  const trail = () => [
+    ev(1, 'mission.started', MISSION, { objective: 'Root' }),
+    ev(2, 'task.contracted', 't-a', {
+      objective: 'Part A', category: 'research', parentTaskId: MISSION, ceiling: 10,
+      acceptanceCriteria: [
+        { criterionId: 'ac-1', statement: 'Cites a source.' },
+        { criterionId: 'ac-2', statement: 'States a date.' },
+      ],
+    }),
+    ev(3, 'agent.staffed', 't-a', { designId: 'analyst', version: 3, logicalTier: 2 }),
+    ev(4, 'task.executed', 't-a', { effortSpent: 4, ceiling: 10 }),
+  ];
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    component = fixture.componentInstance;
+    feed = TestBed.inject(LedgerFeed);
+  });
+
+  it('AC-0: shows the contract, criteria, effort against budget and the staffed agent', () => {
+    feed.events.set(trail());
+    component.selectTask('t-a');
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Part A');
+    expect(text).toContain('Cites a source.');
+    expect(text).toContain('States a date.');
+    expect(text).toContain('analyst');
+    expect(text).toContain('4 / 10');
+    // Formatted for reading, not rounded in the ledger.
+    expect(text).not.toContain('6.666');
+  });
+
+  it('AC-1: a Gate B verdict arriving later updates the criteria without a reload', () => {
+    feed.events.set(trail());
+    component.selectTask('t-a');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('0 / 2 met');
+
+    feed.events.update((events) => [
+      ...events,
+      ev(5, 'gate_b.verdict_issued', 't-a', {
+        outcome: 'fail',
+        findings: [{ criterionId: 'ac-2', detail: 'no date given', errorClass: 'incomplete' }],
+      }),
+    ]);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('1 / 2 met');
+    expect(text).toContain('no date given');
+  });
+
+  it('AC-2: the raw ledger events are one click away', () => {
+    feed.events.set(trail());
+    component.selectTask('t-a');
+    fixture.detectChanges();
+
+    const button = fixture.nativeElement.querySelector('.drill-events') as HTMLButtonElement;
+    expect(button.textContent).toContain('3 ledger events');
+    button.click();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelectorAll('.events li')).toHaveLength(3);
+  });
+
+  it('DISTRACTOR: with nothing selected the inspector invents no task', () => {
+    feed.events.set(trail());
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Select a task');
+  });
+
+  it('DISTRACTOR: effort is "not reported" rather than zero when the ledger is silent', () => {
+    // A task that has not reported effort has not spent nothing — it has not
+    // said. An empty bar would be a claim the ledger never made.
+    feed.events.set(trail().slice(0, 3));
+    component.selectTask('t-a');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('not reported');
+  });
+});

@@ -170,3 +170,100 @@ describe('R15 — the projection carries the graph, not just a list', () => {
     expect(ids).toContain('t-y');
   });
 });
+
+/**
+ * R16 — the inspector's data. Every field is derived from the ledger; a fact
+ * with no event behind it does not belong on screen.
+ */
+describe('R16 — the projection carries what the inspector shows', () => {
+  const ev = (seq: number, type: string, taskId: string | null, payload: Record<string, unknown> = {}) =>
+    ({ seq, eventId: `e-${seq}`, missionId: 'm-1', taskId, family: 'contract', type, payload });
+
+  const withTask = (extra: ReturnType<typeof ev>[] = []) => buildMissionTree([
+    ev(1, 'mission.started', 'm-1', { objective: 'Root' }),
+    ev(2, 'task.contracted', 't-a', {
+      objective: 'A', parentTaskId: 'm-1', ceiling: 10,
+      acceptanceCriteria: [
+        { criterionId: 'ac-1', statement: 'First thing.' },
+        { criterionId: 'ac-2', statement: 'Second thing.' },
+      ],
+    }),
+    ...extra,
+  ])?.children[0];
+
+  it('AC-0: carries the acceptance criteria, the agent and the effort against budget', () => {
+    const task = withTask([
+      ev(3, 'agent.staffed', 't-a', { designId: 'analyst.v7', version: 7, logicalTier: 2 }),
+      ev(4, 'task.executed', 't-a', { effortSpent: 3, ceiling: 10 }),
+    ]);
+
+    expect(task?.criteria.map((c) => c.statement)).toEqual(['First thing.', 'Second thing.']);
+    expect(task?.designId).toBe('analyst.v7');
+    expect(task?.designVersion).toBe(7);
+    expect(task?.effortSpent).toBe(3);
+    expect(task?.ceiling).toBe(10);
+  });
+
+  it('AC-1: a passing Gate B verdict marks every criterion met', () => {
+    const task = withTask([
+      ev(3, 'gate_b.verdict_issued', 't-a', { outcome: 'pass', findings: [] }),
+    ]);
+
+    expect(task?.criteria.map((c) => c.state)).toEqual(['met', 'met']);
+  });
+
+  it('AC-1: a failing verdict marks only the criteria it named', () => {
+    const task = withTask([
+      ev(3, 'gate_b.verdict_issued', 't-a', {
+        outcome: 'fail',
+        findings: [{ criterionId: 'ac-2', detail: 'no citation', errorClass: 'incomplete' }],
+      }),
+    ]);
+
+    expect(task?.criteria.find((c) => c.criterionId === 'ac-2')?.state).toBe('unmet');
+    expect(task?.criteria.find((c) => c.criterionId === 'ac-1')?.state).toBe('met');
+  });
+
+  it('DISTRACTOR: before any verdict a criterion is UNKNOWN, not failed', () => {
+    // "Not yet judged" and "judged and failed" are different facts. Showing the
+    // first as the second would be the dashboard inventing a verdict.
+    const task = withTask();
+
+    expect(task?.criteria.map((c) => c.state)).toEqual(['unknown', 'unknown']);
+  });
+
+  it('DISTRACTOR: the LAST verdict wins, so a retry that passes clears an earlier failure', () => {
+    // Status is the last verdict, never an accumulated flag — otherwise a task
+    // that recovered would still show its old failure.
+    const task = withTask([
+      ev(3, 'gate_b.verdict_issued', 't-a', {
+        outcome: 'fail',
+        findings: [{ criterionId: 'ac-1', detail: 'missing', errorClass: 'incomplete' }],
+      }),
+      ev(4, 'gate_b.verdict_issued', 't-a', { outcome: 'pass', findings: [] }),
+    ]);
+
+    expect(task?.criteria.map((c) => c.state)).toEqual(['met', 'met']);
+  });
+
+  it('AC-2: the events for this task are reachable from the node', () => {
+    const task = withTask([
+      ev(3, 'agent.staffed', 't-a', { designId: 'analyst.v7', version: 7, logicalTier: 2 }),
+    ]);
+
+    expect(task?.events.map((e) => e.type)).toEqual(['task.contracted', 'agent.staffed']);
+  });
+
+  it('DISTRACTOR: a node carries only ITS events, not the whole mission trail', () => {
+    const tree = buildMissionTree([
+      ev(1, 'mission.started', 'm-1', { objective: 'Root' }),
+      ev(2, 'task.contracted', 't-a', { objective: 'A', parentTaskId: 'm-1', acceptanceCriteria: [] }),
+      ev(3, 'task.contracted', 't-b', { objective: 'B', parentTaskId: 'm-1', acceptanceCriteria: [] }),
+      ev(4, 'agent.staffed', 't-b', { designId: 'other', version: 1, logicalTier: 1 }),
+    ]);
+
+    const a = tree?.children.find((c) => c.taskId === 't-a');
+    expect(a?.events.every((e) => e.taskId === 't-a')).toBe(true);
+    expect(a?.events).toHaveLength(1);
+  });
+});

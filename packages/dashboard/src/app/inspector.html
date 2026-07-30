@@ -1,0 +1,79 @@
+@if (task(); as node) {
+  <aside class="inspector" aria-label="task inspector">
+    <h3>Inspector</h3>
+    <p class="objective">{{ node.objective || node.taskId }}</p>
+
+    <dl class="facts">
+      <dt>Status</dt>
+      <dd>{{ node.status }}</dd>
+
+      @if (node.category) {
+        <dt>Category</dt>
+        <dd>{{ node.category }}</dd>
+      }
+
+      <dt>Agent</dt>
+      <dd>
+        @if (node.designId) {
+          {{ node.designId }}@if (node.designVersion !== null) { <span> v{{ node.designVersion }}</span> }
+        } @else {
+          <span class="unknown">not staffed yet</span>
+        }
+      </dd>
+
+      <dt>Tier</dt>
+      <dd>@if (node.logicalTier !== null) { tier {{ node.logicalTier }} } @else { <span class="unknown">—</span> }</dd>
+
+      <dt>Effort</dt>
+      <dd>
+        @if (node.effortSpent !== null && node.ceiling !== null) {
+          {{ format(node.effortSpent) }} / {{ format(node.ceiling) }}
+          @if (effortFraction(); as fraction) {
+            <span class="bar" [style.--fill]="fraction * 100 + '%'" aria-hidden="true"></span>
+          }
+        } @else {
+          <span class="unknown">not reported</span>
+        }
+      </dd>
+
+      @if (node.escalations) {
+        <dt>Escalations</dt>
+        <dd>↑{{ node.escalations }}</dd>
+      }
+    </dl>
+
+    <h4>Acceptance criteria <span class="tally">{{ metCount() }} / {{ criterionCount() }} met</span></h4>
+    <ul class="criteria">
+      @for (criterion of node.criteria; track criterion.criterionId) {
+        <li [attr.data-state]="criterion.state">
+          <span class="mark" aria-hidden="true">{{ mark(criterion.state) }}</span>
+          <span class="state">{{ criterion.state }}</span>
+          <span class="statement">{{ criterion.statement }}</span>
+          @if (criterion.detail) { <span class="detail">{{ criterion.detail }}</span> }
+        </li>
+      } @empty {
+        <li class="unknown">This task recorded no acceptance criteria.</li>
+      }
+    </ul>
+
+    <button type="button" class="drill-events" (click)="toggleEvents()" [attr.aria-expanded]="showEvents()">
+      {{ showEvents() ? 'Hide' : 'Show' }} the {{ node.events.length }} ledger events behind this
+    </button>
+
+    @if (showEvents()) {
+      <ol class="events">
+        @for (event of node.events; track event.eventId) {
+          <li>
+            <span class="seq">#{{ event.seq }}</span>
+            <span class="type">{{ event.type }}</span>
+            <code>{{ event.payload | json }}</code>
+          </li>
+        }
+      </ol>
+    }
+  </aside>
+} @else {
+  <aside class="inspector empty" aria-label="task inspector">
+    <p>Select a task on the canvas to see its contract, criteria and evidence.</p>
+  </aside>
+}

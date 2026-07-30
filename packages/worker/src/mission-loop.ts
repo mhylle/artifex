@@ -226,6 +226,15 @@ export async function runMission(
         category: child.category,
         parentTaskId: child.parentTaskId,
         dependsOn: [...child.dependencies.consumesTaskIds],
+        // The contract's OWN criteria, verbatim (defect `f46ba357`). Without them
+        // the trail records which criteria failed but never how many there were,
+        // so per-clause compliance has no denominator and the inspector cannot
+        // say "3 of 4 met". Paraphrasing here would make replay grade different
+        // words than the reviewer used.
+        acceptanceCriteria: child.acceptanceCriteria.map((c) => ({
+          criterionId: c.criterionId,
+          statement: c.statement,
+        })),
       });
     }
 
@@ -283,7 +292,12 @@ export async function runMission(
         }
         const tier = Math.min(manifest.logicalTier + tierBump, FRONTIER_TIER) as LogicalTier;
         record(child.taskId, 'staffing', 'agent.staffed', 'agent_creator', {
-          designId: manifest.designId, logicalTier: tier, attempt: attempt + 1,
+          designId: manifest.designId,
+          // The version, not just the design: a clade score attributes
+          // performance to a lineage, and "which version was this" is the join key.
+          version: manifest.version,
+          logicalTier: tier,
+          attempt: attempt + 1,
         });
 
         const { verificationPlan: _withheld, ...workerView } = child;
@@ -368,7 +382,13 @@ export async function runMission(
           continue;
         }
 
-        record(child.taskId, 'execution', 'task.executed', 'worker', { bundleId: outcome.bundle.bundleId });
+        record(child.taskId, 'execution', 'task.executed', 'worker', {
+          bundleId: outcome.bundle.bundleId,
+          // Cost belongs in the trail: value-per-effort is the system's fitness
+          // function, and it cannot be computed from a bundle id.
+          effortSpent: outcome.bundle.effortSpent,
+          ceiling: child.budget.ceiling,
+        });
 
         let bVerdict;
         try {

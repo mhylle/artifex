@@ -34,6 +34,23 @@ export type TaskStatus =
 
 export type MissionStatus = 'running' | 'delivered' | 'surrendered';
 
+/**
+ * A criterion's state (R16).
+ *
+ * Three values, not two. "Not yet judged" and "judged and failed" are different
+ * facts, and collapsing them would have the dashboard inventing a verdict the
+ * ledger never issued.
+ */
+export type CriterionState = 'unknown' | 'met' | 'unmet';
+
+export interface CriterionView {
+  readonly criterionId: string;
+  readonly statement: string;
+  readonly state: CriterionState;
+  /** The reviewer's words when it failed — the drill-down's payload. */
+  readonly detail: string | null;
+}
+
 export interface TaskNode {
   readonly taskId: string;
   readonly objective: string;
@@ -46,6 +63,14 @@ export interface TaskNode {
   readonly parentTaskId: string | null;
   /** Sibling outputs this task consumes — the canvas's dependency edges. */
   readonly dependsOn: readonly string[];
+  /** The contract's criteria with their live state — the inspector's spine. */
+  readonly criteria: readonly CriterionView[];
+  readonly designId: string | null;
+  readonly designVersion: number | null;
+  readonly effortSpent: number | null;
+  readonly ceiling: number | null;
+  /** This task's own events, so a drill-down bottoms out in the substrate. */
+  readonly events: readonly LedgerEventView[];
   readonly children: TaskNode[];
 }
 
@@ -67,6 +92,14 @@ interface Accumulator {
   category: string | null;
   parentTaskId: string | null;
   dependsOn: string[];
+  criteria: { criterionId: string; statement: string }[];
+  designId: string | null;
+  designVersion: number | null;
+  effortSpent: number | null;
+  ceiling: number | null;
+  /** Findings of the LAST verdict — status is the last verdict, never a tally. */
+  lastVerdict: { outcome: string; failed: Map<string, string> } | null;
+  events: LedgerEventView[];
 }
 
 function str(payload: Record<string, unknown>, key: string): string | null {
@@ -95,6 +128,8 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
     const created: Accumulator = {
       objective: '', status: 'contracted', logicalTier: null, escalations: 0, blastRadius: null,
       category: null, parentTaskId: null, dependsOn: [],
+      criteria: [], designId: null, designVersion: null, effortSpent: null, ceiling: null,
+      lastVerdict: null, events: [],
     };
     tasks.set(taskId, created);
     order.push(taskId);
@@ -103,6 +138,10 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
 
   for (const event of ordered) {
     const { taskId, payload, type } = event;
+
+    // Every event is filed against its own task, so a drill-down bottoms out in
+    // the substrate rather than in a summary.
+    if (taskId !== null && taskId !== missionId) touch(taskId).events.push(event);
 
     switch (type) {
       case 'mission.started':
@@ -126,6 +165,15 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
         node.parentTaskId = str(payload, 'parentTaskId');
         const consumes = payload['dependsOn'];
         node.dependsOn = Array.isArray(consumes) ? consumes.map(String) : [];
+        const criteria = payload['acceptanceCriteria'];
+        node.criteria = Array.isArray(criteria)
+          ? criteria.map((c) => ({
+              criterionId: String((c as { criterionId?: unknown }).criterionId ?? ''),
+              statement: String((c as { statement?: unknown }).statement ?? ''),
+            }))
+          : [];
+        const ceiling = payload['ceiling'];
+        if (typeof ceiling === 'number') node.ceiling = ceiling;
         node.status = 'contracted';
         break;
       }
@@ -134,12 +182,20 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
         const node = touch(taskId);
         const tier = payload['logicalTier'];
         node.logicalTier = typeof tier === 'number' ? tier : node.logicalTier;
+        node.designId = str(payload, 'designId') ?? node.designId;
+        const version = payload['version'];
+        if (typeof version === 'number') node.designVersion = version;
         node.status = 'staffed';
         break;
       }
       case 'task.executed': {
         if (taskId === null || taskId === missionId) break;
-        touch(taskId).status = 'executing';
+        const node = touch(taskId);
+        const spent = payload['effortSpent'];
+        if (typeof spent === 'number') node.effortSpent = spent;
+        const ceiling = payload['ceiling'];
+        if (typeof ceiling === 'number') node.ceiling = ceiling;
+        node.status = 'executing';
         break;
       }
       case 'task.bounced': {
@@ -155,8 +211,20 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
       case 'gate_b.verdict_issued': {
         if (taskId === null || taskId === missionId) break;
         const node = touch(taskId);
-        // Derived, never stored: the status IS the last verdict.
-        node.status = str(payload, 'outcome') === 'pass' ? 'verified' : 'failed';
+        // Derived, never stored: the status IS the last verdict — and so is the
+        // per-criterion state, which is why the previous verdict is replaced
+        // rather than merged. A retry that passes must clear the old failure.
+        const outcome = str(payload, 'outcome') ?? '';
+        const rawFindings = payload['findings'];
+        const failed = new Map<string, string>();
+        if (Array.isArray(rawFindings)) {
+          for (const finding of rawFindings) {
+            const f = finding as { criterionId?: unknown; detail?: unknown };
+            if (typeof f.criterionId === 'string') failed.set(f.criterionId, String(f.detail ?? ''));
+          }
+        }
+        node.lastVerdict = { outcome, failed };
+        node.status = outcome === 'pass' ? 'verified' : 'failed';
         break;
       }
       case 'escalation.rung_climbed': {
@@ -212,6 +280,19 @@ function nest(
       category: acc.category,
       parentTaskId: acc.parentTaskId,
       dependsOn: acc.dependsOn,
+      criteria: acc.criteria.map((c) => {
+        const verdict = acc.lastVerdict;
+        if (verdict === null) return { ...c, state: 'unknown' as const, detail: null };
+        const failure = verdict.failed.get(c.criterionId);
+        return failure === undefined
+          ? { ...c, state: 'met' as const, detail: null }
+          : { ...c, state: 'unmet' as const, detail: failure };
+      }),
+      designId: acc.designId,
+      designVersion: acc.designVersion,
+      effortSpent: acc.effortSpent,
+      ceiling: acc.ceiling,
+      events: acc.events,
       children: [],
     });
   }

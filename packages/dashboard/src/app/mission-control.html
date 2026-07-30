@@ -120,6 +120,8 @@
         <li class="empty">No tasks contracted yet.</li>
       }
     </ul>
+
+    <app-inspector [task]="selectedTask()" />
   </section>
 } @else {
   <p class="empty">Watch a mission to see its trail.</p>

@@ -633,3 +633,85 @@ describe('a910ed8d — decomposition recurses until leaves are atomic', () => {
     }
   });
 });
+
+/**
+ * Defect `f46ba357` — the trail must carry what the inspector reads.
+ *
+ * The ledger recorded which criteria FAILED (a verdict's findings) but never
+ * the criteria themselves, nor effort spent, nor the agent's version. So
+ * "3 of 4 criteria met" was underivable — you cannot divide by a denominator
+ * you never wrote down — and per-clause compliance, cost-per-verified-outcome
+ * and replay benchmarks were all quietly built on sand.
+ */
+describe('f46ba357 — the ledger records the criteria, the effort and the agent version', () => {
+  const eventsOfType = (trail: readonly { type: string; payload: Record<string, unknown> }[], type: string) =>
+    trail.filter((e) => e.type === type);
+
+  it('task.contracted carries the acceptance criteria the task will be graded on', async () => {
+    const result = await runMission(mission(), seams(), { now: AT });
+
+    const contracted = eventsOfType(result.trail, 'task.contracted');
+    expect(contracted.length).toBeGreaterThan(0);
+    for (const event of contracted) {
+      const criteria = event.payload['acceptanceCriteria'];
+      expect(Array.isArray(criteria)).toBe(true);
+      expect((criteria as unknown[]).length).toBeGreaterThan(0);
+      expect(criteria as Array<{ criterionId: string; statement: string }>).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ criterionId: expect.any(String), statement: expect.any(String) }),
+        ]),
+      );
+    }
+  });
+
+  it('task.executed carries the effort actually spent, not just a bundle id', async () => {
+    const result = await runMission(mission(), seams(), { now: AT });
+
+    const executed = eventsOfType(result.trail, 'task.executed');
+    expect(executed.length).toBeGreaterThan(0);
+    for (const event of executed) {
+      expect(typeof event.payload['effortSpent']).toBe('number');
+    }
+  });
+
+  it('agent.staffed carries the design VERSION, so a clade score can attribute performance', async () => {
+    const result = await runMission(mission(), seams(), { now: AT });
+
+    const staffed = eventsOfType(result.trail, 'agent.staffed');
+    expect(staffed.length).toBeGreaterThan(0);
+    for (const event of staffed) {
+      expect(typeof event.payload['version']).toBe('number');
+    }
+  });
+
+  it('DISTRACTOR: the recorded criteria are the CONTRACT\'s, not a summary invented at record time', async () => {
+    // If the ledger paraphrased, replay would grade against different words than
+    // the reviewer used — and per-clause compliance would compare two things.
+    const distinctive = 'The answer names a COP figure with a date.';
+    const custom = {
+      ...seams(),
+      planner: {
+        async propose() {
+          return {
+            subtasks: [{
+              objective: 'Answer the thing.',
+              category: 'answer',
+              acceptanceCriteria: [{ criterionId: 'ac-1', statement: distinctive }],
+              outOfScope: ['Not the other thing.'],
+              blastRadius: 'low' as const,
+              effortShare: 0.5,
+            }],
+          };
+        },
+      },
+    };
+
+    const result = await runMission(mission(), custom as unknown as Parameters<typeof runMission>[1], { now: AT });
+
+    const contracted = eventsOfType(result.trail, 'task.contracted');
+    const statements = contracted.flatMap((e) =>
+      (e.payload['acceptanceCriteria'] as Array<{ statement: string }>).map((c) => c.statement),
+    );
+    expect(statements).toContain(distinctive);
+  });
+});
