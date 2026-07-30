@@ -18,7 +18,7 @@
  *     produces a dossier of what blocked it — not a crash, and not a fabricated
  *     success. Bounded failure is why `stopTryingWhen` and `maxAttempts` exist.
  */
-import type { EscalationRung, LedgerEventInput, LogicalTier, TaskContract } from '@artifex/shared-types';
+import type { ErrorClass, EscalationRung, LedgerEventInput, LogicalTier, TaskContract } from '@artifex/shared-types';
 
 import { capabilityOf, staff } from './agent-creator.js';
 import { concurrencyFor } from './design-playbook.js';
@@ -27,6 +27,8 @@ import { decompose, foldUp } from './orchestrator.js';
 import type { Planner, Reconciler } from './orchestrator.js';
 import { gateA, gateB } from './reviewer.js';
 import type { CompletionJudge, CoverageJudge, IntentJudge, PlanJudge } from './reviewer.js';
+import { entryRungFor, isStalled, worstClass } from './escalation.js';
+import type { AttemptSignature } from './escalation.js';
 import { runSpecialist } from './specialist.js';
 import type { ClarityJudge, SpecialistWork } from './specialist.js';
 
@@ -726,8 +728,37 @@ export async function runMission(
       | { readonly kind: 'skip'; readonly taskId: string }
       | { readonly kind: 'fail'; readonly outcome: SubtreeOutcome };
 
+    /**
+     * Where the ladder goes next (R36).
+     *
+     * The ENTRY rung is a function of the error class; every failure after it
+     * climbs exactly one. Those two rules constrain different moments, and the
+     * `Math.max` is what reconciles them: a task jumps to where its failure
+     * belongs, then walks from there, and never walks BACK to a cheaper remedy
+     * it has already been told will not work.
+     *
+     * Recomputing the entry every time is what makes that non-obvious: a task
+     * that failed at re_decomposition and then failed as an ordinary slip would
+     * drop to rung 1 and cycle between them forever. `Math.max` makes the ladder
+     * monotonic by construction rather than by hoping the classes stay ordered.
+     */
+    const nextRung = (current: number, errorClass: ErrorClass | null, ladder: readonly EscalationRung[]) => {
+      const stepped = current + 1;
+      if (errorClass === null) return stepped;
+      return Math.max(stepped, entryRungFor(errorClass, ladder));
+    };
+
     const runChild = async (contracted: TaskContract, asLeaf = false): Promise<ChildOutcome> => {
       let child = contracted;
+
+      /**
+       * What each attempt looked like, for the stall counter (R36 AC-2).
+       *
+       * `stallLimit` has been on every contract since P2 and was read by
+       * nothing, so a task could be attempted the same way until `maxAttempts`
+       * ran out — paying full price each time to learn what it already knew.
+       */
+      const attempts: AttemptSignature[] = [];
 
       // Already done, per the trail. Re-running it would spend budget to
       // reproduce a verdict the ledger already carries — and could produce a
@@ -886,8 +917,9 @@ export async function runMission(
           // the local ladder showed a bigger model is *worse* at this gate
           // (2b 33% false-bounce, 9b 17%, 12b 58%), so the default remedy actively
           // increased the chance of bouncing again.
-          const reDecomposition = ladder.indexOf('re_decomposition');
-          rungIndex = reDecomposition > rungIndex ? reDecomposition : rungIndex + 1;
+          // Generalised into `entryRungFor` (R36): this site had the rule inline
+          // and every other escalation site ignored the class entirely.
+          rungIndex = nextRung(rungIndex, 'specification_fault', ladder);
           if (rungIndex >= ladder.length) break;
 
           const rung = ladder[rungIndex]!;
@@ -954,7 +986,11 @@ export async function runMission(
           // Costs a rung, not the task. Corruption runs at roughly 3%, so a
           // retry overwhelmingly returns something good; failing outright would
           // throw away the other 97%.
-          rungIndex += 1;
+          //
+          // Classed as a SCHEMA VIOLATION (R36): the model wrote structure into
+          // a field that asked for prose, which is a formatting failure rather
+          // than a thinking one, and a bigger model holds structure better.
+          rungIndex = nextRung(rungIndex, 'schema_violation', ladder);
           if (rungIndex >= ladder.length) break;
           const rung = ladder[rungIndex]!;
           if (rung === 'retry_higher_tier') tierBump += 1;
@@ -985,8 +1021,9 @@ export async function runMission(
           });
 
           // Costs a rung, not the task: the ladder exists so a shallow attempt
-          // can be retried by something with more to spend.
-          rungIndex += 1;
+          // can be retried by something with more to spend. An ordinary slip
+          // (R36) — the work was done, just too thinly.
+          rungIndex = nextRung(rungIndex, 'execution_error', ladder);
           if (rungIndex >= ladder.length) break;
           const rung = ladder[rungIndex]!;
           if (rung === 'retry_higher_tier') tierBump += 1;
@@ -1103,8 +1140,38 @@ export async function runMission(
           break;
         }
 
-        // ---- exactly ONE rung per failure -----------------------------------
-        rungIndex += 1;
+        // ---- the stall counter (R36 AC-2) -----------------------------------
+        // Recorded BEFORE the rung is chosen, because a stall changes which rung
+        // is correct: repeating an attempt has told us that whatever is wrong is
+        // not something another identical attempt will find.
+        attempts.push({
+          tier,
+          designId: manifest.designId,
+          errorClasses: bVerdict.findings.map((f) => f.errorClass),
+        });
+
+        const stalled = isStalled(attempts, child.stoppingConditions.stallLimit);
+        if (stalled) {
+          record(child.taskId, 'decision', 'task.stalled', 'orchestrator', {
+            objective: child.objective,
+            attempts: attempts.length,
+            stallLimit: child.stoppingConditions.stallLimit,
+            detail:
+              `The same attempt has repeated ${child.stoppingConditions.stallLimit} times — same tier, ` +
+              `same design, same failure. Another identical attempt would learn nothing the last two did not.`,
+          });
+        }
+
+        // ---- the error class picks where the ladder is entered (R36) --------
+        // The WORST class among the findings, because a verdict naming both a
+        // specification fault and an ordinary slip has told us the task is
+        // specified wrong; retrying it would rehearse exactly that.
+        const entryClass = worstClass(bVerdict.findings.map((f) => f.errorClass), ladder);
+
+        // A stall outranks the verdict's own class. `execution_error` would send
+        // an identical attempt back to `retry_same`, which is precisely the
+        // thing that has already failed twice.
+        rungIndex = nextRung(rungIndex, stalled ? 'stall' : entryClass, ladder);
         if (rungIndex >= ladder.length) break;
         const rung = ladder[rungIndex]!;
 
@@ -1123,7 +1190,11 @@ export async function runMission(
           reason: bVerdict.findings.map((f) => f.detail).join('; '),
         });
         record(child.taskId, 'escalation', 'escalation.rung_climbed', 'orchestrator', {
-          rung, fromTier, toTier, errorClasses: bVerdict.findings.map((f) => f.errorClass),
+          rung, fromTier, toTier,
+          errorClasses: bVerdict.findings.map((f) => f.errorClass),
+          // WHICH class chose the rung. An escalation that skipped rungs without
+          // saying why reads like a bug to whoever finds it in the trail.
+          entryClass,
         });
       }
 
