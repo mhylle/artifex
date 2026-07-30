@@ -234,6 +234,15 @@ describe('buildWorkerSeams — the Knowledge Commons producer', () => {
     expect(calls.submitted).toHaveLength(1);
   });
 
+  it('wires the calibration seam, so the reviewer is actually measured (R35)', async () => {
+    // `calibration` is optional on MissionSeams, so an unwired one is silent —
+    // the mission runs, the reviewer is never measured, and nothing anywhere
+    // says so. That is the failure shape `41f7555c` and `753bc6dd` both had.
+    const { deps } = dependencies();
+
+    expect(buildWorkerSeams(deps, MISSION_ID).calibration).toBeDefined();
+  });
+
   it('DISTRACTOR: the seam is PRESENT, not merely optional-and-absent', async () => {
     // `commons?.submit(...)` silently does nothing when the seam is missing, so
     // an unwired commons and a working one are indistinguishable at the call

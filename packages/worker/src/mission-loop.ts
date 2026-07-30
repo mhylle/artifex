@@ -27,6 +27,8 @@ import { decompose, foldUp } from './orchestrator.js';
 import type { Planner, Reconciler } from './orchestrator.js';
 import { gateA, gateB } from './reviewer.js';
 import type { CompletionJudge, CoverageJudge, IntentJudge, PlanJudge } from './reviewer.js';
+import { calibrationOf, probeMisses } from './calibration.js';
+import type { IssuedVerdict, Probe, ReReview } from './calibration.js';
 import { pedigreeOf, surrenderDossier } from './dossier.js';
 import { entryRungFor, isStalled, worstClass } from './escalation.js';
 import type { AttemptSignature } from './escalation.js';
@@ -144,6 +146,14 @@ export interface MissionSeams {
    * mission with no commons runs exactly as before.
    */
   readonly commons?: KnowledgeCommonsSubmitter;
+  /**
+   * The reviewer's own calibration (R35).
+   *
+   * Optional: a mission runs identically without it, and the measurement is
+   * about the REVIEWER rather than about this mission's work — turning it into
+   * a gate would let the yardstick overrule the thing it measures.
+   */
+  readonly calibration?: CalibrationSeam;
 }
 
 /**
@@ -165,6 +175,25 @@ export interface KnowledgeCommonsSubmitter {
       readonly verifiedBy: string;
     };
   }): Promise<unknown>;
+}
+
+/**
+ * How the reviewer gets measured (R35).
+ *
+ * `reReview` is asked for a SECOND opinion on a verdict already issued, and must
+ * come from a different reviewer — `calibrationOf` refuses a self re-review,
+ * because a reviewer agreeing with itself measures nothing.
+ *
+ * `probes` are tasks whose correct verdict is already known, planted in the
+ * review stream. They catch what calibration structurally cannot: a reviewer
+ * consistently wrong in the same direction agrees with itself perfectly, which
+ * is also why ADR-0010's unanimity sampling is silent for it (`627cd71c`).
+ */
+export interface CalibrationSeam {
+  /** Which of these verdicts to re-review. Sampling policy belongs to the caller. */
+  sample(issued: readonly IssuedVerdict[]): Promise<readonly ReReview[]>;
+  /** Probes planted in this mission, if any. */
+  probes?(): Promise<readonly Probe[]>;
 }
 
 export interface Escalation {
@@ -470,6 +499,75 @@ export async function runMission(
     });
   }
 
+  /**
+   * Measure the reviewer against this mission's own verdicts (R35 AC-0/AC-1).
+   *
+   * Runs on BOTH terminal paths, because a surrendered mission's verdicts are
+   * exactly the ones most worth re-reviewing — R37's pedigree was attached to
+   * only one of two paths and silently missed half the missions, and this is the
+   * same shape.
+   *
+   * Failure is swallowed and the result is a MEASUREMENT, never a verdict. A
+   * calibration that could overturn a gate would put the yardstick in the
+   * business of overruling what it measures, which is the constitutional line
+   * about the learner not owning the yardstick.
+   */
+  const runCalibration = async (): Promise<void> => {
+    if (seams.calibration === undefined) return;
+
+    // The WORK, not just the verdict: a second opinion formed from the first
+    // opinion measures obedience, not calibration.
+    const executed = new Map<string, { objective?: string; deliverable?: unknown }>();
+    for (const e of trail) {
+      if (e.taskId === null) continue;
+      if (e.type === 'task.contracted') {
+        const objective = (e.payload as { objective?: unknown }).objective;
+        if (typeof objective === 'string') {
+          executed.set(e.taskId, { ...executed.get(e.taskId), objective });
+        }
+      }
+      if (e.type === 'task.executed') {
+        executed.set(e.taskId, {
+          ...executed.get(e.taskId),
+          deliverable: (e.payload as { deliverable?: unknown }).deliverable,
+        });
+      }
+    }
+
+    const issued: IssuedVerdict[] = trail
+      .filter((e) => e.type === 'gate_b.verdict_issued' && e.taskId !== null)
+      .map((e) => {
+        const p = e.payload as { outcome?: unknown; reviewerId?: unknown; verdictId?: unknown };
+        const work = executed.get(e.taskId!) ?? {};
+        return {
+          taskId: e.taskId!,
+          outcome: p.outcome === 'pass' ? ('pass' as const) : ('fail' as const),
+          reviewerId: typeof p.reviewerId === 'string' ? p.reviewerId : 'unknown',
+          verdictId: typeof p.verdictId === 'string' ? p.verdictId : 'unknown',
+          ...(work.objective === undefined ? { objective: mission.objective } : { objective: work.objective }),
+          deliverable: work.deliverable,
+        };
+      });
+
+    if (issued.length === 0) return;
+
+    try {
+      const reReviews = await seams.calibration.sample(issued);
+      const probes = (await seams.calibration.probes?.()) ?? [];
+
+      const calibration = calibrationOf(issued, reReviews);
+      const misses = probeMisses(probes, issued);
+
+      record(mission.taskId, 'verification', 'reviewer.calibrated', 'reviewer', {
+        ...calibration,
+        probesPlanted: probes.length,
+        misses,
+      });
+    } catch {
+      // A measurement that fails is a missing measurement, not a failed mission.
+    }
+  };
+
   const surrender = (reason: string, blockers: string[]): MissionResult => {
     // The dossier is DERIVED from the trail at the moment of surrender (R37
     // AC-1), not accumulated as the mission ran. A second copy kept alongside
@@ -482,6 +580,11 @@ export async function runMission(
       blockers,
       dossier: surrenderDossier(mission, trail, reason, blockers),
     });
+    // Fire-and-forget: `surrender` is synchronous and called from deep in the
+    // recursion. The record lands in the same trail either way, and awaiting
+    // here would mean threading async through every failure path for a
+    // measurement that must never delay a result.
+    void runCalibration();
     return { outcome: 'surrendered', deliverable: null, trail, escalations };
   };
 
@@ -1355,6 +1458,8 @@ export async function runMission(
     objective: mission.objective,
     pedigree: pedigreeOf(mission, trail),
   });
+
+  await runCalibration();
 
   return { outcome: 'delivered', deliverable: root.deliverable, trail, escalations };
 }

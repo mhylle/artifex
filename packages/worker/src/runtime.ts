@@ -119,6 +119,11 @@ const CoverageSchema = Type.Object(
   { $id: 'CoverageAssessment', additionalProperties: false },
 );
 
+const ReReviewSchema = Type.Object(
+  { met: Type.Boolean(), detail: Type.String({ minLength: 1 }) },
+  { $id: 'ReReview', additionalProperties: false },
+);
+
 const IntentSchema = Type.Object(
   {
     servesIntent: Type.Boolean(),
@@ -765,6 +770,55 @@ export function createMissionSeams(
         }
       },
     }, 3),
+
+    /**
+     * The reviewer measuring itself (R35 AC-0).
+     *
+     * The re-review is a SEPARATE call that judges from the objective and the
+     * deliverable and is never shown the original verdict — showing it the answer
+     * would make agreement the default and the measurement worthless.
+     *
+     * Sampling, not sweeping: the FIRST verdict of each mission. Deterministic
+     * rather than random on purpose — `Math.random` would make a mission
+     * unreplayable, and replay-by-trail is how this system resumes (R41).
+     * Calibration is a trend across missions; re-reviewing everything would
+     * double the cost of verification to learn what a sample already tells us.
+     *
+     * HONEST LIMIT: this runs on the same evaluative model as the original
+     * reviewer, because the Model Catalog has no third tier configured. That is
+     * weaker independence than a different model would give — it catches noise
+     * and inconsistency, but a model wrong the same way twice will agree with
+     * itself. That specific blind spot is what the PROBES (AC-1) exist for, and
+     * why `627cd71c` was logged rather than assumed solved.
+     */
+    calibration: {
+      async sample(issued) {
+        const target = issued[0];
+        if (target === undefined) return [];
+
+        try {
+          const out = (await gen(models.evaluator, ReReviewSchema, [
+            'You are a SECOND, independent reviewer. Judge only whether the work below',
+            'does what the task asked. You have not been told what the first reviewer',
+            'decided, and you should not try to infer it.',
+            '',
+            `TASK: ${target.objective ?? 'unknown'}`,
+            `DELIVERABLE: ${JSON.stringify(target.deliverable)}`,
+          ].join(NL))) as { met: boolean; detail: string };
+
+          return [{
+            taskId: target.taskId,
+            outcome: out.met ? ('pass' as const) : ('fail' as const),
+            // A DIFFERENT reviewer id, or `calibrationOf` refuses the re-review
+            // as non-independent — which is exactly the check working.
+            reviewerId: 'calibration-re-reviewer',
+          }];
+        } catch {
+          // A measurement that fails is a missing measurement, not a failure.
+          return [];
+        }
+      },
+    },
 
     completionJudge: {
       async assess({ contract, bundle }) {
