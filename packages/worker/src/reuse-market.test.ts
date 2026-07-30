@@ -144,6 +144,15 @@ describe('R38 AC-1 — creation feeds the market it is the exception to', () => 
 
     await staff({
       contract: contract(),
+    // R33's plan audit. Permissive here on purpose: these tests are about other
+    // properties, and an explicit permissive judge in a fixture is honest in a
+    // way a silently-skipped clause in production never is. The clause itself is
+    // exercised in `gate-a-full.test.ts`.
+    planJudge: {
+      async audit({ children }: { children: readonly { taskId: string }[] }) {
+        return { tasks: children.map((c) => ({ taskId: c.taskId, atomic: true, detail: 'ok' })), untestable: [], overlaps: [] };
+      },
+    },
       registry: lookup,
       author: { async design() { authored = true; return { roleInstructions: 'x', capabilities: ['text'] }; } },
     });
@@ -229,6 +238,11 @@ describe('R38 AC-1 — Gate B feeds the track record', () => {
       coverageJudge: {
         async assess({ parent, children }) {
           return { coverage: parent.acceptanceCriteria.map((c) => ({ criterionId: c.criterionId, coveredByTaskIds: children.map((k) => k.taskId) })) };
+        },
+      },
+      planJudge: {
+        async audit({ children }: { children: readonly { taskId: string }[] }) {
+          return { tasks: children.map((c) => ({ taskId: c.taskId, atomic: true, detail: 'ok' })), untestable: [], overlaps: [] };
         },
       },
       registry: lookup,

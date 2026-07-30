@@ -73,6 +73,15 @@ function seams(bidsFor: (category: string) => RegisteredDesign | null): MissionS
         };
       },
     },
+    // R33's plan audit. Permissive here on purpose: these tests are about other
+    // properties, and an explicit permissive judge in a fixture is honest in a
+    // way a silently-skipped clause in production never is. The clause itself is
+    // exercised in `gate-a-full.test.ts`.
+    planJudge: {
+      async audit({ children }: { children: readonly { taskId: string }[] }) {
+        return { tasks: children.map((c) => ({ taskId: c.taskId, atomic: true, detail: 'ok' })), untestable: [], overlaps: [] };
+      },
+    },
     registry: { async bestForCategory(category) { return bidsFor(category); } },
     author: { async design() { return { roleInstructions: 'Improvise.', capabilities: ['text'] }; } },
     clarityJudge: { async assess() { return { restatement: 'Do it.', ambiguities: [] }; } },

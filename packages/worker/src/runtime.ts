@@ -20,6 +20,7 @@ import { Type } from '@sinclair/typebox';
 import type { RegistryLookup } from './agent-creator.js';
 import { composeDesign } from './design-playbook.js';
 import type { ControlSignals, DecompositionGate, KnowledgeCommonsSubmitter } from './mission-loop.js';
+import type { PlanJudge } from './reviewer.js';
 import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
 import type { MissionSeams } from './mission-loop.js';
@@ -55,6 +56,41 @@ const AnswerSchema = Type.Object(
 const AssumptionsSchema = Type.Object(
   { assumptions: Type.Array(Type.String({ minLength: 1 })) },
   { $id: 'WorkerAssumptions', additionalProperties: false },
+);
+
+/** Prompt line separator, named so it survives codegen that eats escapes. */
+const NL = String.fromCharCode(10);
+
+const PlanAuditSchema = Type.Object(
+  {
+    tasks: Type.Array(
+      Type.Object(
+        {
+          taskId: Type.String({ minLength: 1 }),
+          atomic: Type.Boolean(),
+          detail: Type.String({ minLength: 1 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    untestable: Type.Array(
+      Type.Object(
+        {
+          taskId: Type.String({ minLength: 1 }),
+          criterionId: Type.String({ minLength: 1 }),
+          detail: Type.String({ minLength: 1 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    overlaps: Type.Array(
+      Type.Object(
+        { taskIds: Type.Array(Type.String({ minLength: 1 })), detail: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { $id: 'PlanAudit', additionalProperties: false },
 );
 
 const ClaritySchema = Type.Object(
@@ -275,6 +311,85 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Sample the plan audit and require UNANIMITY to reject (R33 AC-0).
+ *
+ * The house pattern for an unreliable model judgement, following the admission
+ * gate (`d678cd8c`) and the decompose-or-delegate gate (`890cdea5`). Unanimity
+ * is required in the SAFE direction, and here the safe direction is passing: a
+ * false rejection surrenders a mission that would have succeeded, while a false
+ * pass is still caught downstream by Gate B on the actual work.
+ *
+ * Measured need, not caution: on live mission d55b7f62 the evaluative model
+ * rejected an ordinary two-way split as non-atomic on both attempts, the same
+ * over-rejection that gave the clarity judge its 58% false-bounce rate.
+ *
+ * A throwing sample counts as "no complaint" — it produced no finding, and
+ * treating an outage as a rejection would be the unsafe direction.
+ */
+export function sampledPlanAudit(judge: PlanJudge, samples: number): PlanJudge {
+  return {
+    async audit(input) {
+      const runs = await Promise.all(
+        Array.from({ length: samples }, async () => {
+          try {
+            return await judge.audit(input);
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      const real = runs.filter((r): r is NonNullable<typeof r> => r !== null);
+      if (real.length === 0) {
+        return {
+          tasks: input.children.map((c) => ({ taskId: c.taskId, atomic: true, detail: 'not audited' })),
+          untestable: [],
+          overlaps: [],
+        };
+      }
+
+      // A task is non-atomic only if EVERY sample said so. The detail kept is
+      // the first dissent-free explanation, so the verdict carries a reason a
+      // re-split can act on rather than a bare flag.
+      const tasks = input.children.map((child) => {
+        const verdicts = real.map((r) => r.tasks.find((t) => t.taskId === child.taskId));
+        const allSayCompound =
+          verdicts.length === real.length && verdicts.every((v) => v !== undefined && !v.atomic);
+        return {
+          taskId: child.taskId,
+          atomic: !allSayCompound,
+          detail: verdicts.find((v) => v !== undefined && !v.atomic)?.detail ?? 'atomic',
+        };
+      });
+
+      const unanimous = <T>(pick: (r: NonNullable<(typeof real)[number]>) => readonly T[], key: (t: T) => string) => {
+        const counts = new Map<string, { item: T; n: number }>();
+        for (const run of real) {
+          // Distinct within a run, so one sample repeating itself cannot pass
+          // for agreement between samples.
+          const seen = new Set<string>();
+          for (const item of pick(run)) {
+            const k = key(item);
+            if (seen.has(k)) continue;
+            seen.add(k);
+            const entry = counts.get(k) ?? { item, n: 0 };
+            entry.n += 1;
+            counts.set(k, entry);
+          }
+        }
+        return [...counts.values()].filter((e) => e.n === real.length).map((e) => e.item);
+      };
+
+      return {
+        tasks,
+        untestable: unanimous((r) => r.untestable, (u) => `${u.taskId}::${u.criterionId}`),
+        overlaps: unanimous((r) => r.overlaps, (o) => [...o.taskIds].sort().join('+')),
+      };
+    },
+  };
+}
+
 export function createMissionSeams(
   generator: StructuredGenerator,
   models: RuntimeModels,
@@ -462,6 +577,70 @@ export function createMissionSeams(
         };
       },
     },
+
+    /**
+     * Gate A's semantic clauses (R33 AC-0) — atomicity, testability as written,
+     * and scope overlap between siblings.
+     *
+     * EVALUATIVE tier, like the other gates: "is this task one responsibility"
+     * is a judgement about the shape of the work, and fold-up taught us that
+     * evaluative questions belong a tier above the doing (insight `1aad1dd5`).
+     *
+     * A failed audit is treated as a CLEAN plan rather than a rejected one. That
+     * is deliberate and it is the safe direction here: the deterministic clauses
+     * still ran, and letting a model outage reject every decomposition would
+     * turn a transient failure into a mission that cannot be planned at all.
+     * The gate degrades to what it can prove rather than to a refusal.
+     */
+    planJudge: sampledPlanAudit({
+      async audit({ parent, children }) {
+        const clean = {
+          tasks: children.map((c) => ({ taskId: c.taskId, atomic: true, detail: 'not audited' })),
+          untestable: [],
+          overlaps: [],
+        };
+
+        try {
+          const out = (await gen(models.evaluator, PlanAuditSchema, [
+            'Audit this task decomposition. Answer only about the tasks listed.',
+            '',
+            'ATOMIC means the task carries exactly ONE responsibility with ONE verifiable',
+            'outcome. A task that researches AND writes is not atomic.',
+            '',
+            'UNTESTABLE means a criterion does not name an observable outcome AS WRITTEN.',
+            'The grader reads the words, so judge the words: "the output is good" is',
+            'untestable, "the output states a temperature in Celsius" is testable.',
+            '',
+            'OVERLAP means two tasks would do the same WORK. Two tasks each doing part of',
+            'one parent criterion is normal partitioning, NOT overlap.',
+            '',
+            `PARENT OBJECTIVE: ${parent.objective}`,
+            'TASKS:',
+            ...children.map(
+              (c) =>
+                `  ${c.taskId} — ${c.objective}` + NL +
+                c.acceptanceCriteria.map((x) => `      ${x.criterionId}: ${x.statement}`).join(NL),
+            ),
+          ].join(NL))) as {
+            tasks: Array<{ taskId: string; atomic: boolean; detail: string }>;
+            untestable: Array<{ taskId: string; criterionId: string; detail: string }>;
+            overlaps: Array<{ taskIds: string[]; detail: string }>;
+          };
+
+          // Only tasks the plan actually contains. A model naming a task that is
+          // not in the decomposition is grading a different plan, and letting an
+          // invented id fail the gate would be unfixable by any re-split.
+          const known = new Set(children.map((c) => c.taskId));
+          return {
+            tasks: out.tasks.filter((t) => known.has(t.taskId)),
+            untestable: out.untestable.filter((u) => known.has(u.taskId)),
+            overlaps: out.overlaps.filter((o) => o.taskIds.every((id) => known.has(id))),
+          };
+        } catch {
+          return clean;
+        }
+      },
+    }, 3),
 
     completionJudge: {
       async assess({ contract, bundle }) {

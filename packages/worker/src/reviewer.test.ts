@@ -13,6 +13,22 @@ import { describe, expect, it } from 'vitest';
 import { gateA, gateB } from './reviewer.js';
 import type { CompletionJudge, CoverageJudge } from './reviewer.js';
 
+/**
+ * R33 added two judged clauses to Gate A. Permissive here: these tests are about
+ * coverage and cycles, and an explicit permissive judge is honest in a way a
+ * silently-skipped clause never is. The clauses themselves live in
+ * `gate-a-full.test.ts`.
+ */
+const PLAN_OK = {
+  async audit({ children }: { children: readonly { taskId: string }[] }) {
+    return {
+      tasks: children.map((c) => ({ taskId: c.taskId, atomic: true, detail: 'ok' })),
+      untestable: [],
+      overlaps: [],
+    };
+  },
+};
+
 const AT = '2026-07-30T09:00:00.000Z';
 const MISSION_ID = '3f1c2a54-0d6b-4f2e-9a71-8c5d0e2b7a13';
 const REVIEWER_ID = '7b2d9e10-4c58-4a3f-b6e2-1f8c0d5a9b47';
@@ -68,7 +84,7 @@ describe('R7 AC-1 — Gate A fails an incomplete decomposition and NAMES what is
       },
     };
 
-    const verdict = await gateA(contract(), children, judge, META);
+    const verdict = await gateA(contract(), children, judge, PLAN_OK, META);
 
     expect(verdict.gate).toBe('A');
     expect(verdict.outcome).toBe('fail');
@@ -83,7 +99,7 @@ describe('R7 AC-1 — Gate A fails an incomplete decomposition and NAMES what is
       async assess() { return { coverage: [{ criterionId: 'm-1', coveredByTaskIds: [CHILD_A] }, { criterionId: 'm-2', coveredByTaskIds: [] }] }; },
     };
 
-    const verdict = await gateA(contract(), children, judge, META);
+    const verdict = await gateA(contract(), children, judge, PLAN_OK, META);
 
     expect(verdict.findings[0]?.errorClass).toBe('specification_fault');
   });
@@ -94,7 +110,7 @@ describe('R7 AC-1 — Gate A fails an incomplete decomposition and NAMES what is
       async assess() { return { coverage: [{ criterionId: 'm-1', coveredByTaskIds: [CHILD_A] }, { criterionId: 'm-2', coveredByTaskIds: [CHILD_B] }] }; },
     };
 
-    const verdict = await gateA(contract(), children, judge, META);
+    const verdict = await gateA(contract(), children, judge, PLAN_OK, META);
 
     expect(verdict.outcome).toBe('pass');
     expect(verdict.findings).toEqual([]);
@@ -107,7 +123,7 @@ describe('R7 AC-1 — Gate A fails an incomplete decomposition and NAMES what is
       async assess() { return { coverage: [{ criterionId: 'm-1', coveredByTaskIds: [CHILD_A] }] }; },
     };
 
-    const verdict = await gateA(contract(), children, judge, META);
+    const verdict = await gateA(contract(), children, judge, PLAN_OK, META);
 
     expect(verdict.outcome).toBe('fail');
     expect(verdict.findings.map((f) => f.criterionId)).toContain('m-2');
@@ -116,7 +132,7 @@ describe('R7 AC-1 — Gate A fails an incomplete decomposition and NAMES what is
   it('DISTRACTOR: an empty decomposition cannot pass', async () => {
     const judge: CoverageJudge = { async assess() { return { coverage: [] }; } };
 
-    await expect(gateA(contract(), [], judge, META)).rejects.toThrow(/no children|empty/i);
+    await expect(gateA(contract(), [], judge, PLAN_OK, META)).rejects.toThrow(/no children|empty/i);
   });
 
   it('produces a schema-valid verdict', async () => {
@@ -124,7 +140,7 @@ describe('R7 AC-1 — Gate A fails an incomplete decomposition and NAMES what is
       async assess() { return { coverage: [{ criterionId: 'm-1', coveredByTaskIds: [CHILD_A] }, { criterionId: 'm-2', coveredByTaskIds: [CHILD_B] }] }; },
     };
 
-    const result = validate(VerdictSchema, await gateA(contract(), children, judge, META));
+    const result = validate(VerdictSchema, await gateA(contract(), children, judge, PLAN_OK, META));
     expect(result.ok, JSON.stringify(result.ok ? {} : result.errors)).toBe(true);
   });
 });
@@ -261,9 +277,15 @@ describe('Gate A - the dependency graph must be acyclic (R32 AC-2)', () => {
     },
   };
 
+  // A task coupled to a sibling. R33 added a Gate A clause requiring pinned
+  // decisions wherever siblings must fit together, so a coupled fixture now
+  // carries one — otherwise these tests would fail for a reason that has nothing
+  // to do with the property they name ("a diamond is not a cycle"), which is how
+  // a suite quietly stops testing what its describe claims.
   const linked = (taskId: string, objective: string, consumes: string[]): TaskContract => ({
     ...child(taskId, objective),
     dependencies: { consumesTaskIds: consumes, mayRequest: [] },
+    inputs: { entitlements: [], toolEntitlements: [], pinnedDecisions: ['Figures in GWh.'] },
   });
 
   it('refuses a two-task cycle rather than deadlocking at execution time', async () => {
@@ -272,7 +294,7 @@ describe('Gate A - the dependency graph must be acyclic (R32 AC-2)', () => {
       linked(CHILD_B, 'Charging infrastructure.', [CHILD_A]),
     ];
 
-    const verdict = await gateA(contract(), cyclic, covering, META);
+    const verdict = await gateA(contract(), cyclic, covering, PLAN_OK, META);
 
     expect(verdict.outcome).toBe('fail');
     expect(verdict.findings.map((f) => f.detail).join(' ')).toMatch(/cycle|circular/i);
@@ -285,7 +307,7 @@ describe('Gate A - the dependency graph must be acyclic (R32 AC-2)', () => {
       child(CHILD_B, 'Charging infrastructure.'),
     ];
 
-    const verdict = await gateA(contract(), selfLoop, covering, META);
+    const verdict = await gateA(contract(), selfLoop, covering, PLAN_OK, META);
 
     expect(verdict.outcome).toBe('fail');
   });
@@ -302,7 +324,7 @@ describe('Gate A - the dependency graph must be acyclic (R32 AC-2)', () => {
       linked(CHILD_C, 'Merge both.', [CHILD_A, CHILD_B]),
     ];
 
-    const verdict = await gateA(contract(), diamond, covering, META);
+    const verdict = await gateA(contract(), diamond, covering, PLAN_OK, META);
 
     expect(verdict.outcome).toBe('pass');
   });
@@ -313,7 +335,7 @@ describe('Gate A - the dependency graph must be acyclic (R32 AC-2)', () => {
       linked(CHILD_B, 'Second, needs the first.', [CHILD_A]),
     ];
 
-    const verdict = await gateA(contract(), chain, covering, META);
+    const verdict = await gateA(contract(), chain, covering, PLAN_OK, META);
 
     expect(verdict.outcome).toBe('pass');
   });
@@ -326,7 +348,7 @@ describe('Gate A - the dependency graph must be acyclic (R32 AC-2)', () => {
       child(CHILD_B, 'Charging infrastructure.'),
     ];
 
-    const verdict = await gateA(contract(), outside, covering, META);
+    const verdict = await gateA(contract(), outside, covering, PLAN_OK, META);
 
     expect(verdict.outcome).toBe('pass');
   });

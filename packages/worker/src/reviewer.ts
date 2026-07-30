@@ -32,6 +32,52 @@ export interface CoverageJudge {
   }): Promise<{ readonly coverage: ReadonlyArray<{ readonly criterionId: string; readonly coveredByTaskIds: readonly string[] }> }>;
 }
 
+/**
+ * The two Gate A clauses that genuinely need judgement (R33 AC-0).
+ *
+ * Everything else the dossier names — stopping conditions, boundary overlap,
+ * pinned decisions between coupled siblings, cycles — is decidable from the
+ * contracts themselves, and a check that needs no model must not cost one.
+ *
+ * These two do not decide themselves:
+ *   - **atomicity**: "exactly one responsibility with one verifiable outcome"
+ *     is about what the objective MEANS, not its shape.
+ *   - **testability as written**: a criterion can mean something checkable and
+ *     fail to say it. The grader reads the words, so the words are what is
+ *     audited.
+ */
+export interface PlanJudge {
+  audit(input: {
+    readonly parent: TaskContract;
+    readonly children: readonly TaskContract[];
+  }): Promise<{
+    readonly tasks: ReadonlyArray<{
+      readonly taskId: string;
+      readonly atomic: boolean;
+      readonly detail: string;
+    }>;
+    readonly untestable: ReadonlyArray<{
+      readonly taskId: string;
+      readonly criterionId: string;
+      readonly detail: string;
+    }>;
+    /**
+     * Siblings whose scopes overlap — two tasks doing the same work.
+     *
+     * This started as a deterministic check: two children owning the same
+     * parent criterion. The existing suite rejected that immediately and was
+     * right to. A criterion is routinely met JOINTLY — two tasks each doing part
+     * of it is ordinary partitioning, not duplication — so shared coverage says
+     * nothing about overlap. Overlap is about scope of WORK, which the coverage
+     * map cannot express, so it is judged rather than computed.
+     */
+    readonly overlaps: ReadonlyArray<{
+      readonly taskIds: readonly string[];
+      readonly detail: string;
+    }>;
+  }>;
+}
+
 export interface CompletionJudge {
   assess(input: {
     readonly contract: TaskContract;
@@ -54,6 +100,7 @@ export async function gateA(
   parent: TaskContract,
   children: readonly TaskContract[],
   judge: CoverageJudge,
+  planJudge: PlanJudge,
   meta: VerdictMeta,
 ): Promise<Verdict> {
   if (children.length === 0) {
@@ -77,6 +124,103 @@ export async function gateA(
       failingStep: 'Gate A coverage check',
       detail: `No child task covers "${criterion.statement}" — the decomposition would leave it unmet.`,
     }));
+
+  for (const task of children) {
+    // ---- stopping conditions are PRESENT ------------------------------------
+    // Work with no stated end is not a task. Without these the escalation ladder
+    // has nothing to measure against and a stalled task runs until the budget
+    // is gone, which is the most expensive possible way to discover it.
+    const stopping = task.stoppingConditions;
+    if (stopping.doneWhen.length === 0 || stopping.stopTryingWhen.length === 0) {
+      findings.push({
+        criterionId: task.acceptanceCriteria[0]?.criterionId ?? 'plan',
+        errorClass: 'specification_fault' as const,
+        failingStep: 'Gate A stopping-conditions check',
+        detail:
+          `Task ${task.taskId} ("${task.objective}") declares ` +
+          `${stopping.doneWhen.length === 0 ? 'no doneWhen' : 'no stopTryingWhen'} — ` +
+          `work with no stated end cannot be stopped, only abandoned when the budget runs out.`,
+      });
+    }
+  }
+
+  // ---- pinned decisions WHERE SIBLINGS MUST FIT TOGETHER --------------------
+  // Only where they are actually coupled. Demanding pinned decisions from tasks
+  // that never meet would fail almost every valid plan, and a check that fires
+  // on everything tells you nothing.
+  //
+  // Coupled siblings told nothing about how to fit will each pick a reasonable
+  // convention, and the conventions will differ. That is discovered at fold-up,
+  // after both have been paid for.
+  const siblingIds = new Set(children.map((c) => c.taskId));
+  for (const task of children) {
+    const consumesSibling = task.dependencies.consumesTaskIds.some((id) => siblingIds.has(id));
+    if (consumesSibling && task.inputs.pinnedDecisions.length === 0) {
+      findings.push({
+        criterionId: task.acceptanceCriteria[0]?.criterionId ?? 'plan',
+        errorClass: 'specification_fault' as const,
+        failingStep: 'Gate A pinned-decision check',
+        detail:
+          `Task ${task.taskId} consumes a sibling's output but carries no pinned decisions. ` +
+          `Siblings that must fit together and were told nothing about how will each choose a ` +
+          `reasonable convention, and the conventions will not match.`,
+      });
+    }
+  }
+
+  // ---- the two semantic clauses -------------------------------------------
+  const plan = await planJudge.audit({ parent, children });
+  const byId = new Map(children.map((c) => [c.taskId, c]));
+
+  for (const task of plan.tasks) {
+    if (task.atomic) continue;
+    findings.push({
+      criterionId: byId.get(task.taskId)?.acceptanceCriteria[0]?.criterionId ?? 'plan',
+      errorClass: 'specification_fault' as const,
+      failingStep: 'Gate A atomicity check',
+      detail:
+        `Task ${task.taskId} is not atomic: ${task.detail}. ` +
+        `Splitting continues until each leaf carries exactly one responsibility with one ` +
+        `verifiable outcome — and no further.`,
+    });
+  }
+
+  // ---- boundaries: NON-OVERLAPPING (the exhaustive half is coverage above) --
+  for (const overlap of plan.overlaps) {
+    findings.push({
+      criterionId: byId.get(overlap.taskIds[0] ?? '')?.acceptanceCriteria[0]?.criterionId ?? 'plan',
+      errorClass: 'specification_fault' as const,
+      failingStep: 'Gate A boundary check (overlapping)',
+      detail:
+        `Tasks ${overlap.taskIds.join(', ')} overlap in scope: ${overlap.detail}. ` +
+        `Boundaries must be non-overlapping as well as exhaustive — duplicated work is paid for ` +
+        `twice and hands the fold-up two answers to one question.`,
+    });
+  }
+
+  // Only criteria the DECOMPOSITION introduced. A criterion inherited verbatim
+  // from the parent was not a planning decision, and criteria are partitioned,
+  // never invented — the planner carries the parent's `criterionId` and wording
+  // through unchanged, so it CANNOT reword one.
+  //
+  // Judging those produces a rejection no re-split can repair: observed live on
+  // mission d55b7f62, where the gate rejected "Stopping power is compared"
+  // (the requester's own words from intake) twice and surrendered. Untestable
+  // intake is R30's job — "interrogate until testable, then flag what remains" —
+  // and catching it here instead grades the wrong agent for the wrong decision.
+  const inherited = new Set(parent.acceptanceCriteria.map((c) => c.criterionId));
+
+  for (const bad of plan.untestable) {
+    if (inherited.has(bad.criterionId)) continue;
+    findings.push({
+      criterionId: bad.criterionId,
+      errorClass: 'specification_fault' as const,
+      failingStep: 'Gate A testability check',
+      detail:
+        `Criterion ${bad.criterionId} on task ${bad.taskId} is not testable as written: ${bad.detail}. ` +
+        `The grader reads the words, so the words are what must be checkable.`,
+    });
+  }
 
   if (cycle !== null) {
     findings.push({

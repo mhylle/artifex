@@ -51,7 +51,18 @@ export interface DecompositionProposal {
 }
 
 export interface Planner {
-  propose(input: { readonly contract: TaskContract }): Promise<DecompositionProposal>;
+  propose(input: {
+    readonly contract: TaskContract;
+    /**
+     * Why the previous plan for this same contract was rejected (R33 AC-1).
+     *
+     * Absent on the first attempt. Present on a re-split, and it is what makes
+     * the retry AIMED rather than blind: re-proposing from the same objective
+     * very often produces the same plan, spending a model call to rehearse the
+     * rejection.
+     */
+    readonly rejectedBecause?: readonly string[];
+  }): Promise<DecompositionProposal>;
 }
 
 export interface ChildResult {
@@ -104,8 +115,13 @@ function childTaskId(parentTaskId: string, index: number): string {
 export async function decompose(
   parent: TaskContract,
   planner: Planner,
+  /** Findings from a Gate A rejection of the previous plan (R33 AC-1). */
+  options?: { readonly rejectedBecause?: readonly string[] },
 ): Promise<TaskContract[]> {
-  const proposal = await planner.propose({ contract: parent });
+  const proposal = await planner.propose({
+    contract: parent,
+    ...(options?.rejectedBecause === undefined ? {} : { rejectedBecause: options.rejectedBecause }),
+  });
 
   if (proposal.subtasks.length === 0) {
     throw new Error('decomposition produced no subtasks — nothing to execute');
@@ -155,7 +171,34 @@ export async function decompose(
       inputs: {
         entitlements: [...parent.inputs.entitlements],
         toolEntitlements: parent.inputs.toolEntitlements.map((t) => ({ ...t })),
-        pinnedDecisions: parent.inputs.pinnedDecisions.map((d) => ({ ...d })),
+        // Inherited from the parent, PLUS one pinned per sibling edge (R33).
+        //
+        // Gate A refuses coupled siblings that share no pinned decision, and it
+        // is right to: two tasks told to fit together and told nothing about how
+        // will each pick a reasonable convention, and the conventions will
+        // differ — discovered at fold-up, after both have been paid for.
+        //
+        // Until now nothing could satisfy that clause. `pinnedDecisions` is
+        // inherited and the planner has no way to propose one, so a mission
+        // whose intake pinned nothing produced children that pinned nothing,
+        // and every dependent plan would have been rejected forever.
+        //
+        // The pin is DERIVED from the edge the plan already declares rather than
+        // invented: the producer's deliverable, as produced, is the interface.
+        // That is the minimum both sides must agree on, and it is a fact the
+        // decomposition already knows.
+        pinnedDecisions: [
+          ...parent.inputs.pinnedDecisions.map((d) => ({ ...d })),
+          ...(subtask.consumesIndexes ?? [])
+            .map((i) => proposal.subtasks[i])
+            .filter((producer): producer is NonNullable<typeof producer> => producer !== undefined)
+            .map((producer, n) => ({
+              id: `interface-${index}-${n}`,
+              decision:
+                `Consume "${producer.objective}" exactly as that task delivers it — ` +
+                `its output is the interface, and neither side may restate it in another shape.`,
+            })),
+        ],
       },
       dependencies: {
         // The typed dependency graph (R32). An index that names no sibling, or

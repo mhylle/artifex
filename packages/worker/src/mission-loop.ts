@@ -26,7 +26,7 @@ import type { DesignAuthor, RegistryLookup } from './agent-creator.js';
 import { decompose, foldUp } from './orchestrator.js';
 import type { Planner, Reconciler } from './orchestrator.js';
 import { gateA, gateB } from './reviewer.js';
-import type { CompletionJudge, CoverageJudge } from './reviewer.js';
+import type { CompletionJudge, CoverageJudge, PlanJudge } from './reviewer.js';
 import { runSpecialist } from './specialist.js';
 import type { ClarityJudge, SpecialistWork } from './specialist.js';
 
@@ -99,6 +99,15 @@ export interface ControlSignals {
 export interface MissionSeams {
   readonly planner: Planner;
   readonly coverageJudge: CoverageJudge;
+  /**
+   * Gate A's two semantic clauses — atomicity and testability-as-written (R33).
+   *
+   * REQUIRED, alongside the coverage judge rather than among the optional
+   * behavioural seams. An optional plan judge would let a mission run with two
+   * of Gate A's six clauses silently unaudited while the gate still reported a
+   * pass, which is precisely the failure Gate A exists to prevent.
+   */
+  readonly planJudge: PlanJudge;
   readonly registry: RegistryLookup;
   readonly author: DesignAuthor;
   readonly clarityJudge: ClarityJudge;
@@ -586,6 +595,15 @@ export async function runMission(
       }
     }
 
+    // ---- contract → Gate A, with ONE aimed re-split (R33 AC-1) --------------
+    // A Gate A rejection used to surrender the subtree. The criterion asks for
+    // the opposite: re-split FROM the verdict rather than retrying blind.
+    //
+    // Bounded to a single retry on purpose. A planner that cannot repair its
+    // plan must not loop, and "try again with better instructions each time" is
+    // a way to spend an entire budget rehearsing the same rejection.
+    let resplits = 0;
+    for (;;) {
     for (const child of children) {
       // Nothing is re-contracted on resume: the event is already in the trail,
       // and re-appending it would make the replay itself unfaithful.
@@ -623,17 +641,39 @@ export async function runMission(
     // re-derive a verdict the ledger already holds.
     // Nothing to audit when nothing was split: Gate A grades a decomposition,
     // and a node kept whole has none. Its work is still verified at Gate B.
-    if (!keepWhole && (recovered === undefined || recovered.length === 0)) {
+    if (keepWhole || (recovered !== undefined && recovered.length > 0)) break;
+
     let aVerdict;
     try {
-      aVerdict = await gateA(parent, children, seams.coverageJudge, verdictMeta(seq));
+      aVerdict = await gateA(parent, children, seams.coverageJudge, seams.planJudge, verdictMeta(seq));
     } catch (error) {
       return fail('Gate A could not be evaluated', [describe(error)]);
     }
     record(parent.taskId, 'verification', 'gate_a.verdict_issued', 'reviewer', { ...aVerdict });
 
-    if (aVerdict.outcome === 'fail') {
-      return fail('Gate A rejected the decomposition', aVerdict.findings.map((f) => f.detail));
+    if (aVerdict.outcome === 'pass') break;
+
+    const rejectedBecause = aVerdict.findings.map((f) => f.detail);
+
+    // Second rejection: the planner had the verdict and still could not satisfy
+    // it. Surrendering here is honest — the alternative is an unbounded loop.
+    if (resplits >= 1) {
+      return fail('Gate A rejected the decomposition', rejectedBecause);
+    }
+
+    resplits += 1;
+    record(parent.taskId, 'decision', 'decomposition.resplit', 'orchestrator', {
+      objective: parent.objective,
+      rejectedBecause,
+      detail:
+        'Gate A rejected the plan; re-splitting FROM the verdict rather than retrying blind. ' +
+        'Re-proposing from the same objective very often reproduces the same plan.',
+    });
+
+    try {
+      children = await decompose(parent, seams.planner, { rejectedBecause });
+    } catch (error) {
+      return fail('re-decomposition failed', [describe(error)]);
     }
     }
 
