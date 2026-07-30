@@ -1084,3 +1084,77 @@ describe('MissionControl — audience scoping (R22)', () => {
     expect(feed.events()).toHaveLength(5);
   });
 });
+
+/**
+ * R15 AC-0 — the canvas is a tree PLUS a typed dependency graph.
+ *
+ * "edges connect each node to its parent and to the tasks it depends on."
+ *
+ * Parenthood is drawn by nesting. Dependency had nothing to draw until R32 gave
+ * the planner a way to declare edges — and a bare count ("after 1") names a
+ * number, not a connection: an operator cannot tell WHICH sibling a task is
+ * waiting on, which is the only thing the edge is for.
+ */
+describe('MissionControl — canvas dependency edges (R15 AC-0)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let feed: LedgerFeed;
+
+  const trail = () => [
+    ev(1, 'mission.started', MISSION, { objective: 'Write then critique.' }),
+    ev(2, 'task.contracted', 't-draft', {
+      objective: 'Write the paragraph.', category: 'writing', parentTaskId: MISSION, dependsOn: [],
+    }),
+    ev(3, 'task.contracted', 't-critique', {
+      objective: 'Critique the paragraph.', category: 'review', parentTaskId: MISSION,
+      dependsOn: ['t-draft'],
+    }),
+  ];
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    feed = TestBed.inject(LedgerFeed);
+    feed.events.set(trail());
+    fixture.detectChanges();
+  });
+
+  it('names the task each node depends on, not merely how many', () => {
+    const chips = Array.from(
+      fixture.nativeElement.querySelectorAll('.deps') as NodeListOf<HTMLElement>,
+    ).map((el) => el.textContent?.trim() ?? '');
+
+    expect(chips.join(' ')).toContain('Write the paragraph.');
+  });
+
+  it('DISTRACTOR: a node with no dependencies renders no edge at all', () => {
+    // "after 0" or an empty chip would suggest a relationship the ledger never
+    // recorded — and every independent task would look like it was waiting.
+    const nodes = Array.from(
+      fixture.nativeElement.querySelectorAll('app-canvas-node') as NodeListOf<HTMLElement>,
+    );
+    const draft = nodes.find((n) => n.textContent?.includes('Write the paragraph.'));
+
+    expect(draft?.querySelector('.deps')).toBeNull();
+  });
+
+  it('DISTRACTOR: an edge to a task not in the trail degrades to its id, not a blank chip', () => {
+    // The producer may live in another subtree, or the event may not have
+    // arrived yet. A blank chip would read as "depends on nothing".
+    feed.events.set([
+      ...trail(),
+      ev(4, 'task.contracted', 't-orphan', {
+        objective: 'Consume something absent.', parentTaskId: MISSION, dependsOn: ['t-elsewhere'],
+      }),
+    ]);
+    fixture.detectChanges();
+
+    const chips = Array.from(
+      fixture.nativeElement.querySelectorAll('.deps') as NodeListOf<HTMLElement>,
+    ).map((el) => el.textContent?.trim() ?? '');
+
+    expect(chips.join(' ')).toContain('t-elsewhere');
+  });
+});

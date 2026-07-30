@@ -91,6 +91,24 @@ export class MissionControl implements OnInit {
   /** The requester's own mission, in their terms — never internal task counts. */
   readonly requesterView = computed(() => buildRequesterView(this.visibleEvents()));
 
+  /**
+   * `taskId` → objective for every task in the moment being shown, so a
+   * dependency edge can name the task it points at rather than counting them
+   * (R15 AC-0). Built from the same projection the canvas draws, so it cannot
+   * disagree with it.
+   */
+  readonly nodeLabels = computed(() => {
+    const labels: Record<string, string> = {};
+    const walk = (nodes: readonly TaskNode[]): void => {
+      for (const node of nodes) {
+        labels[node.taskId] = node.objective || node.taskId;
+        walk(node.children);
+      }
+    };
+    walk(this.visibleTree()?.children ?? []);
+    return labels;
+  });
+
   /** Template-side guard, so a control is drawn only where it could be used. */
   can(action: CockpitAction): boolean {
     return mayAct(this.audience(), action);

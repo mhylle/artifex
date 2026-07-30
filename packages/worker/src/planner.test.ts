@@ -57,6 +57,8 @@ function generatorOf(script: {
    * deduplicates never gets past the first.
    */
   objectives: string[][];
+  /** What the model answers when asked which sibling each subtask consumes. */
+  dependsOn?: number[];
 }): { generator: StructuredGenerator; calls: string[] } {
   const calls: string[] = [];
   let attempt = 0;
@@ -67,6 +69,8 @@ function generatorOf(script: {
       calls.push(id);
 
       if (id === 'SubtaskCount') return { count: script.count ?? 2 };
+
+      if (id === 'SubtaskDependency') return { dependsOn: script.dependsOn ?? [] };
 
       if (id === 'SubtaskOutline') {
         const offered = script.objectives[Math.min(attempt, script.objectives.length - 1)] ?? [];
@@ -209,6 +213,7 @@ describe('5e245281 — subtasks partition the parent criteria rather than invent
         const id = (probe.schema as { $id?: string }).$id ?? '';
         if (id === 'SubtaskCount') return { count: script.objectives.length };
         if (id === 'SubtaskOutline') return { objectives: script.objectives };
+        if (id === 'SubtaskDependency') return { dependsOn: [] };
         if (id === 'CriterionAssignment') {
           return { assignments: script.assignments ?? script.objectives.map((_, i) => i) };
         }
@@ -327,5 +332,120 @@ describe('5e245281 — subtasks partition the parent criteria rather than invent
       ['Two.'],
       ['Three.'],
     ]);
+  });
+});
+
+/**
+ * R32 — the planner declares the typed dependency graph.
+ *
+ * The contract has carried `dependencies.consumesTaskIds` since P1 and nothing
+ * ever filled it, so every mission executed as a flat set of independents. The
+ * scheduler and Gate A's cycle refusal were built first; this is the link that
+ * makes either of them reachable from a real mission.
+ *
+ * `-1` means independent. One producer per subtask, deliberately: a flat array
+ * of integers is the shallow shape defect `8b7e9e95` demanded, and a nested
+ * per-subtask list is exactly the grammar a 2B model runs away inside.
+ */
+describe('R32 — the planner declares which siblings feed which', () => {
+  const TWO = ['Draft the paragraph.', 'Critique the draft.'];
+
+  it('carries a declared edge through as consumesIndexes', async () => {
+    // Subtask 1 consumes subtask 0 — the shape that needs an edge at all.
+    const { generator } = generatorOf({ count: 2, objectives: [TWO], dependsOn: [-1, 0] });
+
+    const result = await plannerOn(generator).propose({ contract: contract() });
+
+    expect(result.subtasks[0]?.consumesIndexes ?? []).toEqual([]);
+    expect(result.subtasks[1]?.consumesIndexes).toEqual([0]);
+  });
+
+  it('asks the model at all — the declaration is a real call, not a default', async () => {
+    const { generator, calls } = generatorOf({ count: 2, objectives: [TWO], dependsOn: [-1, 0] });
+
+    await plannerOn(generator).propose({ contract: contract() });
+
+    expect(calls).toContain('SubtaskDependency');
+  });
+
+  it('DISTRACTOR: -1 means independent — no edge is invented', async () => {
+    // The failure this guards: a planner that "helpfully" chains subtasks in
+    // declaration order would serialise every mission and undo R32 entirely,
+    // while looking like it had declared a real graph.
+    const { generator } = generatorOf({ count: 2, objectives: [TWO], dependsOn: [-1, -1] });
+
+    const result = await plannerOn(generator).propose({ contract: contract() });
+
+    for (const subtask of result.subtasks) {
+      expect(subtask.consumesIndexes ?? []).toEqual([]);
+    }
+  });
+
+  it('DISTRACTOR: an out-of-range index is dropped, not carried as a dangling edge', async () => {
+    // A 2B model will happily name subtask 7 of 2. Carrying it would produce a
+    // contract waiting on a task that does not exist — a mission that can never
+    // start, diagnosed nowhere.
+    const { generator } = generatorOf({ count: 2, objectives: [TWO], dependsOn: [-1, 7] });
+
+    const result = await plannerOn(generator).propose({ contract: contract() });
+
+    expect(result.subtasks[1]?.consumesIndexes ?? []).toEqual([]);
+  });
+
+  it('DISTRACTOR: a subtask declaring ITSELF is dropped — a self-edge is a guaranteed deadlock', async () => {
+    const { generator } = generatorOf({ count: 2, objectives: [TWO], dependsOn: [0, -1] });
+
+    const result = await plannerOn(generator).propose({ contract: contract() });
+
+    expect(result.subtasks[0]?.consumesIndexes ?? []).toEqual([]);
+  });
+
+  it('DISTRACTOR: a CYCLE between two subtasks is carried through, so Gate A can refuse it', async () => {
+    // The tempting fix is to break the cycle here. That would be wrong: the plan
+    // would then execute as a silently-mangled version of what the planner
+    // proposed, instead of being refused as unexecutable. Gate A audits the
+    // plan; the planner must report what it actually decided.
+    const { generator } = generatorOf({ count: 2, objectives: [TWO], dependsOn: [1, 0] });
+
+    const result = await plannerOn(generator).propose({ contract: contract() });
+
+    expect(result.subtasks[0]?.consumesIndexes).toEqual([1]);
+    expect(result.subtasks[1]?.consumesIndexes).toEqual([0]);
+  });
+
+  it('DISTRACTOR: a single subtask is never asked about dependencies — there is nothing to depend on', async () => {
+    const { generator, calls } = generatorOf({ count: 1, objectives: [['The only piece.']] });
+
+    await plannerOn(generator).propose({ contract: contract() });
+
+    expect(calls).not.toContain('SubtaskDependency');
+  });
+});
+
+describe('R32 — a malformed dependency answer must not cost the mission', () => {
+  it('DISTRACTOR: a model that omits `dependsOn` entirely yields independent subtasks, not a crash', async () => {
+    // Exactly what a 2B model does under constrained decoding. The dependency
+    // graph is the one part of a plan the system can do without; losing the
+    // whole decomposition over an optional field would trade a scheduling
+    // optimisation for the work itself.
+    const generator: StructuredGenerator = {
+      async generate({ probe }) {
+        const id = (probe.schema as { $id?: string }).$id ?? '';
+        if (id === 'SubtaskCount') return { count: 2 };
+        if (id === 'SubtaskOutline') return { objectives: ['Draft it.', 'Critique it.'] };
+        if (id === 'SubtaskDependency') return {}; // the field the schema asked for is simply absent
+        return {
+          objective: 'IGNORED', category: 'explain', criterion: 'It is explained.',
+          outOfScope: 'Not the other part.', blastRadius: 'low' as const,
+        };
+      },
+    };
+
+    const result = await plannerOn(generator).propose({ contract: contract() });
+
+    expect(result.subtasks).toHaveLength(2);
+    for (const subtask of result.subtasks) {
+      expect(subtask.consumesIndexes ?? []).toEqual([]);
+    }
   });
 });

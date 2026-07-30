@@ -22,7 +22,13 @@ import type { TaskContract } from '@artifex/shared-types';
 import { Type } from '@sinclair/typebox';
 import type { Static } from '@sinclair/typebox';
 
-import type { ChildResult, DecompositionProposal, Planner, Reconciler } from './orchestrator.js';
+import type {
+  ChildResult,
+  DecompositionProposal,
+  Planner,
+  ProposedSubtask,
+  Reconciler,
+} from './orchestrator.js';
 
 const BLAST_RADII = ['low', 'medium', 'high'] as const;
 
@@ -283,6 +289,25 @@ export const CriterionAssignmentSchema = Type.Object(
 );
 
 /**
+ * Which sibling each subtask consumes (R32).
+ *
+ * `dependsOn[i]` is the index of the subtask whose output subtask `i` needs, or
+ * `-1` for "independent". Independence is the default and the common case:
+ * criteria are partitioned, so siblings usually have nothing to say to each
+ * other, and inventing edges would serialise every mission for no reason.
+ *
+ * ONE producer per subtask, deliberately. A flat array of integers is the
+ * shallow shape defect `8b7e9e95` demanded — a nested per-subtask list is
+ * exactly the grammar a 2B model runs away inside. The cost is that a diamond
+ * (two producers feeding one consumer) cannot be *declared* by the planner,
+ * though the scheduler and Gate A both handle one arriving from elsewhere.
+ */
+export const SubtaskDependencySchema = Type.Object(
+  { dependsOn: Type.Array(Type.Integer({ minimum: -1 })) },
+  { $id: 'SubtaskDependency', additionalProperties: false },
+);
+
+/**
  * Compare objectives the way a reader would, not the way `===` does.
  *
  * The shipped duplicates were byte-identical, but "Explain the heat pump." and
@@ -368,7 +393,33 @@ export function createStepwisePlanner(options: ModelSeamOptions): Planner {
           ? await partitionCriteria(ask, contract, accepted)
           : null;
 
-      const subtasks = [];
+      // Which sibling feeds which (R32). Skipped for a single subtask: there is
+      // nothing to depend on, and asking would spend a model call to be told so.
+      const declaredRaw =
+        accepted.length > 1
+          ? (
+              await ask<{ dependsOn?: number[] }>(
+                SubtaskDependencySchema,
+                [
+                  `For each subtask below, say which OTHER subtask's output it needs before it can start.`,
+                  `Answer with one number per subtask, in order: the index of the subtask it needs, or -1 if it needs nothing.`,
+                  `Most subtasks need nothing — answer -1 unless one genuinely cannot begin until another has finished.`,
+                  ``,
+                  `OBJECTIVE: ${contract.objective}`,
+                  ``,
+                  ...accepted.map((objective, i) => `  ${i}. ${objective}`),
+                ].join('\n'),
+              )
+            ).dependsOn
+          : [];
+
+      // A missing or malformed answer means "all independent", never a crash.
+      // The dependency graph is the one part of a plan the system can do without
+      // — losing a mission because a 2B model omitted an optional field would
+      // trade a scheduling optimisation for the whole piece of work.
+      const declared = Array.isArray(declaredRaw) ? declaredRaw : [];
+
+      const kept: Array<{ acceptedIndex: number; subtask: ProposedSubtask }> = [];
       for (const [index, objective] of accepted.entries()) {
         const covered = partition?.[index] ?? null;
         // A subtask covering nothing cannot be graded, so it is not a subtask.
@@ -391,21 +442,43 @@ export function createStepwisePlanner(options: ModelSeamOptions): Planner {
           ].join('\n'),
         );
 
-        subtasks.push({
-          // The outline decides the objective, not the detail call — otherwise a
-          // model could reintroduce a duplicate at the last step, past the guard.
-          objective,
-          category: one.category,
-          acceptanceCriteria:
-            covered ?? [{ criterionId: `ac-${index + 1}`, statement: one.criterion }],
-          outOfScope: [one.outOfScope],
-          blastRadius: one.blastRadius,
-          // Computed from what SURVIVED, not from what was asked for: shares
-          // derived from `count` would under-allocate the parent budget whenever
-          // duplicates were dropped.
-          effortShare: 1 / accepted.length,
+        kept.push({
+          acceptedIndex: index,
+          subtask: {
+            // The outline decides the objective, not the detail call — otherwise a
+            // model could reintroduce a duplicate at the last step, past the guard.
+            objective,
+            category: one.category,
+            acceptanceCriteria:
+              covered ?? [{ criterionId: `ac-${index + 1}`, statement: one.criterion }],
+            outOfScope: [one.outOfScope],
+            blastRadius: one.blastRadius,
+            // Computed from what SURVIVED, not from what was asked for: shares
+            // derived from `count` would under-allocate the parent budget whenever
+            // duplicates were dropped.
+            effortShare: 1 / accepted.length,
+          },
         });
       }
+
+      // Edges are declared against the OUTLINE's indexes, but subtasks covering
+      // nothing were dropped above — so the indexes have to be remapped or an
+      // edge would silently point at the wrong sibling. An edge into a dropped
+      // subtask is dropped with it: waiting on work nobody is doing is a mission
+      // that can never start.
+      const finalIndexOf = new Map<number, number>();
+      kept.forEach((entry, position) => finalIndexOf.set(entry.acceptedIndex, position));
+
+      const subtasks = kept.map((entry, position) => {
+        const producer = finalIndexOf.get(declared[entry.acceptedIndex] ?? -1);
+        // A self-edge is a guaranteed deadlock; -1 and out-of-range both resolve
+        // to `undefined`. A CYCLE between two different subtasks is carried
+        // through deliberately — breaking it here would execute a silently
+        // mangled version of the plan instead of letting Gate A refuse it.
+        return producer === undefined || producer === position
+          ? entry.subtask
+          : { ...entry.subtask, consumesIndexes: [producer] };
+      });
 
       return { subtasks };
     },

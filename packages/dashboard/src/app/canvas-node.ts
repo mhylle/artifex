@@ -58,6 +58,20 @@ export function nodeGlyph(status: TaskStatus): Glyph {
 export class CanvasNode {
   readonly node = input.required<TaskNode>();
   readonly selectedTaskId = input<string | null>(null);
+  /**
+   * `taskId` → objective, so a dependency edge can name the task it points at
+   * (R15 AC-0). A count alone tells the operator that a node is waiting but not
+   * on what, which is the only thing the edge is for.
+   */
+  readonly labels = input<Record<string, string>>({});
+
+  /** The tasks this node consumes, labelled. */
+  dependencyLabel(taskId: string): string {
+    // Falls back to the id rather than rendering blank: the producer may live in
+    // another subtree or its event may not have arrived, and an empty chip would
+    // read as "depends on nothing".
+    return this.labels()[taskId] ?? taskId;
+  }
   readonly selectTask = output<string>();
   /** Drill into this subtree — the affordance the breadcrumb needs to exist. */
   readonly focusTask = output<string>();

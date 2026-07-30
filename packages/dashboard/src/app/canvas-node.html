@@ -27,8 +27,8 @@
     @if (task.category) { <span class="category">{{ task.category }}</span> }
     @if (task.logicalTier !== null) { <span class="tier">tier {{ task.logicalTier }}</span> }
     @if (task.escalations) { <span class="esc">↑{{ task.escalations }}</span> }
-    @if (task.dependsOn.length) {
-      <span class="deps">after {{ task.dependsOn.length }}</span>
+    @for (producer of task.dependsOn; track producer) {
+      <span class="deps">after: {{ dependencyLabel(producer) }}</span>
     }
   </button>
 
@@ -50,6 +50,7 @@
         <app-canvas-node
           [node]="child"
           [selectedTaskId]="selectedTaskId()"
+          [labels]="labels()"
           (selectTask)="selectTask.emit($event)"
           (focusTask)="focusTask.emit($event)"
         />

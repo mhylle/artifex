@@ -320,6 +320,7 @@
           <app-canvas-node
             [node]="task"
             [selectedTaskId]="selectedTaskId()"
+            [labels]="nodeLabels()"
             (selectTask)="selectTask($event)"
             (focusTask)="focus($event)"
           />
