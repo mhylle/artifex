@@ -83,16 +83,36 @@ export async function main(): Promise<void> {
       const { contract } = job.data;
       console.log(`\n> mission ${contract.missionId}: ${contract.objective}`);
 
+      // Appends are chained rather than fired in parallel: the ledger's ordering
+      // is what replay and time-travel are defined by, so events must reach it
+      // in the order they happened. Awaiting the chain after the run means a
+      // surrendered mission still lands a complete, ordered history.
+      let appends: Promise<unknown> = Promise.resolve();
+      const failed: string[] = [];
+
       const result = await runMission(
         contract,
         createMissionSeams(generator, { worker, evaluator }),
-        { now: new Date().toISOString() },
+        {
+          now: new Date().toISOString(),
+          // Streamed as they happen (defect `b3b4e554`). Appending the whole
+          // trail after the run left a watching dashboard blind for the entire
+          // mission, then jumping straight to the finished state.
+          onEvent: (event) => {
+            appends = appends
+              .then(() => ledger.append(event))
+              .catch((cause: unknown) => {
+                // Recorded, not thrown: losing the mission because the ledger
+                // hiccuped would trade a reporting problem for a real one.
+                failed.push(`${event.type}: ${String(cause)}`);
+              });
+          },
+        },
       );
 
-      // Appended after the run so the ledger carries the complete ordered
-      // history even when the mission surrendered.
-      for (const event of result.trail) {
-        await ledger.append(event);
+      await appends;
+      if (failed.length > 0) {
+        console.error(`! ${failed.length} ledger append(s) failed:\n  ${failed.join('\n  ')}`);
       }
 
       console.log(

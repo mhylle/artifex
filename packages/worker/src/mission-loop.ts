@@ -74,6 +74,19 @@ export async function runMission(
      * Defaults to 1: enough to absorb a hiccup, not enough to hide a fault.
      */
     readonly transientRetries?: number;
+    /**
+     * Called for each event as it is recorded, so the trail can be persisted and
+     * streamed while the mission runs rather than in a burst at the end.
+     *
+     * Defect `b3b4e554`: the worker appended `result.trail` only after this
+     * function resolved, so a connected dashboard sat blind for the whole
+     * mission and then jumped straight to the finished state. The dossier
+     * promises events "streamed as they happen".
+     *
+     * Deliberately synchronous and failure-absorbing: the mission must not slow
+     * to the speed of the ledger, and must not die because a subscriber threw.
+     */
+    readonly onEvent?: (event: LedgerEventInput) => void;
   },
 ): Promise<MissionResult> {
   const { now } = options;
@@ -90,7 +103,7 @@ export async function runMission(
     payload: Record<string, unknown>,
   ): void => {
     seq += 1;
-    trail.push({
+    const event: LedgerEventInput = {
       eventId: `${mission.taskId.slice(0, 24)}${seq.toString(16).padStart(12, '0')}`,
       missionId: mission.missionId,
       taskId,
@@ -99,7 +112,17 @@ export async function runMission(
       actor: { kind: actorKind, id: actorKind, displayName: null },
       payload,
       occurredAt: now,
-    });
+    };
+    trail.push(event);
+
+    // The trail is still returned in full — replay and the mission result do not
+    // depend on anyone listening. This is an additional path, not a substitute.
+    try {
+      options.onEvent?.(event);
+    } catch {
+      // A subscriber's failure is not a mission failure. The event is already in
+      // the trail, so nothing is lost that replay cannot recover.
+    }
   };
 
   const verdictMeta = (n: number) => ({

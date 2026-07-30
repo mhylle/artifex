@@ -331,3 +331,52 @@ describe('defect 626f6596 — a TRANSIENT failure is retried before a rung is sp
     expect(result.escalations).toHaveLength(1);
   });
 });
+
+/**
+ * Defect `b3b4e554` (second half) — the trail must stream, not arrive in a burst.
+ *
+ * `packages/worker/src/index.ts` appended `result.trail` only after `runMission`
+ * resolved, so even with the Postgres LISTEN connected the dashboard would sit
+ * empty for the whole mission and then jump to the finished state. The dossier
+ * promises "typed events, streamed as they happen" and a canvas "executing left
+ * to right"; neither survives batch-at-the-end.
+ */
+describe('b3b4e554 — events are emitted as they happen, not batched at the end', () => {
+  it('emits every trail event through onEvent, in trail order', async () => {
+    const emitted: string[] = [];
+
+    const result = await runMission(mission(), seams(), {
+      now: AT,
+      onEvent: (event) => void emitted.push(event.eventId),
+    });
+
+    expect(emitted).toEqual(result.trail.map((e) => e.eventId));
+  });
+
+  it('DISTRACTOR: the first event is emitted BEFORE the mission resolves', async () => {
+    // The whole point. Collecting into an array and flushing at the end would
+    // satisfy the ordering test above while leaving the dashboard just as blind.
+    let emittedBeforeResolve = 0;
+    let resolved = false;
+
+    const pending = runMission(mission(), seams(), {
+      now: AT,
+      onEvent: () => { if (!resolved) emittedBeforeResolve += 1; },
+    });
+    await pending;
+    resolved = true;
+
+    expect(emittedBeforeResolve).toBeGreaterThan(1);
+  });
+
+  it('DISTRACTOR: a throwing subscriber does not take the mission down', async () => {
+    // The ledger append can fail transiently; losing the mission because the
+    // stream hiccuped would trade a cosmetic problem for a real one.
+    const result = await runMission(mission(), seams(), {
+      now: AT,
+      onEvent: () => { throw new Error('sink exploded'); },
+    });
+
+    expect(result.outcome).toBe('delivered');
+  });
+});
