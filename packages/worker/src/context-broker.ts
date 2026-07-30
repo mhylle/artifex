@@ -12,14 +12,11 @@
  */
 import type { LedgerEventInput, WorkerContractView } from '@artifex/shared-types';
 
+import type { EventSink } from './event-sink.js';
+
 /** Anything that can hand back a context payload for a named source. */
 export interface ContextStore {
   read(source: string): Promise<unknown>;
-}
-
-/** Where broker events go. The real one is the ledger repository. */
-export interface EventSink {
-  append(event: LedgerEventInput): Promise<unknown>;
 }
 
 export class UnentitledSourceError extends Error {
