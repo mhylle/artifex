@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 /**
  * @artifex/worker — the agent runtime, the heart of Artifex.
  *
@@ -22,6 +23,8 @@ import { Worker } from 'bullmq';
 import pg from 'pg';
 
 import { runMission } from './mission-loop.js';
+import { LedgerEvidenceSource } from './ledger-evidence.js';
+import { rankWeakSpots } from './science-loop.js';
 import { buildWorkerSeams } from './worker-seams.js';
 
 export * from './constitution.js';
@@ -153,6 +156,41 @@ export async function main(): Promise<void> {
         `< mission ${contract.missionId}: ${result.outcome} ` +
           `(${result.trail.length} events, ${result.escalations.length} escalations)`,
       );
+
+      // ---- the science loop mines, now that there is history (R27 AC-0) -----
+      // Run AFTER the mission's own events are durable, so this mission counts
+      // toward the history it is mining. The Learning Agent lives in the worker
+      // (it is one of the four meta-agents), which is why this is here rather
+      // than behind an API endpoint — the control plane does not host agents.
+      //
+      // Read-only and propose-only (invariant #4): mining ranks weak spots and
+      // APPENDS the ranking. It changes nothing, and the constitutional path
+      // decides what, if anything, to do about it.
+      //
+      // Failure is swallowed. A learning pass that could not run is a missing
+      // observation, never a failed mission.
+      try {
+        const weakSpots = rankWeakSpots(await new LedgerEvidenceSource(ledger, ledger).evidenceFor());
+        if (weakSpots.length > 0) {
+          await ledger.append({
+            eventId: randomUUID(),
+            missionId: contract.missionId,
+            taskId: null,
+            family: 'learning',
+            type: 'learning.weak_spots_ranked',
+            actor: { kind: 'learning_agent', id: 'learning_agent', displayName: 'Learning Agent' },
+            // Ranked highest-severity first; the head is what a hypothesis
+            // would be aimed at. Capped so one append cannot carry the whole
+            // taxonomy — the full ranking is re-derivable from the ledger at
+            // any time, which is the point of deriving rather than storing.
+            payload: { ranked: weakSpots.length, top: weakSpots.slice(0, 5) },
+            occurredAt: new Date().toISOString(),
+          });
+        }
+      } catch (cause) {
+        console.error('! weak-spot mining failed:', String(cause));
+      }
+
       return { outcome: result.outcome, events: result.trail.length };
     },
     { connection: redis, concurrency: 1 },
