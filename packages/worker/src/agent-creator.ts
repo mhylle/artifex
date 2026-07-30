@@ -41,7 +41,7 @@ export interface RegistryLookup {
     readonly category: string;
     readonly roleInstructions: string;
     readonly capabilities: string[];
-  }): Promise<void>;
+  }): Promise<{ readonly version: number } | void>;
   /**
    * Fold one verified outcome into a design's track record.
    *
@@ -171,12 +171,18 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
     // Failure is swallowed on purpose: the registry is a cost lever, not a
     // dependency, and a fabric outage must degrade the swarm to "always
     // author" rather than stop it working.
-    await registry.register?.({
+    const stored = await registry.register?.({
       designId: design.designId,
       category: contract.category,
       roleInstructions: design.roleInstructions,
       capabilities: design.capabilities,
     }).catch(() => undefined);
+
+    // Report the version the registry actually holds. Registration is
+    // idempotent, so a category whose asset the ratchet has already advanced
+    // returns that version rather than the 1 this call proposed — otherwise the
+    // ledger records a version that never did the work (defect `fe690036`).
+    if (stored !== undefined && stored !== null) design = { ...design, version: stored.version };
   }
 
   const decision = computeTier({

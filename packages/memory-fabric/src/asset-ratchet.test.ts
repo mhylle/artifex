@@ -239,3 +239,74 @@ describe('R23 AC-2 — retirement is down-weighting, never deletion', () => {
     expect(surface.filter((m) => /delete|destroy|remove|purge|drop/i.test(m))).toEqual([]);
   });
 });
+
+/**
+ * Defect `fe690036` — registration is not a version bump.
+ *
+ * Staffing registers every design it authors (R38), so an unchanged design is
+ * re-registered on every no-bid. `upsert` bumped `version` each time: five
+ * identical live missions moved one design v1 → v2 → v3 with no delta, no
+ * evidence and no measurement — precisely what the ratchet exists to prevent,
+ * and it makes `version` useless as the join key a clade score is attributed to.
+ */
+describe('registration is idempotent — the ratchet owns version advancement', () => {
+  it('re-registering identical content does NOT bump the version', async () => {
+    const designId = nextId();
+    const input = {
+      designId, category: CATEGORY,
+      roleInstructions: 'Draft the clause.', capabilities: ['text'],
+    };
+
+    const first = await registry.upsert(input);
+    const second = await registry.upsert(input);
+    const third = await registry.upsert(input);
+
+    expect(first.version).toBe(1);
+    expect(second.version).toBe(1);
+    expect(third.version).toBe(1);
+  });
+
+  it('DISTRACTOR: re-registering DIFFERENT content leaves the incumbent untouched', async () => {
+    // A no-bid that authored different instructions for a category that already
+    // has an asset must not overwrite it. That is a wholesale rewrite with no
+    // evidence — the thing R23 AC-0 forbids — and the only way to change an
+    // existing asset is `proposeDelta`, which carries measurement.
+    const designId = nextId();
+    await registry.upsert({
+      designId, category: CATEGORY,
+      roleInstructions: 'Incumbent instructions.', capabilities: ['text'],
+    });
+
+    const after = await registry.upsert({
+      designId, category: CATEGORY,
+      roleInstructions: 'Freshly authored, unmeasured.', capabilities: ['text', 'tables'],
+    });
+
+    expect(after.roleInstructions).toBe('Incumbent instructions.');
+    expect(after.capabilities).toEqual(['text']);
+    expect(after.version).toBe(1);
+  });
+
+  it('DISTRACTOR: registration still returns the STORED design, so callers can report its real version', async () => {
+    // `staff()` used to report `version: 1` for anything it authored without
+    // reading back what the registry held, so the ledger and the registry
+    // disagreed. Registration has to hand back the truth for that to be fixable.
+    const designId = nextId();
+    await registry.upsert({ designId, category: CATEGORY, roleInstructions: 'One.', capabilities: ['text'] });
+    await registry.proposeDelta({
+      designId,
+      changes: [{ field: 'roleInstructions', to: 'Two.' }],
+      justifiedBy: EVIDENCE,
+      candidateScore: 0.9,
+    });
+
+    const reRegistered = await registry.upsert({
+      designId, category: CATEGORY, roleInstructions: 'One.', capabilities: ['text'],
+    });
+
+    // v2 because the RATCHET advanced it, and registration reports that rather
+    // than resetting or bumping it.
+    expect(reRegistered.version).toBe(2);
+    expect(reRegistered.roleInstructions).toBe('Two.');
+  });
+});

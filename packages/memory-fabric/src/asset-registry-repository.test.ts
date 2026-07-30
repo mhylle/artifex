@@ -119,14 +119,27 @@ describe('the clade score is a running mean over its observations', () => {
   });
 });
 
-describe('upsert versions an existing design rather than duplicating it', () => {
-  it('bumps the version on re-registration', async () => {
+describe('registration never duplicates a design', () => {
+  it('re-registering one id keeps ONE row, and leaves it exactly as it stands', async () => {
+    // Rewritten for defect `fe690036`. This previously asserted that
+    // re-registration BUMPED the version and overwrote the content — which
+    // encoded the defect rather than a requirement. Once staffing began
+    // registering every design it authored (R38), an unchanged design was
+    // re-registered on every no-bid and climbed v1 → v2 → v3 with no delta, no
+    // evidence and no measurement, which is what R23's ratchet exists to
+    // prevent.
+    //
+    // The intent worth keeping is the one in the describe: re-registering an id
+    // must not create a second row. That is asserted directly below. The rest
+    // now belongs to `proposeDelta`, the only path that carries a measurement.
     const designId = nextId();
     const first = await registry.upsert({ designId, category: 'version.me', roleInstructions: 'v1', capabilities: [] });
     const second = await registry.upsert({ designId, category: 'version.me', roleInstructions: 'v2', capabilities: [] });
 
     expect(first.version).toBe(1);
-    expect(second.version).toBe(2);
-    expect(second.roleInstructions).toBe('v2');
+    expect(second.version).toBe(1);
+    // Not duplicated, and not silently rewritten by an unmeasured second author.
+    expect(second.designId).toBe(designId);
+    expect(second.roleInstructions).toBe('v1');
   });
 });

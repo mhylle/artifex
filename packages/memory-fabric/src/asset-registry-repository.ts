@@ -69,21 +69,42 @@ export class AssetRegistryRepository {
     this.#pool = pool;
   }
 
-  /** Register a new design, or bump the version of an existing one. */
+  /**
+   * Register a design, and return whatever the registry now holds for that id.
+   *
+   * **Idempotent, and it never overwrites an incumbent** (defect `fe690036`).
+   * Staffing registers every design it authors, so an unchanged design is
+   * re-registered on every no-bid. This previously bumped `version` each time:
+   * five identical missions moved one design v1 → v2 → v3 with no delta, no
+   * evidence and no measurement — exactly what the ratchet exists to prevent,
+   * and it made `version` useless as the key a clade score is attributed to.
+   *
+   * A conflict now changes nothing at all, not even the content. A no-bid that
+   * authored *different* instructions for a category that already has an asset
+   * must not silently replace it: that is a wholesale rewrite without evidence,
+   * which R23 AC-0 forbids. The only route to changing an existing asset is
+   * `proposeDelta`, which carries a measurement and records why.
+   */
   async upsert(input: AgentDesignInput): Promise<AgentDesign> {
     const { rows } = await this.#pool.query<DesignRow>(
       `INSERT INTO agent_design (design_id, category, role_instructions, capabilities)
        VALUES ($1, $2, $3, $4::jsonb)
-       ON CONFLICT (design_id) DO UPDATE
-         SET role_instructions = EXCLUDED.role_instructions,
-             capabilities      = EXCLUDED.capabilities,
-             version           = agent_design.version + 1,
-             updated_at        = now()
+       ON CONFLICT (design_id) DO NOTHING
        RETURNING ${RETURNED}`,
       [input.designId, input.category, input.roleInstructions, JSON.stringify(input.capabilities)],
     );
 
-    return toDesign(rows[0]!);
+    if (rows.length > 0) return toDesign(rows[0]!);
+
+    // The row already existed, so `DO NOTHING` returned nothing. Read it back:
+    // the caller needs the version the registry actually holds, not the one it
+    // proposed — `staff()` reporting a hard-coded 1 is how the ledger and the
+    // registry came to disagree about which version did the work.
+    const existing = await this.findById(input.designId);
+    if (existing === null) {
+      throw new Error(`agent design ${input.designId} vanished between insert and read-back`);
+    }
+    return existing;
   }
 
   /**
