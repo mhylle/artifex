@@ -13,6 +13,7 @@ import { LedgerStreamService } from './ledger-stream.service';
 import { MissionController } from './mission.controller';
 import { MissionIntakeService } from './mission-intake.service';
 import type { MissionJob, MissionQueue } from './mission-intake.service';
+import type { LedgerReader } from './ledger.types';
 import { INTAKE_CLOCK, LEDGER_READER, LEDGER_SINK, MISSION_QUEUE } from './tokens';
 
 /**
@@ -63,8 +64,27 @@ function connectionString(): string {
       // plane holds the sink here alongside intake — per packages/api/CLAUDE.md,
       // the API writes gate/intake events and reads everything else.
       provide: CockpitService,
-      useFactory: (sink, reader, clock) => new CockpitService(sink, reader, clock),
-      inject: [LEDGER_SINK, LEDGER_READER, INTAKE_CLOCK],
+      useFactory: (sink, reader: LedgerReader, clock, queue: MissionQueue) =>
+        new CockpitService(sink, reader, clock, {
+          /**
+           * Re-enqueue the mission so the runtime picks it up and resumes (R41).
+           *
+           * The contract is read back from the intake event rather than
+           * reconstructed: the resumed run must be judged against the SAME
+           * contract it was commissioned with, and a rebuilt one would be a
+           * different mission wearing the same id.
+           */
+          async resume(missionId: string) {
+            const trail = await reader.replay({ missionId });
+            const intake = trail.find((e) => e.type === 'mission.intake_accepted');
+            const contract = intake?.payload['contract'];
+            if (contract === undefined || contract === null) {
+              throw new Error(`mission ${missionId} has no recorded contract to resume from`);
+            }
+            await queue.enqueue({ missionId, contract: contract as never });
+          },
+        }),
+      inject: [LEDGER_SINK, LEDGER_READER, INTAKE_CLOCK, MISSION_QUEUE],
     },
     {
       provide: LedgerStreamService,

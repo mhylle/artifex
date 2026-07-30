@@ -110,6 +110,90 @@ export interface MissionResult {
 
 const FRONTIER_TIER = 3;
 
+/** What a prior trail establishes about a mission already in flight (R41). */
+interface PriorState {
+  /** Every task the trail contracted, by id — the exact contracts, not summaries. */
+  readonly contracts: ReadonlyMap<string, TaskContract>;
+  /** Children by parent id, in contracted order. */
+  readonly childrenOf: ReadonlyMap<string, TaskContract[]>;
+  /** Tasks whose last Gate B verdict passed, with what they produced. */
+  readonly verified: ReadonlyMap<string, unknown>;
+  /**
+   * Tasks a human has already answered.
+   *
+   * Without this a resumed mission would stop at the very rung the operator
+   * just cleared, and the decision would achieve nothing — the queue would
+   * refill with the item that was only moments ago answered.
+   */
+  readonly decided: ReadonlySet<string>;
+}
+
+/**
+ * Fold a prior trail into the state a resumed run needs.
+ *
+ * Only two questions matter: which tasks exist, and which are already done.
+ * Everything else in the trail is history the new run will not redo, so it does
+ * not need re-deriving.
+ *
+ * Status is taken from the LAST verdict per task, not from any accumulated
+ * flag — the same rule the dashboard projection uses, so a task that failed and
+ * then passed on retry resumes as done rather than as broken.
+ */
+function foldPriorTrail(events: readonly LedgerEventInput[]): PriorState {
+  const contracts = new Map<string, TaskContract>();
+  const childrenOf = new Map<string, TaskContract[]>();
+  const deliverables = new Map<string, unknown>();
+  const lastOutcome = new Map<string, string>();
+  const decided = new Set<string>();
+
+  for (const event of events) {
+    const taskId = event.taskId;
+    if (taskId === null) continue;
+
+    if (event.type === 'task.contracted') {
+      const contract = event.payload['contract'];
+      // Only a FULL contract is usable. A summary would force the loop to invent
+      // the missing fields, and an invented contract is not the one the work was
+      // graded against.
+      if (contract !== undefined && contract !== null && typeof contract === 'object') {
+        const typed = contract as TaskContract;
+        contracts.set(taskId, typed);
+        const siblings = childrenOf.get(typed.parentTaskId ?? '') ?? [];
+        siblings.push(typed);
+        childrenOf.set(typed.parentTaskId ?? '', siblings);
+      }
+      continue;
+    }
+
+    if (event.type === 'task.executed') {
+      const deliverable = event.payload['deliverable'];
+      if (deliverable !== undefined) deliverables.set(taskId, deliverable);
+      continue;
+    }
+
+    if (event.type === 'operator.decided') {
+      decided.add(taskId);
+      continue;
+    }
+
+    if (event.type === 'gate_b.verdict_issued') {
+      const outcome = event.payload['outcome'];
+      if (typeof outcome === 'string') lastOutcome.set(taskId, outcome);
+    }
+  }
+
+  const verified = new Map<string, unknown>();
+  for (const [taskId, outcome] of lastOutcome) {
+    if (outcome !== 'pass') continue;
+    const deliverable = deliverables.get(taskId);
+    // A pass with no recorded deliverable cannot be carried into fold-up, so the
+    // task is treated as outstanding rather than as done-with-nothing.
+    if (deliverable !== undefined) verified.set(taskId, deliverable);
+  }
+
+  return { contracts, childrenOf, verified, decided };
+}
+
 /** Either a subtree's assembled deliverable, or the surrender that ended it. */
 type SubtreeOutcome =
   | { readonly ok: true; readonly deliverable: unknown }
@@ -160,6 +244,15 @@ export async function runMission(
      * to the speed of the ledger, and must not die because a subscriber threw.
      */
     readonly onEvent?: (event: LedgerEventInput) => void;
+    /**
+     * A prior trail to continue from (R41).
+     *
+     * The ledger is the checkpoint: rather than holding a suspended
+     * continuation, the loop folds what already happened and picks up from
+     * there. Absent, a mission decomposes and runs exactly as before — resume is
+     * an additional entry point, never a change to a fresh run.
+     */
+    readonly resumeFrom?: readonly LedgerEventInput[];
   },
 ): Promise<MissionResult> {
   const { now } = options;
@@ -204,7 +297,26 @@ export async function runMission(
     issuedAt: now,
   });
 
-  record(mission.taskId, 'contract', 'mission.started', 'orchestrator', { objective: mission.objective });
+  /**
+   * What the prior trail already establishes (R41).
+   *
+   * Only two things matter for continuing: which tasks exist (with their exact
+   * contracts) and which are already done (with what they produced). Everything
+   * else — escalations, verdicts, budget — is history the new run does not need
+   * to re-derive, because it is not going to redo that work.
+   */
+  const prior = foldPriorTrail(options.resumeFrom ?? []);
+  const resuming = prior.contracts.size > 0;
+
+  if (!resuming) {
+    record(mission.taskId, 'contract', 'mission.started', 'orchestrator', { objective: mission.objective });
+  } else {
+    record(mission.taskId, 'decision', 'mission.resumed', 'orchestrator', {
+      objective: mission.objective,
+      tasksRecovered: prior.contracts.size,
+      alreadyVerified: prior.verified.size,
+    });
+  }
 
   const surrender = (reason: string, blockers: string[]): MissionResult => {
     record(mission.taskId, 'escalation', 'mission.surrendered', 'orchestrator', { reason, blockers });
@@ -245,12 +357,23 @@ export async function runMission(
     // trail and tells the operator nothing. Surrender is the designed outcome for
     // "cannot proceed"; an unhandled exception is not.
     let children;
-    try {
-      children = await decompose(parent, seams.planner);
-    } catch (error) {
-      return fail('decomposition failed', [describe(error)]);
+    const recovered = prior.childrenOf.get(parent.taskId);
+    if (recovered !== undefined && recovered.length > 0) {
+      // Rebuilt from the trail, so every id is the one it had before — which is
+      // what makes an operator's earlier decision still refer to this task.
+      children = recovered;
+    } else {
+      try {
+        children = await decompose(parent, seams.planner);
+      } catch (error) {
+        return fail('decomposition failed', [describe(error)]);
+      }
     }
+
     for (const child of children) {
+      // Nothing is re-contracted on resume: the event is already in the trail,
+      // and re-appending it would make the replay itself unfaithful.
+      if (prior.contracts.has(child.taskId)) continue;
       record(child.taskId, 'contract', 'task.contracted', 'orchestrator', {
         objective: child.objective,
         ceiling: child.budget.ceiling,
@@ -270,10 +393,19 @@ export async function runMission(
           criterionId: c.criterionId,
           statement: c.statement,
         })),
+        // The WHOLE contract, so the trail is self-sufficient for replay (R41).
+        // The contract is the atom and "the contract is also the key into the
+        // ledger" — a trail that cannot reconstruct it can describe a mission
+        // but not continue one.
+        contract: child,
       });
     }
 
     // ---- Gate A: audit the PLAN before spending anything on it ---------------
+    // Skipped when the plan came from the trail: it was gated when it was first
+    // proposed, and re-gating an unchanged plan would spend a model call to
+    // re-derive a verdict the ledger already holds.
+    if (recovered === undefined || recovered.length === 0) {
     let aVerdict;
     try {
       aVerdict = await gateA(parent, children, seams.coverageJudge, verdictMeta(seq));
@@ -285,11 +417,22 @@ export async function runMission(
     if (aVerdict.outcome === 'fail') {
       return fail('Gate A rejected the decomposition', aVerdict.findings.map((f) => f.detail));
     }
+    }
 
     // ---- per-leaf: staff → execute → Gate B → escalate ------------------------
     const completed: Array<{ objective: string; deliverable: unknown }> = [];
 
     for (let child of children) {
+      // Already done, per the trail. Re-running it would spend budget to
+      // reproduce a verdict the ledger already carries — and could produce a
+      // DIFFERENT answer, which would make the resumed mission disagree with
+      // its own history.
+      const done = prior.verified.get(child.taskId);
+      if (done !== undefined) {
+        completed.push({ objective: child.objective, deliverable: done });
+        continue;
+      }
+
       // A task that is not yet atomic is a PARENT: it assembles, it does not
       // execute. This is the recursion the dossier specifies — "splitting
       // continues until each leaf carries exactly one responsibility with one
@@ -473,6 +616,10 @@ export async function runMission(
           // function, and it cannot be computed from a bundle id.
           effortSpent: outcome.bundle.effortSpent,
           ceiling: child.budget.ceiling,
+          // "deliverables with evidence bundles" is what the execution family is
+          // specified to hold. Without it a resumed mission knows a task passed
+          // but not what it produced, so fold-up would have nothing to assemble.
+          deliverable: outcome.bundle.deliverable,
         });
 
         let bVerdict;
@@ -517,7 +664,7 @@ export async function runMission(
         // decorative in the other direction.
         const humanAt = effectiveDial === 'autonomous' ? null : child.escalationPolicy.humanAt ?? 'human_review';
 
-        if (humanAt !== null && rung === humanAt) {
+        if (humanAt !== null && rung === humanAt && !prior.decided.has(child.taskId)) {
           record(child.taskId, 'escalation', 'escalation.awaiting_human', 'orchestrator', {
             objective: child.objective,
             rung,

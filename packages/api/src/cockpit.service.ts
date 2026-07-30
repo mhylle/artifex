@@ -24,7 +24,8 @@ export type CockpitAction =
   | 'cancel'
   | 'grant_budget'
   | 'turn_dial'
-  | 'annotate';
+  | 'annotate'
+  | 'decide';
 
 export interface CockpitRequest {
   readonly missionId: string;
@@ -35,9 +36,22 @@ export interface CockpitRequest {
   readonly amount?: number;
   readonly autonomyDial?: AutonomyDial;
   readonly note?: string;
+  /** For `decide`: what the human concluded about a waiting item. */
+  readonly decision?: 'approve' | 'reject';
 }
 
 export type ControlState = 'run' | 'paused' | 'cancelled';
+
+/**
+ * How a decision reaches the runtime.
+ *
+ * The worker resumes by replaying the trail (R41), but it only replays when a
+ * job arrives — so an answer has to put the mission back on the queue. Without
+ * this the decision would be a fact nobody acts on.
+ */
+export interface MissionResumer {
+  resume(missionId: string): Promise<void>;
+}
 
 export interface CockpitClock {
   now(): string;
@@ -54,6 +68,10 @@ const SHAPE: Record<CockpitAction, { type: string; family: LedgerEventInput['fam
   grant_budget: { type: 'operator.budget_granted', family: 'economic' },
   turn_dial: { type: 'operator.dial_turned', family: 'decision' },
   annotate: { type: 'operator.annotated', family: 'decision' },
+  // Answering an attention item. Its own type rather than an annotation,
+  // because the runtime must be able to tell "a human has ruled on this" from
+  // "a human wrote something down" — only the first unblocks a task.
+  decide: { type: 'operator.decided', family: 'decision' },
 };
 
 @Injectable()
@@ -62,6 +80,7 @@ export class CockpitService {
     private readonly ledger: LedgerSink,
     private readonly reader: LedgerReader,
     private readonly clock: CockpitClock,
+    private readonly resumer?: MissionResumer,
   ) {}
 
   /** Record what the operator did. The only write path for human action. */
@@ -89,6 +108,18 @@ export class CockpitService {
       payload,
       occurredAt: this.clock.now(),
     });
+
+    // Only a DECISION unblocks. Re-enqueuing on every action would restart
+    // missions the operator has just paused or cancelled.
+    if (request.action === 'decide' && this.resumer !== undefined) {
+      try {
+        await this.resumer.resume(request.missionId);
+      } catch {
+        // The ruling is already recorded, and it is the one thing only the human
+        // can supply. Losing it because a queue blinked would be the worse
+        // failure; the mission can be re-enqueued again.
+      }
+    }
 
     return { eventId };
   }
@@ -148,6 +179,12 @@ export class CockpitService {
           // retroactive: "takes effect at the next gate, never retroactively".
           appliesFrom: 'next_gate',
         };
+      }
+      case 'decide': {
+        if (request.decision !== 'approve' && request.decision !== 'reject') {
+          throw new BadRequestException('a decision must be approve or reject');
+        }
+        return { decision: request.decision, ...(request.note === undefined ? {} : { note: request.note }) };
       }
       case 'annotate': {
         if (request.note === undefined || request.note.trim().length === 0) {

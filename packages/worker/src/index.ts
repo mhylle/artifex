@@ -83,6 +83,15 @@ export async function main(): Promise<void> {
       const { contract } = job.data;
       console.log(`\n> mission ${contract.missionId}: ${contract.objective}`);
 
+      // The ledger is the checkpoint (R41). A mission that already has a trail
+      // is being RESUMED — after a pause, a human decision, or a surrender — so
+      // the loop folds what happened and continues, rather than re-planning from
+      // scratch with fresh task ids that no earlier decision refers to.
+      const priorTrail = await ledger.replay({ missionId: contract.missionId }).catch(() => []);
+      if (priorTrail.length > 0) {
+        console.log(`  resuming from ${priorTrail.length} recorded events`);
+      }
+
       // Appends are chained rather than fired in parallel: the ledger's ordering
       // is what replay and time-travel are defined by, so events must reach it
       // in the order they happened. Awaiting the chain after the run means a
@@ -102,6 +111,7 @@ export async function main(): Promise<void> {
         ),
         {
           now: new Date().toISOString(),
+          resumeFrom: priorTrail,
           // Streamed as they happen (defect `b3b4e554`). Appending the whole
           // trail after the run left a watching dashboard blind for the entire
           // mission, then jumping straight to the finished state.

@@ -140,7 +140,15 @@ export class MissionIntakeService {
       family: 'contract',
       type: 'mission.intake_accepted',
       actor: { kind: 'human', id: request.requestedBy, displayName: request.requestedBy },
-      payload: { objective: contract.objective, autonomyDial: contract.autonomyDial, budget: contract.budget },
+      payload: {
+        objective: contract.objective,
+        autonomyDial: contract.autonomyDial,
+        budget: contract.budget,
+        // Task zero's WHOLE contract, for the same reason children carry theirs
+        // (R41): a mission cannot be resumed from a trail that does not contain
+        // the contract it is being judged against.
+        contract,
+      },
       occurredAt: createdAt,
     });
 

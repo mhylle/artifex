@@ -112,3 +112,23 @@ describe('0d39d84b — the runtime reads the operator dial from the ledger', () 
     await expect(control.currentDial?.('m-1')).resolves.toBeNull();
   });
 });
+
+/**
+ * R41 — the binary must actually RESUME, not merely be capable of it.
+ *
+ * The composition check: a mission arriving with an existing trail has to be
+ * continued rather than re-planned. A resume capability nothing passes a trail
+ * to is the defect shape this project has shipped three times.
+ */
+describe('R41 — the worker binary resumes from the ledger', () => {
+  it('passes the mission\'s prior trail into the loop', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile(new URL('./index.ts', import.meta.url), 'utf8'),
+    );
+
+    // Asserting on the composition itself: the binary must read the trail for
+    // this mission and hand it to runMission as resumeFrom.
+    expect(source).toMatch(/ledger\.replay\(\{\s*missionId:\s*contract\.missionId\s*\}\)/);
+    expect(source).toMatch(/resumeFrom:\s*priorTrail/);
+  });
+});

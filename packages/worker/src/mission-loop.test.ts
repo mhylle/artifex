@@ -1048,3 +1048,155 @@ describe('607a2468 — the ladder stops for a human, per the dial', () => {
     expect(verdicts(plain).length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * R41 — resume a mission by replaying its trail (defect `3be8831e`).
+ *
+ * The ledger IS the checkpoint. A mission that stopped — paused, waiting at the
+ * human rung, or surrendered — must continue without redoing verified work, and
+ * with the SAME task ids, or an operator's decision refers to nothing.
+ */
+describe('R41 — a mission resumes from its trail', () => {
+  /** The trail a mission leaves when one child verified and the other stopped. */
+  const priorTrail = async () => {
+    const first = await runMission(mission(), seams(), { now: AT });
+    return first.trail;
+  };
+
+  it('AC-1: rebuilds the tree from the trail WITHOUT re-planning', async () => {
+    // Asserting "the ids match" is not enough: childTaskId derives ids from the
+    // parent and the stub planner is deterministic, so a re-decompose produces
+    // identical ids and the assertion passes either way. (Found by mutation —
+    // disabling trail recovery changed no test until this one existed.) With a
+    // real model planner a re-decompose would invent DIFFERENT objectives, so
+    // the claim that actually matters is that the planner is never consulted.
+    const trail = await priorTrail();
+    let planned = 0;
+    const countingPlanner = {
+      ...seams(),
+      planner: {
+        async propose(input: Parameters<ReturnType<typeof seams>['planner']['propose']>[0]) {
+          planned += 1;
+          return seams().planner.propose(input);
+        },
+      },
+    };
+
+    const resumed = await runMission(
+      mission(),
+      countingPlanner as unknown as Parameters<typeof runMission>[1],
+      { now: AT, resumeFrom: trail },
+    );
+
+    expect(planned).toBe(0);
+    expect(resumed.trail.filter((e) => e.type === 'task.contracted')).toHaveLength(0);
+    expect(trail.filter((e) => e.type === 'task.contracted').length).toBeGreaterThan(0);
+  });
+
+  it('AC-1 DISTRACTOR: the recovered contracts carry the original task ids', async () => {
+    // The ids are what make an operator's earlier decision still refer to the
+    // right task, so they are asserted directly rather than inferred.
+    const trail = await priorTrail();
+    const originalIds = trail.filter((e) => e.type === 'task.contracted').map((e) => e.taskId).sort();
+
+    const seen: string[] = [];
+    const watching = {
+      ...seams(),
+      work: {
+        async execute({ contract }: { contract: { taskId: string; objective: string } }) {
+          seen.push(contract.taskId);
+          return { deliverable: { answer: 'x' }, actions: [], consulted: [], assumptions: [], effortSpent: 1 };
+        },
+      },
+    };
+
+    // Resume from a trail where nothing was verified, so every recovered task runs.
+    const unverified = trail.filter((e) => e.type !== 'gate_b.verdict_issued');
+    await runMission(mission(), watching as unknown as Parameters<typeof runMission>[1], {
+      now: AT,
+      resumeFrom: unverified,
+    });
+
+    expect(seen.sort()).toEqual(originalIds);
+  });
+
+  it('AC-0: does not execute a task that was already verified', async () => {
+    const trail = await priorTrail();
+    let executed = 0;
+    const counting = {
+      ...seams(),
+      work: {
+        async execute({ contract }: { contract: { objective: string } }) {
+          executed += 1;
+          return { deliverable: { answer: `done: ${contract.objective}` }, actions: [], consulted: [], assumptions: [], effortSpent: 1 };
+        },
+      },
+    };
+
+    await runMission(mission(), counting as unknown as Parameters<typeof runMission>[1], {
+      now: AT,
+      resumeFrom: trail,
+    });
+
+    expect(executed).toBe(0);
+  });
+
+  it('AC-0: carries the verified deliverables into the fold-up', async () => {
+    const trail = await priorTrail();
+
+    const resumed = await runMission(mission(), seams(), { now: AT, resumeFrom: trail });
+
+    expect(resumed.outcome).toBe('delivered');
+    expect(resumed.deliverable).not.toBeNull();
+  });
+
+  it('AC-2 DISTRACTOR: replay does not re-append the events already recorded', async () => {
+    // Replay reconstructs state by READING the trail; rewriting it would double
+    // every fact and make replay itself unfaithful.
+    const trail = await priorTrail();
+
+    const resumed = await runMission(mission(), seams(), { now: AT, resumeFrom: trail });
+
+    const contracted = resumed.trail.filter((e) => e.type === 'task.contracted');
+    const executed = resumed.trail.filter((e) => e.type === 'task.executed');
+    expect(contracted).toHaveLength(0);
+    expect(executed).toHaveLength(0);
+  });
+
+  it('AC-4 DISTRACTOR: a mission with no prior trail still decomposes normally', async () => {
+    // Resume is an additional entry point, never a change to how a fresh
+    // mission runs.
+    const fresh = await runMission(mission(), seams(), { now: AT });
+
+    expect(fresh.trail.filter((e) => e.type === 'task.contracted').length).toBeGreaterThan(0);
+    expect(fresh.outcome).toBe('delivered');
+  });
+
+  it('DISTRACTOR: an unverified task IS executed on resume', async () => {
+    // Otherwise "skip what is done" would quietly become "skip everything", and
+    // a resumed mission would deliver without doing the outstanding work.
+    const stopped = await runMission(
+      mission(),
+      seams({ gateBFailuresPerTask: { 1: 99 } }) as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    let executed = 0;
+    const counting = {
+      ...seams(),
+      work: {
+        async execute({ contract }: { contract: { objective: string } }) {
+          executed += 1;
+          return { deliverable: { answer: `done: ${contract.objective}` }, actions: [], consulted: [], assumptions: [], effortSpent: 1 };
+        },
+      },
+    };
+
+    await runMission(mission(), counting as unknown as Parameters<typeof runMission>[1], {
+      now: AT,
+      resumeFrom: stopped.trail,
+    });
+
+    expect(executed).toBeGreaterThan(0);
+  });
+});

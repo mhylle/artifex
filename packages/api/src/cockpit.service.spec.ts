@@ -158,3 +158,70 @@ describe('R17 — control state is DERIVED from the trail, never stored', () => 
     await expect(service.controlState(MISSION, TASK)).resolves.toBe('paused');
   });
 });
+
+/**
+ * R18 AC-2 — an answered item must let the task PROCEED, not merely be recorded.
+ *
+ * Recording a decision that nothing acts on is the failure shape this project
+ * has shipped repeatedly. The runtime resumes by replaying the trail (R41), but
+ * it only replays when a job arrives — so answering has to re-enqueue.
+ */
+describe('R18 AC-2 — deciding re-enqueues the mission so the task proceeds', () => {
+  function decidingHarness() {
+    const appended: Array<Record<string, unknown>> = [];
+    const enqueued: string[] = [];
+    const sink: LedgerSink = { async append(event) { appended.push(event as Record<string, unknown>); return event; } };
+    const reader = {
+      async replay() { return [] as never; },
+      async listMissions() { return []; },
+      async listAttentionItems() { return []; },
+    };
+    const service = new CockpitService(
+      sink,
+      reader,
+      { now: () => AT, newId: () => TASK },
+      { async resume(missionId: string) { enqueued.push(missionId); } },
+    );
+    return { service, appended, enqueued };
+  }
+
+  it('appends the decision and re-enqueues the mission', async () => {
+    const { service, appended, enqueued } = decidingHarness();
+
+    await service.act({
+      missionId: MISSION, taskId: TASK, action: 'decide', operator: 'op', decision: 'approve',
+    });
+
+    expect((appended[0] as { type: string }).type).toBe('operator.decided');
+    expect(enqueued).toEqual([MISSION]);
+  });
+
+  it('DISTRACTOR: a pause does NOT re-enqueue — only a decision unblocks', async () => {
+    // Re-enqueuing on every action would restart missions the operator just
+    // stopped, which is the opposite of what they asked for.
+    const { service, enqueued } = decidingHarness();
+
+    await service.act({ missionId: MISSION, taskId: TASK, action: 'pause', operator: 'op' });
+    await service.act({ missionId: MISSION, taskId: TASK, action: 'annotate', operator: 'op', note: 'x' });
+
+    expect(enqueued).toEqual([]);
+  });
+
+  it('DISTRACTOR: a decision is recorded even if re-enqueuing fails', async () => {
+    // The human's ruling is a fact about what they decided; losing it because a
+    // queue was briefly unavailable would discard the one thing only they can
+    // provide.
+    const appended: Array<Record<string, unknown>> = [];
+    const service = new CockpitService(
+      { async append(event) { appended.push(event as Record<string, unknown>); return event; } },
+      { async replay() { return [] as never; }, async listMissions() { return []; }, async listAttentionItems() { return []; } },
+      { now: () => AT, newId: () => TASK },
+      { async resume() { throw new Error('queue down'); } },
+    );
+
+    await expect(
+      service.act({ missionId: MISSION, taskId: TASK, action: 'decide', operator: 'op', decision: 'approve' }),
+    ).resolves.toBeDefined();
+    expect(appended).toHaveLength(1);
+  });
+});
