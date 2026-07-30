@@ -15,6 +15,8 @@ export * from './orchestrator.js';
 export * from './planner.js';
 export * from './agent-creator.js';
 export * from './reviewer.js';
+export * from './context-broker.js';
+export * from './specialist.js';
 
 export const PACKAGE_NAME = '@artifex/worker';
 
