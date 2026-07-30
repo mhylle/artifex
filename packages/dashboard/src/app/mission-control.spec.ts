@@ -728,3 +728,184 @@ describe('MissionControl — the five lenses (R19)', () => {
     expect(feed.events()).toHaveLength(5);
   });
 });
+
+/**
+ * R20 — time travel.
+ *
+ * The projection is unit-tested in `time-travel.spec.ts`. These tests are about
+ * the cockpit actually WIRING it: that the scrubber exists on screen, that every
+ * view is routed through the cursor rather than only the canvas, and above all
+ * that the past is read-only. This project has shipped four "correct component
+ * nothing calls" defects; a scrubber that only the canvas obeys would be the
+ * fifth, and the operator would be reading a mixture of two moments.
+ */
+describe('MissionControl — time travel (R20)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let component: MissionControl;
+  let feed: LedgerFeed;
+  let sent: CockpitCommand[];
+
+  /** Task A fails, then is retried and passes. B is contracted along the way. */
+  const trail = () => [
+    ev(1, 'mission.started', MISSION, { objective: 'Root' }),
+    ev(2, 'task.contracted', 't-a', {
+      objective: 'Part A', parentTaskId: MISSION, ceiling: 10,
+      acceptanceCriteria: [{ criterionId: 'ac-1', statement: 'Cites a source.' }],
+    }),
+    ev(3, 'agent.staffed', 't-a', { designId: 'analyst', version: 1, logicalTier: 1 }),
+    ev(4, 'task.executed', 't-a', { effortSpent: 2, ceiling: 10 }),
+    ev(5, 'gate_b.verdict_issued', 't-a', {
+      outcome: 'fail', findings: [{ criterionId: 'ac-1', detail: 'no citation' }],
+    }),
+    ev(6, 'task.contracted', 't-b', { objective: 'Part B', parentTaskId: MISSION }),
+    ev(7, 'task.executed', 't-a', { effortSpent: 6, ceiling: 10 }),
+    ev(8, 'gate_b.verdict_issued', 't-a', { outcome: 'pass', findings: [] }),
+  ];
+
+  beforeEach(async () => {
+    sent = [];
+    const stub: Pick<Cockpit, 'act'> = { async act(command) { sent.push(command); } };
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting(), { provide: Cockpit, useValue: stub }],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    component = fixture.componentInstance;
+    feed = TestBed.inject(LedgerFeed);
+
+    component.select(MISSION);
+    feed.events.set(trail());
+    fixture.detectChanges();
+  });
+
+  it('AC-0: the scrubber is RENDERED — time travel is reachable, not merely implemented', () => {
+    const scrubber = fixture.nativeElement.querySelector('.scrubber input[type="range"]') as HTMLInputElement;
+
+    expect(scrubber, 'no scrubber on screen').toBeTruthy();
+    expect(Number(scrubber.max)).toBe(8);
+  });
+
+  it('AC-0: scrubbing back renders the canvas as it stood at that moment', () => {
+    component.scrubTo(5);
+    fixture.detectChanges();
+
+    // At seq 5 the mission had one task and it had just failed.
+    expect(component.visibleNodes().map((n) => n.taskId)).toEqual(['t-a']);
+    expect(component.visibleNodes()[0]!.status).toBe('failed');
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).not.toContain('Part B');
+  });
+
+  it('AC-0: the inspector and budgets read as they stood, not as they stand now', () => {
+    component.selectTask('t-a');
+    component.scrubTo(5);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('2 / 10');        // effort at that moment, not 6
+    expect(text).toContain('no citation');   // the verdict that stood then
+    expect(text).toContain('0 / 1 met');
+  });
+
+  it('AC-0: the lenses obey the cursor too — every view shows one moment, not a mixture', () => {
+    // The defect this guards: routing only the canvas through the cursor, so the
+    // operator reads a past canvas beside a present ledger and cannot tell.
+    component.lens.set('ledger');
+    component.scrubTo(4);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelectorAll('.rows li').length).toBe(4);
+  });
+
+  it('AC-0: returning to live restores the present', () => {
+    component.scrubTo(5);
+    fixture.detectChanges();
+    expect(component.isPast()).toBe(true);
+
+    component.returnToLive();
+    fixture.detectChanges();
+
+    expect(component.isPast()).toBe(false);
+    expect(component.visibleNodes().map((n) => n.taskId)).toEqual(['t-a', 't-b']);
+    expect(fixture.nativeElement.textContent).toContain('Part B');
+  });
+
+  it('AC-1: comparing two moments shows what changed between them', () => {
+    component.scrubTo(5);
+    component.markCompareStart();
+    component.scrubTo(8);
+    fixture.detectChanges();
+
+    const diff = component.diff();
+    expect(diff, 'no diff produced').not.toBeNull();
+    expect(diff!.appeared.map((t) => t.objective)).toEqual(['Part B']);
+    expect(diff!.changed[0]).toMatchObject({ taskId: 't-a', before: 'failed', after: 'verified' });
+    expect(diff!.criteriaMet).toBe(1);
+
+    // ...and it is on screen, not just in a signal.
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Part B');
+    expect(text).toMatch(/criteria met/i);
+  });
+
+  it('AC-2 DISTRACTOR: the past is read-only — no cockpit action can be issued against it', async () => {
+    component.selectTask('t-a');
+    component.scrubTo(5);
+    fixture.detectChanges();
+
+    await component.pauseTask();
+    await component.cancelTask();
+    await component.grantBudget();
+    await component.turnDial();
+
+    // The guard must live in the METHOD, not only in the template. A disabled
+    // button still has a keyboard path, a stale click and a test that calls it —
+    // and an action issued against a superseded state is exactly what this
+    // criterion forbids.
+    expect(sent).toEqual([]);
+  });
+
+  it('AC-2 DISTRACTOR: the controls are hidden while showing the past, and return when live', () => {
+    component.selectTask('t-a');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.cockpit button').length).toBeGreaterThan(0);
+
+    component.scrubTo(5);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.cockpit button').length).toBe(0);
+    expect(fixture.nativeElement.textContent).toMatch(/read-only|read only/i);
+
+    // The inverse matters as much: controls that never came back would satisfy
+    // "unavailable in the past" while breaking the cockpit permanently.
+    component.returnToLive();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.cockpit button').length).toBeGreaterThan(0);
+  });
+
+  it('DISTRACTOR: time travel changes no ledger fact — the trail is untouched', () => {
+    const before = JSON.stringify(feed.events());
+
+    component.scrubTo(3);
+    fixture.detectChanges();
+    component.scrubTo(7);
+    fixture.detectChanges();
+    component.returnToLive();
+
+    expect(JSON.stringify(feed.events())).toBe(before);
+    expect(feed.events()).toHaveLength(8);
+  });
+
+  it('DISTRACTOR: a live mission growing under a parked cursor does not drag the view forward', () => {
+    // The operator is reading seq 5. New events arriving must not silently
+    // change what they are looking at — that is the whole point of parking.
+    component.scrubTo(5);
+    fixture.detectChanges();
+
+    feed.events.update((events) => [...events, ev(9, 'mission.folded', MISSION, {})]);
+    fixture.detectChanges();
+
+    expect(component.visibleEvents()).toHaveLength(5);
+    expect(fixture.nativeElement.textContent).not.toContain('delivered');
+  });
+});

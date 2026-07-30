@@ -18,7 +18,9 @@ import { LensPanels } from './lens-panels';
 import type { LensName } from './lens-panels';
 import { LedgerFeed } from './ledger-feed';
 import { MissionIntake, toLines } from './mission-intake';
+import { buildMissionTree } from './mission-tree';
 import type { TaskNode } from './mission-tree';
+import { diffMoments, eventsAsOf, momentsOf } from './time-travel';
 
 @Component({
   selector: 'app-mission-control',
@@ -65,16 +67,60 @@ export class MissionControl implements OnInit {
 
   readonly zoomPercent = computed(() => Math.round(this.zoom() * 100));
 
+  /**
+   * Time travel (R20) — which moment the cockpit is showing.
+   *
+   * `null` is the present. Like zoom and lens this is a property of *looking*,
+   * so it lives here and touches no projection: the past is reconstructed by
+   * re-folding a truncated event list, never by reading a stored snapshot.
+   */
+  readonly cursor = signal<number | null>(null);
+  readonly isPast = computed(() => this.cursor() !== null);
+
+  /** Every recorded event is a stop the operator can visit. */
+  readonly moments = computed(() => momentsOf(this.feed.events()));
+
+  readonly firstSeq = computed(() => this.moments()[0]?.seq ?? 0);
+  readonly lastSeq = computed(() => this.moments().at(-1)?.seq ?? 0);
+
+  /** Where the scrubber handle sits: the parked moment, or the newest event. */
+  readonly cursorSeq = computed(() => this.cursor() ?? this.lastSeq());
+
+  readonly currentMoment = computed(() => {
+    const seq = this.cursorSeq();
+    return this.moments().find((moment) => moment.seq === seq) ?? null;
+  });
+
+  /**
+   * The trail as of the cursor — the single source every view below reads.
+   *
+   * Everything on screen routes through this rather than `feed.events()`. A view
+   * that read the raw feed would keep showing the present beside a past canvas,
+   * and the operator would have no way to tell they were reading two moments at
+   * once.
+   */
+  readonly visibleEvents = computed(() => eventsAsOf(this.feed.events(), this.cursor()));
+  readonly visibleTree = computed(() => buildMissionTree(this.visibleEvents()));
+
+  /** The other end of a comparison, if the operator has marked one. */
+  readonly compareFrom = signal<number | null>(null);
+
+  readonly diff = computed(() => {
+    const from = this.compareFrom();
+    if (from === null) return null;
+    return diffMoments(this.feed.events(), from, this.cursorSeq());
+  });
+
   /** The path from task zero down to the focused subtree. */
   readonly breadcrumb = computed(() => {
     const focused = this.focusedTaskId();
     if (focused === null) return [];
-    return pathTo(this.feed.tree()?.children ?? [], focused);
+    return pathTo(this.visibleTree()?.children ?? [], focused);
   });
 
   /** What the canvas draws: the whole tree, or the focused subtree. */
   readonly visibleNodes = computed(() => {
-    const roots = this.feed.tree()?.children ?? [];
+    const roots = this.visibleTree()?.children ?? [];
     const focused = this.focusedTaskId();
     if (focused === null) return roots;
     const node = findTask(roots, focused);
@@ -87,8 +133,25 @@ export class MissionControl implements OnInit {
   readonly selectedTask = computed(() => {
     const taskId = this.selectedTaskId();
     if (taskId === null) return null;
-    return findTask(this.feed.tree()?.children ?? [], taskId);
+    return findTask(this.visibleTree()?.children ?? [], taskId);
   });
+
+  scrubTo(seq: number): void {
+    this.cursor.set(seq);
+  }
+
+  returnToLive(): void {
+    this.cursor.set(null);
+  }
+
+  /** Marks the current moment as one end of a comparison (AC-1). */
+  markCompareStart(): void {
+    this.compareFrom.set(this.cursorSeq());
+  }
+
+  clearCompare(): void {
+    this.compareFrom.set(null);
+  }
 
   /** Cockpit inputs. The dial addresses the mission; the rest address a task. */
   readonly grantAmount = signal(10);
@@ -135,14 +198,29 @@ export class MissionControl implements OnInit {
 
   async turnDial(): Promise<void> {
     const missionId = this.missionId();
-    if (missionId.length === 0) return;
+    if (missionId.length === 0 || this.isPast()) return;
     await this.#send({ missionId, taskId: null, action: 'turn_dial', autonomyDial: this.dial() });
   }
 
+  /**
+   * The cockpit's task-scoped actions.
+   *
+   * The read-only guard lives HERE rather than only in the template, because a
+   * hidden button is not an absent capability: there is still a keyboard path, a
+   * stale click on a view that has just changed, and any caller that reaches the
+   * method directly. R20 AC-2 forbids issuing an action against a state that has
+   * already been superseded, and that has to be enforced where the action is
+   * sent.
+   *
+   * Deciding an attention-queue item deliberately does NOT pass through here.
+   * It addresses a different mission entirely, so a parked cursor on the mission
+   * being watched says nothing about it — blocking it would strand the operator
+   * who parked the view precisely in order to investigate before answering.
+   */
   async #actOnTask(action: CockpitAction, extra: Record<string, unknown> = {}): Promise<void> {
     const missionId = this.missionId();
     const taskId = this.selectedTaskId();
-    if (missionId.length === 0 || taskId === null) return;
+    if (missionId.length === 0 || taskId === null || this.isPast()) return;
     await this.#send({ missionId, taskId, action, ...extra });
   }
 

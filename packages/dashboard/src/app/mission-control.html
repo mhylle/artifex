@@ -106,13 +106,77 @@
   </ul>
 </section>
 
-@if (feed.tree(); as tree) {
+@if (visibleTree(); as tree) {
   <section class="mission" [attr.data-status]="tree.status">
     <h2>{{ tree.objective || '(no objective yet)' }}</h2>
     <p class="meta">
       <span class="badge">{{ tree.status }}</span>
       <span>{{ tree.eventCount }} events</span>
     </p>
+
+    <section class="scrubber" [class.past]="isPast()" aria-label="time travel">
+      <div class="track">
+        <label for="scrub">Moment</label>
+        <input
+          id="scrub"
+          name="scrub"
+          type="range"
+          [min]="firstSeq()"
+          [max]="lastSeq()"
+          step="1"
+          [value]="cursorSeq()"
+          (input)="scrubTo(+$any($event.target).value)"
+          aria-label="mission timeline scrubber"
+        />
+        <span class="at">
+          #{{ cursorSeq() }}
+          @if (currentMoment(); as moment) {
+            <span class="what">{{ moment.type }}</span>
+            @if (moment.occurredAt) { <span class="when">{{ moment.occurredAt }}</span> }
+          }
+        </span>
+        <button type="button" (click)="returnToLive()" [disabled]="!isPast()">Live</button>
+        <button type="button" (click)="markCompareStart()">Compare from here</button>
+      </div>
+
+      @if (isPast()) {
+        <p class="readonly" role="status">
+          Showing a past moment — read-only. The cockpit is unavailable because this state has
+          already been superseded.
+        </p>
+      }
+
+      @if (diff(); as d) {
+        <div class="diff" aria-label="moment comparison">
+          <p class="range">
+            #{{ d.fromSeq }} → #{{ d.toSeq }} · {{ d.eventsBetween }} events between
+            <button type="button" (click)="clearCompare()">Clear</button>
+          </p>
+          <p class="totals">
+            <span>{{ d.criteriaMet }} criteria met</span>
+            <span>{{ d.effortSpent }} effort spent</span>
+            <span>{{ d.escalations }} escalations</span>
+          </p>
+          @if (d.appeared.length) {
+            <h4>Appeared</h4>
+            <ul>
+              @for (t of d.appeared; track t.taskId) { <li>{{ t.objective || t.taskId }} — {{ t.after }}</li> }
+            </ul>
+          }
+          @if (d.changed.length) {
+            <h4>Changed</h4>
+            <ul>
+              @for (t of d.changed; track t.taskId) {
+                <li>{{ t.objective || t.taskId }}: {{ t.before }} → {{ t.after }}</li>
+              }
+            </ul>
+          }
+          @if (!d.appeared.length && !d.changed.length) {
+            <p class="empty">Nothing changed between these two moments.</p>
+          }
+        </div>
+      }
+    </section>
 
     @if (tree.blockers.length) {
       <ul class="blockers">
@@ -127,7 +191,7 @@
     </nav>
 
     @if (lens() !== 'canvas') {
-      <app-lens-panels [lens]="lens()" [events]="feed.events()" />
+      <app-lens-panels [lens]="lens()" [events]="visibleEvents()" />
     }
 
     @if (lens() === 'canvas') {
@@ -168,6 +232,11 @@
 
     <section class="cockpit" aria-label="cockpit controls">
       <h3>Cockpit</h3>
+      @if (isPast()) {
+        <p class="empty">
+          The past is read-only. Return to Live to act on this mission.
+        </p>
+      } @else {
       @if (selectedTaskId(); as taskId) {
         <div class="row">
           <button type="button" (click)="pauseTask()">Pause</button>
@@ -198,6 +267,7 @@
         <button type="button" (click)="turnDial()">Turn dial</button>
         <span class="hint">applies at the next gate</span>
       </div>
+      }
 
       @if (cockpitError(); as message) {
         <p class="error" role="alert">{{ message }}</p>
