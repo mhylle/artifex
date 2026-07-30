@@ -1,0 +1,11 @@
+{
+  // The build config excludes tests so `dist` stays clean — which would leave
+  // them typechecked by nothing (vitest transpiles without checking). Added in
+  // P4, when this package grew real tests.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
