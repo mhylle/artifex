@@ -497,3 +497,139 @@ describe('1e3905a4 — a bounced contract is rewritten, not retried at a bigger 
     expect(result.outcome).toBe('surrendered');
   });
 });
+
+/**
+ * Defect `a910ed8d` — decomposition never recursed.
+ *
+ * `decompose()` was called once, on task zero, and never on a child, so every
+ * mission tree Artifex ever produced was exactly one level deep. The dossier
+ * specifies recursive splitting "until each leaf carries exactly one
+ * responsibility with one verifiable outcome — and no further", and the whole
+ * reliability argument (pillar 1) rests on it.
+ *
+ * The stop condition is taken from that sentence rather than invented: a
+ * contract carrying a SINGLE acceptance criterion already has one verifiable
+ * outcome, so it is a leaf. Termination is guaranteed because a split must
+ * partition criteria, and one criterion cannot be partitioned further.
+ */
+describe('a910ed8d — decomposition recurses until leaves are atomic', () => {
+  /** Splits a multi-criterion task into one child per criterion. */
+  const splittingPlanner = {
+    async propose({ contract }: { contract: TaskContract }) {
+      return {
+        subtasks: contract.acceptanceCriteria.map((criterion, index) => ({
+          objective: `${contract.objective} / part ${index + 1}`,
+          category: 'answer',
+          acceptanceCriteria: [{ criterionId: criterion.criterionId, statement: criterion.statement }],
+          outOfScope: ['Not the sibling parts.'],
+          blastRadius: 'low' as const,
+          effortShare: 1 / contract.acceptanceCriteria.length,
+        })),
+      };
+    },
+  };
+
+  /** A mission whose two criteria can each be split once more. */
+  const deepMission = (): TaskContract => ({
+    ...mission(),
+    acceptanceCriteria: [
+      { criterionId: 'ac-1', statement: 'Part one is answered.' },
+      { criterionId: 'ac-2', statement: 'Part two is answered.' },
+    ],
+  });
+
+  const contractedIds = (trail: readonly { type: string; taskId: string | null; payload: Record<string, unknown> }[]) =>
+    trail.filter((e) => e.type === 'task.contracted');
+
+  it('produces a tree deeper than one level', async () => {
+    const grandparentSplitter = {
+      async propose({ contract }: { contract: TaskContract }) {
+        // Every task splits into two, each keeping BOTH criteria until depth 2,
+        // so there is genuinely something below the first level.
+        const keepBoth = contract.depth < 1;
+        return {
+          subtasks: [0, 1].map((i) => ({
+            objective: `${contract.objective} / branch ${i + 1}`,
+            category: 'answer',
+            acceptanceCriteria: keepBoth
+              ? contract.acceptanceCriteria.map((c) => ({ ...c }))
+              : [{ criterionId: `ac-${i + 1}`, statement: `Branch ${i + 1} is answered.` }],
+            outOfScope: ['Not the sibling branch.'],
+            blastRadius: 'low' as const,
+            effortShare: 0.5,
+          })),
+        };
+      },
+    };
+
+    const result = await runMission(
+      deepMission(),
+      { ...seams(), planner: grandparentSplitter } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    const contracted = contractedIds(result.trail);
+    const depths = new Set(contracted.map((e) => String(e.payload['parentTaskId'])));
+    // More than one distinct parent means at least one task was itself split.
+    expect(depths.size).toBeGreaterThan(1);
+  });
+
+  it('DISTRACTOR: a task with a single acceptance criterion is NOT split further', async () => {
+    // "One responsibility, one verifiable outcome" is the definition of a leaf.
+    // Splitting it again would fabricate structure the contract does not have.
+    const result = await runMission(
+      { ...mission(), acceptanceCriteria: [{ criterionId: 'ac-1', statement: 'The only thing.' }] },
+      { ...seams(), planner: splittingPlanner } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    const contracted = contractedIds(result.trail);
+    // One split of the mission, and nothing below it.
+    const parents = new Set(contracted.map((e) => String(e.payload['parentTaskId'])));
+    expect(parents.size).toBe(1);
+  });
+
+  it('DISTRACTOR: recursion terminates even when the planner always wants to split', async () => {
+    // A planner that keeps returning multi-criterion children must not recurse
+    // forever; the bound comes from the mission's own criteria count.
+    const insatiable = {
+      async propose({ contract }: { contract: TaskContract }) {
+        return {
+          subtasks: [0, 1].map((i) => ({
+            objective: `${contract.objective} / more ${i + 1}`,
+            category: 'answer',
+            // Always two criteria — never atomic by the criteria rule alone.
+            acceptanceCriteria: [
+              { criterionId: 'ac-1', statement: 'One.' },
+              { criterionId: 'ac-2', statement: 'Two.' },
+            ],
+            outOfScope: ['Not the sibling.'],
+            blastRadius: 'low' as const,
+            effortShare: 0.5,
+          })),
+        };
+      },
+    };
+
+    const result = await runMission(
+      deepMission(),
+      { ...seams(), planner: insatiable } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(['delivered', 'surrendered']).toContain(result.outcome);
+    expect(result.trail.length).toBeLessThan(500);
+  });
+
+  it('records each task under its real parent, so the canvas can draw the tree', async () => {
+    const result = await runMission(
+      deepMission(),
+      { ...seams(), planner: splittingPlanner } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    for (const event of contractedIds(result.trail)) {
+      expect(typeof event.payload['parentTaskId']).toBe('string');
+    }
+  });
+});
