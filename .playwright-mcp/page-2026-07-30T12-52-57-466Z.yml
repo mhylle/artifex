@@ -1,0 +1,23 @@
+- generic [ref=f9e3]:
+  - banner [ref=f9e4]:
+    - heading "Artifex — Mission Control" [level=1] [ref=f9e5]
+    - generic [ref=f9e6]:
+      - textbox "mission id" [ref=f9e7]: ab7099d8-2889-4077-8daf-6740235322f0
+      - button "Watch" [ref=f9e8] [cursor=pointer]
+      - generic [ref=f9e10]: live
+  - generic [ref=f9e11]:
+    - generic [ref=f9e12]: New mission
+    - textbox "objective" [ref=f9e13]:
+      - /placeholder: What should Artifex do?
+    - textbox "success criteria" [ref=f9e14]:
+      - /placeholder: Success criteria — one per line. A mission nobody can grade is not a mission.
+    - textbox "out of scope" [ref=f9e15]:
+      - /placeholder: Out of scope — one per line (optional)
+    - button "Start mission" [ref=f9e16] [cursor=pointer]
+  - generic [ref=f9e21]:
+    - heading "(no objective yet)" [level=2] [ref=f9e22]
+    - paragraph [ref=f9e23]:
+      - generic [ref=f9e24]: running
+      - generic [ref=f9e25]: 1 events
+    - list [ref=f9e26]:
+      - listitem [ref=f9e27]: No tasks contracted yet.

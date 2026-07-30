@@ -123,3 +123,54 @@ describe('R10 AC-1 — intake creates task zero and enqueues it', () => {
     expect(contract.budget.floor).toBe(5);
   });
 });
+
+/**
+ * R14 AC-3 — a malformed request gets a stated reason, not a 500.
+ *
+ * Defect `fd345eae`: the controller typed its body against a TypeScript
+ * interface, which is erased at runtime, so a body missing `successCriteria`
+ * reached `accept()` and threw `Cannot read properties of undefined (reading
+ * 'length')`. The operator saw "Internal server error" — indistinguishable from
+ * the control plane being down, and useless for fixing the request.
+ */
+describe('R14 AC-3 — intake refuses a malformed request with a stated reason', () => {
+  it('rejects a body missing successCriteria as a 400 naming the field', async () => {
+    const { service, enqueued } = harness();
+
+    await expect(
+      service.accept({ objective: 'Explain heat pumps.' } as unknown as IntakeRequest),
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(enqueued).toHaveLength(0);
+  });
+
+  it('names the offending field rather than failing generically', async () => {
+    const { service } = harness();
+
+    await service
+      .accept({ objective: 'Explain heat pumps.' } as unknown as IntakeRequest)
+      .then(
+        () => { throw new Error('expected a rejection'); },
+        (error: unknown) => {
+          expect(JSON.stringify(error)).toMatch(/successCriteria/);
+        },
+      );
+  });
+
+  it('DISTRACTOR: a well-formed request still succeeds — the guard refuses malformed input, not all input', async () => {
+    // Without this, "reject everything" would satisfy the two tests above.
+    const { service, enqueued } = harness();
+
+    await service.accept(request());
+
+    expect(enqueued).toHaveLength(1);
+  });
+
+  it('DISTRACTOR: a criterion that is only whitespace is refused, not accepted as gradeable', async () => {
+    const { service, enqueued } = harness();
+
+    await expect(service.accept(request({ successCriteria: ['   '] }))).rejects.toMatchObject({ status: 400 });
+
+    expect(enqueued).toHaveLength(0);
+  });
+});

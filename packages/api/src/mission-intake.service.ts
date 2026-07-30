@@ -12,7 +12,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { BadRequestException } from '@nestjs/common';
-import { TaskContractSchema, assertValid } from '@artifex/shared-types';
+import { MissionIntakeRequestSchema, TaskContractSchema, assertValid, validate } from '@artifex/shared-types';
 import type { AutonomyDial, BlastRadius, TaskContract } from '@artifex/shared-types';
 
 import type { LedgerSink } from './ledger.types';
@@ -50,15 +50,41 @@ export class MissionIntakeService {
   ) {}
 
   async accept(request: IntakeRequest): Promise<{ contract: TaskContract }> {
-    // Refuse rather than default. Inventing a criterion on the requester's
-    // behalf would be the control plane deciding what success means — and "no
-    // work without a contract" (invariant #2) starts at intake, not at the first
-    // decomposition.
-    if (request.objective.trim().length === 0) {
+    // Two layers, in this order, because they answer different questions and the
+    // operator deserves the more specific answer when it applies.
+    //
+    // First: the field is *there* but says nothing. These get the sentence a
+    // human can act on. Written defensively because at this point nothing has
+    // yet proven the body has any shape at all.
+    //
+    // Refusing rather than defaulting is the point — inventing a criterion on
+    // the requester's behalf would be the control plane deciding what success
+    // means, and "no work without a contract" (invariant #2) starts at intake,
+    // not at the first decomposition.
+    if (typeof request?.objective === 'string' && request.objective.trim().length === 0) {
       throw new BadRequestException('a mission needs an objective');
     }
-    if (request.successCriteria.length === 0) {
+    if (
+      Array.isArray(request?.successCriteria) &&
+      request.successCriteria.every((c) => typeof c !== 'string' || c.trim().length === 0)
+    ) {
       throw new BadRequestException('a mission needs at least one success criterion — a mission nobody can grade is not a mission');
+    }
+
+    // Second: the body is malformed — a field missing, mistyped, or unexpected.
+    // Until this existed, `@Body() body: IntakeRequest` typed against a
+    // TypeScript interface that is erased at runtime, so a missing field reached
+    // the code below and died as `Cannot read properties of undefined (reading
+    // 'length')` — a 500 that told the operator nothing and looked exactly like
+    // the control plane being down (defect `fd345eae`). Validating with the
+    // shared TypeBox object keeps this edge on the same validator as everything
+    // else rather than importing a second validation dialect (ADR-0004).
+    const shape = validate(MissionIntakeRequestSchema, request);
+    if (!shape.ok) {
+      throw new BadRequestException({
+        message: `the mission request is not well-formed: ${shape.errors.map((e) => e.message).join('; ')}`,
+        errors: shape.errors,
+      });
     }
 
     const missionId = this.clock.newId();

@@ -13,6 +13,7 @@ Angular **mission-control cockpit**.
 
 ## Conventions
 
+- **No inline templates or styles.** Every component uses `templateUrl` + `styleUrl` pointing at sibling `.html` / `.css` files. `template:` and `styles:` in the decorator are not used here, no matter how small the markup.
 - Consume the API websocket; no direct DB access.
 - Types come from `packages/shared-types`.
 - Scaffold + add libraries with the Angular CLI / `npm install` (`ng add`, `ng generate`) — never hand-edit `package.json`/`angular.json` dependency entries.

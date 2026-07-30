@@ -9,61 +9,85 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 
 import { LedgerFeed } from './ledger-feed';
+import { MissionIntake, toLines } from './mission-intake';
 
 @Component({
   selector: 'app-mission-control',
   standalone: true,
   imports: [FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  templateUrl: './mission-control.html',
   styleUrl: './mission-control.css',
-  template: `
-    <header>
-      <h1>Artifex — Mission Control</h1>
-      <div class="watch">
-        <input [(ngModel)]="missionId" placeholder="mission id" aria-label="mission id" />
-        <button (click)="watch()" [disabled]="!missionId()">Watch</button>
-        <span class="dot" [class.live]="feed.connected()"></span>
-        <span>{{ feed.connected() ? 'live' : 'offline' }}</span>
-      </div>
-    </header>
-
-    @if (feed.tree(); as tree) {
-      <section class="mission" [attr.data-status]="tree.status">
-        <h2>{{ tree.objective || '(no objective yet)' }}</h2>
-        <p class="meta">
-          <span class="badge">{{ tree.status }}</span>
-          <span>{{ tree.eventCount }} events</span>
-        </p>
-
-        @if (tree.blockers.length) {
-          <ul class="blockers">
-            @for (blocker of tree.blockers; track blocker) { <li>{{ blocker }}</li> }
-          </ul>
-        }
-
-        <ol class="tasks">
-          @for (task of tree.children; track task.taskId) {
-            <li [attr.data-status]="task.status">
-              <span class="badge">{{ task.status }}</span>
-              <span class="objective">{{ task.objective }}</span>
-              @if (task.logicalTier !== null) { <span class="tier">tier {{ task.logicalTier }}</span> }
-              @if (task.escalations) { <span class="esc">↑{{ task.escalations }}</span> }
-            </li>
-          } @empty {
-            <li class="empty">No tasks contracted yet.</li>
-          }
-        </ol>
-      </section>
-    } @else {
-      <p class="empty">Watch a mission to see its trail.</p>
-    }
-  `,
 })
 export class MissionControl {
   readonly feed = inject(LedgerFeed);
+  readonly #intake = inject(MissionIntake);
+
   readonly missionId = signal('');
+
+  /** The draft an operator is authoring. Cleared once the mission is accepted. */
+  readonly objective = signal('');
+  readonly criteriaText = signal('');
+  readonly outOfScopeText = signal('');
+  readonly submitting = signal(false);
+  readonly error = signal<string | null>(null);
 
   watch(): void {
     this.feed.watch(this.missionId());
   }
+
+  /**
+   * Start a mission and immediately watch it.
+   *
+   * The refusals below are not a second opinion on the control plane's rules —
+   * they are the same rule applied where the operator can still act on it. A
+   * draft that cannot be graded never reaches the wire, so the feedback is
+   * immediate and the trail is not littered with rejected intakes.
+   */
+  async submit(): Promise<void> {
+    const objective = this.objective().trim();
+    const successCriteria = toLines(this.criteriaText());
+
+    if (objective.length === 0) {
+      this.error.set('A mission needs an objective.');
+      return;
+    }
+    if (successCriteria.length === 0) {
+      this.error.set('A mission needs at least one success criterion — a mission nobody can grade is not a mission.');
+      return;
+    }
+
+    this.error.set(null);
+    this.submitting.set(true);
+    try {
+      const missionId = await this.#intake.submit({
+        objective,
+        successCriteria,
+        outOfScope: toLines(this.outOfScopeText()),
+      });
+
+      // Watching is the point: an operator who starts a mission should not then
+      // have to find its id to see what it is doing.
+      this.missionId.set(missionId);
+      this.feed.watch(missionId);
+      this.objective.set('');
+      this.criteriaText.set('');
+      this.outOfScopeText.set('');
+    } catch (cause: unknown) {
+      // Surfaced rather than swallowed — a silent failure is indistinguishable
+      // from a control plane that is simply down.
+      this.error.set(messageOf(cause));
+    } finally {
+      this.submitting.set(false);
+    }
+  }
+}
+
+/** Prefers the control plane's own words over a generic transport message. */
+function messageOf(cause: unknown): string {
+  if (typeof cause === 'object' && cause !== null && 'error' in cause) {
+    const body = (cause as { error?: { message?: unknown } }).error;
+    if (typeof body?.message === 'string') return body.message;
+  }
+  return cause instanceof Error ? cause.message : 'The control plane rejected the mission.';
 }

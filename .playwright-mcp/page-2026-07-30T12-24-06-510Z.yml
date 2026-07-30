@@ -1,0 +1,8 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - heading "Artifex — Mission Control" [level=1] [ref=e5]
+    - generic [ref=e6]:
+      - textbox "mission id" [ref=e7]
+      - button "Watch" [disabled] [ref=e8]
+      - generic [ref=e10]: offline
+  - paragraph [ref=e11]: Watch a mission to see its trail.

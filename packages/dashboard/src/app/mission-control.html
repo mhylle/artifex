@@ -1,0 +1,75 @@
+<header>
+  <h1>Artifex — Mission Control</h1>
+  <div class="watch">
+    <input [(ngModel)]="missionId" name="missionId" placeholder="mission id" aria-label="mission id" />
+    <button (click)="watch()" [disabled]="!missionId()">Watch</button>
+    <span class="dot" [class.live]="feed.connected()"></span>
+    <span>{{ feed.connected() ? 'live' : 'offline' }}</span>
+  </div>
+</header>
+
+<form class="intake" (ngSubmit)="submit()">
+  <label for="objective">New mission</label>
+  <textarea
+    id="objective"
+    name="objective"
+    rows="2"
+    [ngModel]="objective()"
+    (ngModelChange)="objective.set($event)"
+    placeholder="What should Artifex do?"
+    aria-label="objective"
+  ></textarea>
+  <textarea
+    name="criteria"
+    rows="2"
+    [ngModel]="criteriaText()"
+    (ngModelChange)="criteriaText.set($event)"
+    placeholder="Success criteria — one per line. A mission nobody can grade is not a mission."
+    aria-label="success criteria"
+  ></textarea>
+  <textarea
+    name="outOfScope"
+    rows="1"
+    [ngModel]="outOfScopeText()"
+    (ngModelChange)="outOfScopeText.set($event)"
+    placeholder="Out of scope — one per line (optional)"
+    aria-label="out of scope"
+  ></textarea>
+  <button type="submit" [disabled]="submitting()">
+    {{ submitting() ? 'Starting…' : 'Start mission' }}
+  </button>
+  @if (error(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  }
+</form>
+
+@if (feed.tree(); as tree) {
+  <section class="mission" [attr.data-status]="tree.status">
+    <h2>{{ tree.objective || '(no objective yet)' }}</h2>
+    <p class="meta">
+      <span class="badge">{{ tree.status }}</span>
+      <span>{{ tree.eventCount }} events</span>
+    </p>
+
+    @if (tree.blockers.length) {
+      <ul class="blockers">
+        @for (blocker of tree.blockers; track blocker) { <li>{{ blocker }}</li> }
+      </ul>
+    }
+
+    <ol class="tasks">
+      @for (task of tree.children; track task.taskId) {
+        <li [attr.data-status]="task.status">
+          <span class="badge">{{ task.status }}</span>
+          <span class="objective">{{ task.objective }}</span>
+          @if (task.logicalTier !== null) { <span class="tier">tier {{ task.logicalTier }}</span> }
+          @if (task.escalations) { <span class="esc">↑{{ task.escalations }}</span> }
+        </li>
+      } @empty {
+        <li class="empty">No tasks contracted yet.</li>
+      }
+    </ol>
+  </section>
+} @else {
+  <p class="empty">Watch a mission to see its trail.</p>
+}
