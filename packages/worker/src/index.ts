@@ -19,6 +19,7 @@ export * from './event-sink.js';
 export * from './context-broker.js';
 export * from './specialist.js';
 export * from './action-broker.js';
+export * from './self-critique.js';
 
 export const PACKAGE_NAME = '@artifex/worker';
 
