@@ -1,3 +1,5 @@
 import { Routes } from '@angular/router';
 
-export const routes: Routes = [];
+import { MissionControl } from './mission-control';
+
+export const routes: Routes = [{ path: '', component: MissionControl }];
