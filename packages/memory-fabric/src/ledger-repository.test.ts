@@ -233,3 +233,114 @@ describe('defect 8a6ee598 — the live tail must not skip a late-committing even
     ]);
   });
 });
+
+/**
+ * R21 — the fleet view. Mission Control opened on an empty box demanding a
+ * UUID, which makes it unusable to anyone who does not already know what to
+ * type. The rail is derived from the ledger by aggregation: there is no mission
+ * table, so the fleet cannot fall out of step with the trail.
+ */
+describe('R21 — listMissions projects the fleet out of the ledger', () => {
+  it('summarises each mission with its objective, status and counts', async () => {
+    const missionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Explain heat pumps.' } }));
+    await ledger.append(makeEvent({ missionId, type: 'task.contracted' }));
+    await ledger.append(makeEvent({ missionId, type: 'escalation.rung_climbed' }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.folded' }));
+
+    const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
+
+    expect(found).toBeDefined();
+    expect(found?.objective).toBe('Explain heat pumps.');
+    expect(found?.status).toBe('delivered');
+    expect(found?.eventCount).toBe(4);
+    expect(found?.escalations).toBe(1);
+  });
+
+  it('reports a mission with no terminal event as still running', async () => {
+    const missionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'In flight.' } }));
+
+    const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
+
+    expect(found?.status).toBe('running');
+  });
+
+  it('DISTRACTOR: surrender wins over fold — the cheerier outcome is not reported', async () => {
+    // A dashboard that resolves this tie the other way tells the operator a
+    // mission delivered when it did not.
+    const missionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Both.' } }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.folded' }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.surrendered' }));
+
+    const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
+
+    expect(found?.status).toBe('surrendered');
+  });
+
+  it('DISTRACTOR: counts belong to their own mission, not the whole table', async () => {
+    // Without GROUP BY this passes trivially on a one-mission table and is
+    // catastrophically wrong the moment a second mission exists.
+    const a = randomUUID();
+    const b = randomUUID();
+    await ledger.append(makeEvent({ missionId: a, type: 'mission.started', payload: { objective: 'A' } }));
+    await ledger.append(makeEvent({ missionId: b, type: 'mission.started', payload: { objective: 'B' } }));
+    await ledger.append(makeEvent({ missionId: b, type: 'task.contracted' }));
+
+    const missions = await ledger.listMissions();
+    const summaryA = missions.find((m) => m.missionId === a);
+    const summaryB = missions.find((m) => m.missionId === b);
+
+    expect(summaryA?.eventCount).toBe(1);
+    expect(summaryB?.eventCount).toBe(2);
+    expect(summaryA?.objective).toBe('A');
+    expect(summaryB?.objective).toBe('B');
+  });
+
+  it('orders by most recent activity, so the rail opens on what is happening now', async () => {
+    const older = randomUUID();
+    const newer = randomUUID();
+    await ledger.append(makeEvent({ missionId: older, type: 'mission.started', payload: { objective: 'Older' } }));
+    await ledger.append(makeEvent({ missionId: newer, type: 'mission.started', payload: { objective: 'Newer' } }));
+
+    const missions = await ledger.listMissions();
+    const indexOfOlder = missions.findIndex((m) => m.missionId === older);
+    const indexOfNewer = missions.findIndex((m) => m.missionId === newer);
+
+    expect(indexOfNewer).toBeLessThan(indexOfOlder);
+  });
+});
+
+describe('R21 — fleet totals come from the ledger too', () => {
+  it('counts staffed agents and tasks contracted today', async () => {
+    // `makeEvent` dates its fixtures in the past, so "today" must be explicit —
+    // which is the point: the count is about when the work happened, not when
+    // the row was written.
+    const today = new Date().toISOString();
+    const missionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Totals.' } }));
+    await ledger.append(makeEvent({ missionId, type: 'task.contracted', occurredAt: today }));
+    await ledger.append(makeEvent({ missionId, type: 'task.contracted', occurredAt: today }));
+    await ledger.append(makeEvent({ missionId, type: 'agent.staffed' }));
+
+    const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
+
+    expect(found?.agentsStaffed).toBe(1);
+    expect(found?.tasksToday).toBe(2);
+  });
+
+  it('DISTRACTOR: a task contracted before today is not counted as today', async () => {
+    // Without the date filter this is just a total, and the operator reads a
+    // number that never resets as "how busy is the swarm right now".
+    const missionId = randomUUID();
+    const today = new Date().toISOString();
+    await ledger.append(makeEvent({ missionId, type: 'task.contracted', occurredAt: '2020-01-01T00:00:00.000Z' }));
+    await ledger.append(makeEvent({ missionId, type: 'task.contracted', occurredAt: today }));
+
+    const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
+
+    // One of the two is old: a plain COUNT would say 2.
+    expect(found?.tasksToday).toBe(1);
+  });
+});

@@ -43,6 +43,39 @@
   }
 </form>
 
+<section class="fleet">
+  <h2>
+    Fleet
+    <span class="totals">
+      {{ fleet.total() }} missions · {{ fleet.running() }} running · {{ fleet.agentsActive() }} agents · {{ fleet.tasksToday() }} tasks today
+      @if (fleet.needingAttention(); as waiting) {
+        <span class="attention">⚠ {{ waiting }} need a human</span>
+      }
+    </span>
+  </h2>
+
+  @if (fleet.error(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  }
+
+  <ul class="rail">
+    @for (mission of fleet.missions(); track mission.missionId) {
+      <li [attr.data-status]="mission.status" [class.selected]="mission.missionId === missionId()">
+        <button type="button" (click)="select(mission.missionId)">
+          <span class="badge">{{ mission.status }}</span>
+          <span class="objective">{{ mission.objective || mission.missionId }}</span>
+          <span class="count">{{ mission.eventCount }} events</span>
+          @if (mission.escalations) { <span class="esc">↑{{ mission.escalations }}</span> }
+        </button>
+      </li>
+    } @empty {
+      @if (!fleet.error()) {
+        <li class="empty">No missions yet — start one below.</li>
+      }
+    }
+  </ul>
+</section>
+
 @if (feed.tree(); as tree) {
   <section class="mission" [attr.data-status]="tree.status">
     <h2>{{ tree.objective || '(no objective yet)' }}</h2>

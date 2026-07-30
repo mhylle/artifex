@@ -6,8 +6,10 @@
  * the operator sees cannot disagree with the audit trail.
  */
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import type { OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
+import { Fleet } from './fleet';
 import { LedgerFeed } from './ledger-feed';
 import { MissionIntake, toLines } from './mission-intake';
 
@@ -19,8 +21,9 @@ import { MissionIntake, toLines } from './mission-intake';
   templateUrl: './mission-control.html',
   styleUrl: './mission-control.css',
 })
-export class MissionControl {
+export class MissionControl implements OnInit {
   readonly feed = inject(LedgerFeed);
+  readonly fleet = inject(Fleet);
   readonly #intake = inject(MissionIntake);
 
   readonly missionId = signal('');
@@ -32,8 +35,20 @@ export class MissionControl {
   readonly submitting = signal(false);
   readonly error = signal<string | null>(null);
 
+  ngOnInit(): void {
+    // The rail is what makes this screen usable cold; fetch it before the
+    // operator has to think of anything to type.
+    void this.fleet.refresh();
+  }
+
   watch(): void {
     this.feed.watch(this.missionId());
+  }
+
+  /** Switch the cockpit to a mission chosen from the rail. */
+  select(missionId: string): void {
+    this.missionId.set(missionId);
+    this.feed.watch(missionId);
   }
 
   /**

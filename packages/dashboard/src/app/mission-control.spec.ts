@@ -9,6 +9,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { Fleet } from './fleet';
 import { LedgerFeed } from './ledger-feed';
 import { MissionControl } from './mission-control';
 import { MissionIntake } from './mission-intake';
@@ -173,5 +174,81 @@ describe('MissionControl — intake (R14)', () => {
 
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('a mission needs an objective');
+  });
+});
+
+/**
+ * R21 — the fleet view. Mission Control used to open on an empty box demanding
+ * a UUID, which made it unusable to anyone who did not already know one.
+ */
+describe('MissionControl — fleet rail (R21)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let component: MissionControl;
+  let feed: LedgerFeed;
+  let fleet: Fleet;
+
+  const SUMMARIES = [
+    { missionId: 'm-1', objective: 'Explain heat pumps.', status: 'running' as const, eventCount: 7, escalations: 1, agentsStaffed: 2, tasksToday: 3, lastEventAt: '2026-07-30T09:00:00.000Z' },
+    { missionId: 'm-2', objective: 'Explain solar panels.', status: 'surrendered' as const, eventCount: 15, escalations: 3, agentsStaffed: 4, tasksToday: 1, lastEventAt: '2026-07-30T08:00:00.000Z' },
+  ];
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    component = fixture.componentInstance;
+    feed = TestBed.inject(LedgerFeed);
+    fleet = TestBed.inject(Fleet);
+  });
+
+  it('AC-0: lists every mission with its status, and shows fleet totals', () => {
+    fleet.missions.set(SUMMARIES);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Explain heat pumps.');
+    expect(text).toContain('Explain solar panels.');
+    expect(text).toContain('surrendered');
+    expect(fleet.total()).toBe(2);
+    expect(fleet.running()).toBe(1);
+  });
+
+  it('AC-0: surfaces the count of missions needing a human', () => {
+    fleet.missions.set(SUMMARIES);
+    fixture.detectChanges();
+
+    expect(fleet.needingAttention()).toBe(1);
+  });
+
+  it('AC-1: selecting a mission from the rail switches the view to it', () => {
+    const watched: string[] = [];
+    feed.watch = (missionId: string) => void watched.push(missionId);
+    fleet.missions.set(SUMMARIES);
+    fixture.detectChanges();
+
+    component.select('m-2');
+
+    expect(watched).toEqual(['m-2']);
+    expect(component.missionId()).toBe('m-2');
+  });
+
+  it('DISTRACTOR: an empty fleet says so rather than rendering a blank rail', () => {
+    // A blank area is indistinguishable from a broken one.
+    fleet.missions.set([]);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toMatch(/no missions/i);
+  });
+
+  it('DISTRACTOR: an unreachable control plane is reported, not shown as an empty fleet', () => {
+    // The failure this guards: operator sees "no missions yet" while the API is
+    // simply down, and concludes the system is idle.
+    fleet.missions.set([]);
+    fleet.error.set('Failed to fetch');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Failed to fetch');
   });
 });

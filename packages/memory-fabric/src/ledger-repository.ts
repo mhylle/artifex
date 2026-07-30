@@ -58,6 +58,40 @@ export interface ReplayFilter {
   missionId?: string;
 }
 
+/**
+ * One row of the fleet view (R21) — a mission as the operator sees it in the rail.
+ *
+ * Every field is DERIVED from the ledger by aggregation; nothing here is stored.
+ * That is the invariant the dashboard rests on ("a view, never a second truth"):
+ * there is no mission table to fall out of step with the trail, and a mission
+ * exists in the fleet exactly when it has events.
+ */
+export interface MissionSummary {
+  readonly missionId: string;
+  /** From the `mission.started` event; null until the runtime picks it up. */
+  readonly objective: string | null;
+  readonly status: 'running' | 'delivered' | 'surrendered';
+  readonly eventCount: number;
+  readonly escalations: number;
+  /** Specialists staffed for this mission — the fleet's "agents active" total. */
+  readonly agentsStaffed: number;
+  /** Tasks contracted since local midnight — the fleet's "tasks today" total. */
+  readonly tasksToday: number;
+  readonly lastEventAt: string;
+}
+
+interface MissionSummaryRow {
+  mission_id: string;
+  objective: string | null;
+  delivered: boolean;
+  surrendered: boolean;
+  event_count: string;
+  escalations: string;
+  agents_staffed: string;
+  tasks_today: string;
+  last_event_at: Date;
+}
+
 export class LedgerRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -168,6 +202,55 @@ export class LedgerRepository {
           );
 
     return result.rows.map(toLedgerEvent);
+  }
+
+  /**
+   * Every mission the ledger knows about, newest activity first (R21).
+   *
+   * Aggregated in one pass rather than replaying each mission and folding in
+   * TypeScript: the fleet view is the first screen an operator sees, and it must
+   * not cost one query per mission — that is the shape that stops working
+   * exactly when the system starts being used.
+   *
+   * `objective` is picked from `mission.started` rather than intake, because
+   * intake's event belongs to the control plane and the runtime is what proves a
+   * mission actually began.
+   */
+  async listMissions(): Promise<MissionSummary[]> {
+    const result = await this.pool.query<MissionSummaryRow>(`
+      SELECT
+        mission_id,
+        (ARRAY_AGG(payload->>'objective') FILTER (WHERE type = 'mission.started'))[1] AS objective,
+        BOOL_OR(type = 'mission.folded')      AS delivered,
+        BOOL_OR(type = 'mission.surrendered') AS surrendered,
+        COUNT(*)                              AS event_count,
+        COUNT(*) FILTER (WHERE type = 'escalation.rung_climbed') AS escalations,
+        COUNT(*) FILTER (WHERE type = 'agent.staffed')           AS agents_staffed,
+        -- "Today" is the calendar day, not a rolling window: an operator reading
+        -- a dashboard means today, and a rolling N hours would be a number
+        -- nobody asked for.
+        COUNT(*) FILTER (
+          WHERE type = 'task.contracted' AND occurred_at >= date_trunc('day', now())
+        )                                     AS tasks_today,
+        MAX(occurred_at)                      AS last_event_at
+      FROM ledger_event
+      GROUP BY mission_id
+      ORDER BY MAX(seq) DESC
+    `);
+
+    return result.rows.map((row) => ({
+      missionId: row.mission_id,
+      objective: row.objective,
+      // Surrender wins a tie: a mission that folded AND surrendered has not
+      // delivered, and reporting the cheerier of two outcomes is how a dashboard
+      // starts lying.
+      status: row.surrendered ? 'surrendered' : row.delivered ? 'delivered' : 'running',
+      eventCount: Number(row.event_count),
+      escalations: Number(row.escalations),
+      agentsStaffed: Number(row.agents_staffed),
+      tasksToday: Number(row.tasks_today),
+      lastEventAt: row.last_event_at.toISOString(),
+    }));
   }
 
   async count(): Promise<number> {

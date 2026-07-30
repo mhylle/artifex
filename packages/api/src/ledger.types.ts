@@ -13,8 +13,21 @@ export interface LedgerSink {
   append(event: LedgerEventInput): Promise<unknown>;
 }
 
+/** One mission as the fleet rail shows it (R21) — derived, never stored. */
+export interface MissionSummary {
+  readonly missionId: string;
+  readonly objective: string | null;
+  readonly status: 'running' | 'delivered' | 'surrendered';
+  readonly eventCount: number;
+  readonly escalations: number;
+  readonly agentsStaffed: number;
+  readonly tasksToday: number;
+  readonly lastEventAt: string;
+}
+
 export interface LedgerReader {
   replay(filter: { missionId: string }): Promise<LedgerEvent[]>;
+  listMissions(): Promise<MissionSummary[]>;
 }
 
 /** A pointer, as the ledger's `LISTEN/NOTIFY` channel delivers it. */

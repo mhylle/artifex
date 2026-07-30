@@ -3,7 +3,7 @@ import type { LedgerEvent } from '@artifex/shared-types';
 
 import { MissionIntakeService } from './mission-intake.service';
 import type { IntakeRequest } from './mission-intake.service';
-import type { LedgerReader } from './ledger.types';
+import type { LedgerReader, MissionSummary } from './ledger.types';
 import { LEDGER_READER } from './tokens';
 import { Inject } from '@nestjs/common';
 
@@ -25,6 +25,18 @@ export class MissionController {
   async create(@Body() body: IntakeRequest) {
     const { contract } = await this.intake.accept(body);
     return { missionId: contract.missionId, contract };
+  }
+
+  /**
+   * The fleet (R21) — every mission the ledger knows about.
+   *
+   * Declared BEFORE `:missionId/events` because Nest matches routes in
+   * declaration order, and a bare `GET /missions` must not be mistaken for a
+   * mission whose id is the empty string.
+   */
+  @Get()
+  async fleet(): Promise<MissionSummary[]> {
+    return this.ledger.listMissions();
   }
 
   /** The whole trail for one mission — the dashboard's cold-start read. */
