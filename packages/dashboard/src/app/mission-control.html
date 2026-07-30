@@ -120,6 +120,17 @@
       </ul>
     }
 
+    <nav class="lenses" aria-label="lenses">
+      @for (name of lenses; track name) {
+        <button type="button" [class.active]="lens() === name" (click)="lens.set(name)">{{ name }}</button>
+      }
+    </nav>
+
+    @if (lens() !== 'canvas') {
+      <app-lens-panels [lens]="lens()" [events]="feed.events()" />
+    }
+
+    @if (lens() === 'canvas') {
     <div class="canvas-bar">
       <nav class="breadcrumb" aria-label="canvas path">
         <button type="button" (click)="clearFocus()">task zero</button>
@@ -150,6 +161,8 @@
         <li class="empty">No tasks contracted yet.</li>
       }
     </ul>
+
+    }
 
     <app-inspector [task]="selectedTask()" />
 

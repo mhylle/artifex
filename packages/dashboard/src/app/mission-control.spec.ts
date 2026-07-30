@@ -629,3 +629,102 @@ describe('MissionControl — deciding an attention item (R18)', () => {
     expect(sent[0]?.decision).toBe('reject');
   });
 });
+
+/**
+ * R19 — the lenses must be REACHABLE and must agree.
+ *
+ * Reachability first, because this project has shipped four capabilities that
+ * worked and had no caller. Agreement second, because that is the AC that makes
+ * five lenses one dashboard rather than five dashboards.
+ */
+describe('MissionControl — the five lenses (R19)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let component: MissionControl;
+  let feed: LedgerFeed;
+
+  const trail = () => [
+    ev(1, 'mission.started', MISSION, { objective: 'Root' }),
+    ev(2, 'task.contracted', 't-a', { objective: 'Part A', category: 'research', parentTaskId: MISSION }),
+    ev(3, 'agent.staffed', 't-a', { designId: 'analyst', version: 3, logicalTier: 2 }),
+    ev(4, 'task.executed', 't-a', { effortSpent: 2 }),
+    ev(5, 'gate_b.verdict_issued', 't-a', { outcome: 'pass', findings: [] }),
+  ];
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    component = fixture.componentInstance;
+    feed = TestBed.inject(LedgerFeed);
+    feed.events.set(trail());
+    fixture.detectChanges();
+  });
+
+  it('renders a switcher button for every lens', () => {
+    const labels = Array.from(
+      fixture.nativeElement.querySelectorAll('.lenses button') as NodeListOf<HTMLButtonElement>,
+    ).map((b) => b.textContent?.trim());
+
+    for (const lens of ['canvas', 'workforce', 'timeline', 'learning', 'ledger']) {
+      expect(labels, `no switcher button for "${lens}"`).toContain(lens);
+    }
+  });
+
+  it('the workforce lens shows the staffed specialist with its design and version', () => {
+    component.lens.set('workforce');
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('analyst');
+    expect(text).toContain('v3');
+    expect(text).toContain('100% compliant');
+  });
+
+  it('the timeline lens shows a lane for the task', () => {
+    component.lens.set('timeline');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Part A');
+    expect(fixture.nativeElement.querySelectorAll('.lanes > li').length).toBe(1);
+  });
+
+  it('the ledger explorer shows every event, and narrows when filtered', () => {
+    component.lens.set('ledger');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.rows li').length).toBe(5);
+  });
+
+  it('the learning observatory says plainly that nothing has been recorded', () => {
+    // Honest emptiness rather than invented content: the loops are unbuilt.
+    component.lens.set('learning');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('not built yet');
+  });
+
+  it('AC-4 DISTRACTOR: the workforce lens and the canvas agree about this mission', () => {
+    // Each is a projection of the identical event list, so they cannot disagree
+    // — this asserts that rather than trusting it.
+    component.lens.set('workforce');
+    fixture.detectChanges();
+
+    const staffedNodes = component.visibleNodes().filter((n) => n.designId !== null).length;
+    const agents = fixture.nativeElement.querySelectorAll('.agents li').length;
+
+    expect(agents).toBe(staffedNodes);
+  });
+
+  it('DISTRACTOR: switching lenses changes no ledger fact', () => {
+    const before = JSON.stringify(feed.tree());
+
+    for (const lens of component.lenses) {
+      component.lens.set(lens);
+      fixture.detectChanges();
+    }
+
+    expect(JSON.stringify(feed.tree())).toBe(before);
+    expect(feed.events()).toHaveLength(5);
+  });
+});

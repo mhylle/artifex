@@ -1,0 +1,103 @@
+@switch (lens()) {
+  @case ('workforce') {
+    <section class="lens" aria-label="workforce lens">
+      <h3>Workforce <span class="count">{{ workforce().length }} staffed</span></h3>
+      <ul class="agents">
+        @for (agent of workforce(); track agent.taskId + agent.designId) {
+          <li>
+            <span class="badge">{{ agent.category || 'uncategorised' }}</span>
+            <span class="design">{{ agent.designId }} v{{ agent.version ?? '?' }}</span>
+            <span class="tier">tier {{ agent.logicalTier ?? '?' }}</span>
+            <span class="objective">{{ agent.objective || agent.taskId }}</span>
+            <span class="runtime">{{ agent.runtimeSeconds }}s</span>
+            <span class="compliance">{{ percent(agent.complianceRate) }} compliant</span>
+          </li>
+        } @empty {
+          <li class="empty">No specialists staffed in this trail.</li>
+        }
+      </ul>
+    </section>
+  }
+
+  @case ('timeline') {
+    <section class="lens" aria-label="timeline lens">
+      <h3>Timeline <span class="count">{{ timeline().length }} lanes</span></h3>
+      <ul class="lanes">
+        @for (lane of timeline(); track lane.taskId) {
+          <li>
+            <p class="objective">{{ lane.objective || lane.taskId }}</p>
+            <p class="spans">
+              <span class="waited">waited {{ lane.waitedSeconds }}s</span>
+              <span class="ran">ran {{ lane.ranSeconds === null ? 'not started' : lane.ranSeconds + 's' }}</span>
+            </p>
+            <ol class="entries">
+              @for (entry of lane.entries; track entry.seq) {
+                <li><span class="seq">#{{ entry.seq }}</span> {{ entry.type }}</li>
+              }
+            </ol>
+          </li>
+        } @empty {
+          <li class="empty">No tasks in this trail.</li>
+        }
+      </ul>
+    </section>
+  }
+
+  @case ('learning') {
+    <section class="lens" aria-label="learning observatory lens">
+      <h3>Learning observatory</h3>
+      @if (hasLearning()) {
+        <h4>Experiments in flight</h4>
+        <ul>
+          @for (e of learning().experiments; track e.eventId) { <li>{{ e.payload | json }}</li> }
+        </ul>
+        <h4>Adoptions and reverts</h4>
+        <ul>
+          @for (e of learning().adoptions; track e.eventId) { <li>adopted: {{ e.payload | json }}</li> }
+          @for (e of learning().reverts; track e.eventId) { <li>reverted: {{ e.payload | json }}</li> }
+        </ul>
+        <h4>Amendment petitions <span class="count">proposals only — never applied</span></h4>
+        <ul>
+          @for (e of learning().petitions; track e.eventId) { <li>{{ e.payload | json }}</li> }
+        </ul>
+      } @else {
+        <p class="empty">
+          Nothing to show. The learning loops are not built yet (R26 fast loop, R27 science loop),
+          so no experiment, adoption or amendment petition has ever been recorded.
+        </p>
+      }
+    </section>
+  }
+
+  @case ('ledger') {
+    <section class="lens" aria-label="ledger explorer lens">
+      <h3>Ledger explorer <span class="count">{{ ledger().length }} of {{ events().length }} events</span></h3>
+      <div class="filters">
+        <label for="family">Family</label>
+        <select id="family" name="family" [ngModel]="family()" (ngModelChange)="family.set($event)">
+          <option value="">any</option>
+          @for (f of families(); track f) { <option [value]="f">{{ f }}</option> }
+        </select>
+
+        <label for="errorClass">Error class</label>
+        <input id="errorClass" name="errorClass" [ngModel]="errorClass()" (ngModelChange)="errorClass.set($event)" placeholder="e.g. incomplete" />
+
+        <label for="agentFilter">Agent</label>
+        <input id="agentFilter" name="agentFilter" [ngModel]="agent()" (ngModelChange)="agent.set($event)" placeholder="design id" />
+      </div>
+
+      <ol class="rows">
+        @for (event of ledger(); track event.eventId) {
+          <li>
+            <span class="seq">#{{ event.seq }}</span>
+            <span class="family">{{ event.family }}</span>
+            <span class="type">{{ event.type }}</span>
+            <code>{{ event.payload | json }}</code>
+          </li>
+        } @empty {
+          <li class="empty">No events match these filters.</li>
+        }
+      </ol>
+    </section>
+  }
+}

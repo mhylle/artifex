@@ -14,6 +14,8 @@ import { Cockpit } from './cockpit';
 import type { CockpitAction } from './cockpit';
 import { Fleet } from './fleet';
 import { Inspector } from './inspector';
+import { LensPanels } from './lens-panels';
+import type { LensName } from './lens-panels';
 import { LedgerFeed } from './ledger-feed';
 import { MissionIntake, toLines } from './mission-intake';
 import type { TaskNode } from './mission-tree';
@@ -21,7 +23,7 @@ import type { TaskNode } from './mission-tree';
 @Component({
   selector: 'app-mission-control',
   standalone: true,
-  imports: [FormsModule, CanvasNode, Inspector],
+  imports: [FormsModule, CanvasNode, Inspector, LensPanels],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './mission-control.html',
   styleUrl: './mission-control.css',
@@ -48,6 +50,15 @@ export class MissionControl implements OnInit {
    * of *looking at* a mission, not facts about it, and the tree must remain a
    * pure function of the ledger (invariant #1).
    */
+  /**
+   * Which of the five lenses is showing (R19).
+   *
+   * A property of looking, like zoom and focus — never of the mission, so it
+   * lives here and touches no projection.
+   */
+  readonly lens = signal<LensName>('canvas');
+  readonly lenses: readonly LensName[] = ['canvas', 'workforce', 'timeline', 'learning', 'ledger'];
+
   readonly selectedTaskId = signal<string | null>(null);
   readonly focusedTaskId = signal<string | null>(null);
   readonly zoom = signal(1);

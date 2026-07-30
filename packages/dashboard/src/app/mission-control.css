@@ -55,3 +55,6 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .attention .dial { color: #666; }
 .attention .criteria, .attention .findings { margin: .4rem 0 0; padding-left: 1.1rem; font-size: .78rem; }
 .attention .findings { color: #9c2b23; }
+.lenses { display: flex; flex-wrap: wrap; gap: .3rem; margin: .9rem 0 .2rem; }
+.lenses button { padding: .25rem .7rem; font-size: .78rem; text-transform: capitalize; background: #fff; border: 1px solid #d8d8d8; }
+.lenses button.active { background: #eef2fb; border-color: #5a78c8; color: #33477d; font-weight: 500; }
