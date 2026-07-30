@@ -34,6 +34,11 @@ const ClaritySchema = Type.Object(
   { $id: 'ClarityAssessment', additionalProperties: false },
 );
 
+const RewrittenObjectiveSchema = Type.Object(
+  { objective: Type.String({ minLength: 1 }) },
+  { $id: 'RewrittenObjective', additionalProperties: false },
+);
+
 const CoverageSchema = Type.Object(
   {
     coverage: Type.Array(
@@ -138,6 +143,37 @@ export function createMissionSeams(
         ].join('\n'))) as { restatement: string; ambiguities: string[] };
 
         return { restatement: out.restatement, ambiguities: out.ambiguities };
+      },
+    },
+
+    /**
+     * Repairs a contract the worker could not restate (defect `1e3905a4`).
+     *
+     * Runs at the evaluator tier because rewriting a specification is authoring
+     * work, not execution — and because the thing being repaired is the
+     * Orchestrator's output, so it belongs at the Orchestrator's end of the
+     * ladder rather than the worker's.
+     *
+     * Note what it is NOT allowed to do: the acceptance criteria are returned
+     * unchanged (`null`). A task that could rewrite its own criteria could
+     * dissolve any objective it found hard by redefining success — the exact
+     * move invariant #4 exists to prevent. Only the objective's *wording* is in
+     * scope here; what counts as done is not.
+     */
+    clarifier: {
+      async clarify({ contract, ambiguities }) {
+        const out = (await gen(models.evaluator, RewrittenObjectiveSchema, [
+          'Rewrite this task objective so the listed ambiguities disappear.',
+          'Keep the SAME work in scope — resolve the wording, do not narrow or change the task.',
+          '',
+          `OBJECTIVE: ${contract.objective}`,
+          'AMBIGUITIES REPORTED BY THE WORKER:',
+          ...ambiguities.map((a) => `  - ${a}`),
+          'IT MUST STILL SATISFY:',
+          ...contract.acceptanceCriteria.map((c) => `  - ${c.statement}`),
+        ].join('\n'))) as { objective: string };
+
+        return { objective: out.objective, acceptanceCriteria: null };
       },
     },
 

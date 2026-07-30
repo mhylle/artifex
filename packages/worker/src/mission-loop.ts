@@ -29,6 +29,23 @@ import type { CompletionJudge, CoverageJudge } from './reviewer.js';
 import { runSpecialist } from './specialist.js';
 import type { ClarityJudge, SpecialistWork } from './specialist.js';
 
+/**
+ * Rewrites a contract the worker could not restate (defect `1e3905a4`).
+ *
+ * A bounce says the *specification* is unclear, so the only thing that can fix
+ * it is changing the specification. Optional: without it the loop still climbs
+ * the ladder and surrenders honestly, it just cannot repair the contract.
+ */
+export interface Clarifier {
+  clarify(input: {
+    readonly contract: TaskContract;
+    readonly ambiguities: readonly string[];
+  }): Promise<{
+    readonly objective: string;
+    readonly acceptanceCriteria: readonly { criterionId: string; statement: string }[] | null;
+  }>;
+}
+
 export interface MissionSeams {
   readonly planner: Planner;
   readonly coverageJudge: CoverageJudge;
@@ -38,6 +55,7 @@ export interface MissionSeams {
   readonly work: SpecialistWork;
   readonly completionJudge: CompletionJudge;
   readonly reconciler: Reconciler;
+  readonly clarifier?: Clarifier;
 }
 
 export interface Escalation {
@@ -174,7 +192,7 @@ export async function runMission(
   // ---- per-leaf: staff → execute → Gate B → escalate ------------------------
   const completed: Array<{ objective: string; deliverable: unknown }> = [];
 
-  for (const child of children) {
+  for (let child of children) {
     const ladder = child.escalationPolicy.ladder;
     let rungIndex = -1;
     let tierBump = 0;
@@ -239,14 +257,50 @@ export async function runMission(
 
       if (outcome.kind === 'bounced') {
         record(child.taskId, 'execution', 'task.bounced', 'worker', { ambiguities: outcome.ambiguities });
-        // A bounce is a specification problem, so it climbs the ladder too rather
-        // than being retried identically — retrying an ambiguous contract just
-        // rehearses the ambiguity.
-        rungIndex += 1;
+
+        // The error class picks the rung (R36). A bounce is a SPECIFICATION
+        // fault: the contract could not be restated, so nothing about running it
+        // again — at any size of model — addresses the problem. Climbing one rung
+        // from the bottom lands on `retry_higher_tier`, and measurement across
+        // the local ladder showed a bigger model is *worse* at this gate
+        // (2b 33% false-bounce, 9b 17%, 12b 58%), so the default remedy actively
+        // increased the chance of bouncing again.
+        const reDecomposition = ladder.indexOf('re_decomposition');
+        rungIndex = reDecomposition > rungIndex ? reDecomposition : rungIndex + 1;
         if (rungIndex >= ladder.length) break;
-        record(child.taskId, 'escalation', 'escalation.rung_climbed', 'orchestrator', {
-          rung: ladder[rungIndex], reason: 'contract was bounced as ambiguous',
-        });
+
+        const rung = ladder[rungIndex]!;
+        const reason = `contract was bounced as ambiguous: ${outcome.ambiguities.join('; ')}`;
+        escalations.push({ taskId: child.taskId, rung, fromTier: tier, toTier: tier, reason });
+        record(child.taskId, 'escalation', 'escalation.rung_climbed', 'orchestrator', { rung, reason });
+
+        // Enact the rung rather than merely recording it: rewrite the contract
+        // the worker could not read. Without a clarifier the loop still climbs
+        // and surrenders — honestly, but unable to repair anything.
+        if (seams.clarifier !== undefined) {
+          try {
+            const rewritten = await seams.clarifier.clarify({
+              contract: child,
+              ambiguities: outcome.ambiguities,
+            });
+            child = {
+              ...child,
+              objective: rewritten.objective,
+              ...(rewritten.acceptanceCriteria === null
+                ? {}
+                : { acceptanceCriteria: [...rewritten.acceptanceCriteria] }),
+            };
+            record(child.taskId, 'decision', 'task.recontracted', 'orchestrator', {
+              objective: child.objective, reason: 'rewritten after a bounce',
+            });
+          } catch (error) {
+            // A clarifier that fails leaves the original contract standing; the
+            // ladder has already advanced, so this cannot loop.
+            record(child.taskId, 'decision', 'task.recontract_failed', 'orchestrator', {
+              reason: describe(error),
+            });
+          }
+        }
         continue;
       }
 

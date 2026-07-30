@@ -380,3 +380,120 @@ describe('b3b4e554 — events are emitted as they happen, not batched at the end
     expect(result.outcome).toBe('delivered');
   });
 });
+
+/**
+ * Defect `1e3905a4` — a bounce must change the SPECIFICATION, not the tier.
+ *
+ * The clarity judge bounced the planner's own objectives and every multi-subtask
+ * mission surrendered doing zero work. The loop did climb the ladder on a
+ * bounce, but it climbed to `retry_higher_tier` — and measurement across the
+ * local ladder showed a higher tier is *worse* at this gate, not better:
+ *
+ *   qwen3.5:2b 33% false-bounce · 4b 25% · 9b 17% · gemma4:12b 58%
+ *
+ * So the remedy actively increased the chance of bouncing again. The dossier is
+ * explicit: "planning and specification faults jump straight to re-decomposition,
+ * because retrying a task that was specified wrong just burns budget rehearsing
+ * the same mistake" (R36). A bounce says the CONTRACT is unclear — the only
+ * thing that can fix it is rewriting the contract.
+ */
+describe('1e3905a4 — a bounced contract is rewritten, not retried at a bigger model', () => {
+  /** Bounces anything still containing the word "vague", accepts the rewrite. */
+  const pickyJudge = {
+    async assess({ contract }: { contract: { objective: string } }) {
+      return contract.objective.includes('vague')
+        ? { restatement: 'unclear', ambiguities: ['"vague" is not defined'] }
+        : { restatement: contract.objective, ambiguities: [] };
+    },
+  };
+
+  const vagueSeams = () => ({
+    ...seams(),
+    planner: {
+      async propose() {
+        return {
+          subtasks: [{
+            objective: 'Do the vague thing.',
+            category: 'answer',
+            acceptanceCriteria: [{ criterionId: 'ac-1', statement: 'The thing is done.' }],
+            outOfScope: ['Not the other thing.'],
+            blastRadius: 'low' as const,
+            effortShare: 0.5,
+          }],
+        };
+      },
+    },
+    clarityJudge: pickyJudge,
+  });
+
+  it('asks the clarifier to rewrite the objective and then succeeds', async () => {
+    const result = await runMission(
+      mission(),
+      {
+        ...vagueSeams(),
+        clarifier: {
+          async clarify({ contract }: { contract: { objective: string } }) {
+            return { objective: contract.objective.replace('vague', 'specific'), acceptanceCriteria: null };
+          },
+        },
+      } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(result.outcome).toBe('delivered');
+  });
+
+  it('records the rewrite as a re-decomposition rung, not a tier bump', async () => {
+    // The ladder intake actually issues — it carries a re_decomposition rung,
+    // which is the whole point: a spec fault has somewhere specific to go.
+    const withFullLadder = {
+      ...mission(),
+      escalationPolicy: {
+        ladder: ['retry_higher_tier', 'different_agent', 'agent_redesign', 're_decomposition', 'human_review'],
+        humanAt: 'human_review',
+      },
+    } as ReturnType<typeof mission>;
+
+    const result = await runMission(
+      withFullLadder,
+      {
+        ...vagueSeams(),
+        clarifier: {
+          async clarify({ contract }: { contract: { objective: string } }) {
+            return { objective: contract.objective.replace('vague', 'specific'), acceptanceCriteria: null };
+          },
+        },
+      } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    const rungs = result.escalations.map((e) => e.rung);
+    expect(rungs).toContain('re_decomposition');
+    expect(rungs).not.toContain('retry_higher_tier');
+  });
+
+  it('DISTRACTOR: a clear contract is never sent to the clarifier', async () => {
+    // Without this, "always rewrite" would satisfy the tests above while
+    // rewriting objectives that were fine — churning every task through an
+    // extra model call and changing work nobody asked to change.
+    let clarified = 0;
+
+    await runMission(
+      mission(),
+      {
+        ...seams(),
+        clarifier: { async clarify() { clarified += 1; return { objective: 'x', acceptanceCriteria: null }; } },
+      } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(clarified).toBe(0);
+  });
+
+  it('DISTRACTOR: with no clarifier seam the mission still surrenders rather than looping forever', async () => {
+    // The clarifier is optional; its absence must not hang the loop.
+    const result = await runMission(mission(), vagueSeams() as unknown as Parameters<typeof runMission>[1], { now: AT });
+
+    expect(result.outcome).toBe('surrendered');
+  });
+});
