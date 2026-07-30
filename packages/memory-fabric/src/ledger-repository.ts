@@ -132,6 +132,44 @@ export class LedgerRepository {
     return result.rows.map(toLedgerEvent);
   }
 
+  /**
+   * Read forward from `seq`, stopping at the commit horizon (defect `8a6ee598`).
+   *
+   * `seq` is handed out at INSERT, not at COMMIT. With parallel writers, seq 2
+   * can therefore become visible while seq 1 is still in flight — and a consumer
+   * polling {@link readSince} would advance past 1 and never see it. Replay from
+   * zero was always safe; only the live tail could skip.
+   *
+   * This returns only rows whose inserting transaction is *definitely* finished:
+   * everything below the current snapshot's xmin. Postgres already knows exactly
+   * what is still in flight, so no guessing is required.
+   *
+   * Note what this deliberately is NOT: a "lag by N seconds" window. That number
+   * would be simultaneously too slow on a quiet system and too fast on a busy
+   * one, and it would turn a correctness property into a tuning parameter. The
+   * horizon is exact — the cost is latency measured in the lifetime of the
+   * oldest open write transaction, which is the true bound on when an event
+   * *can* be known safe.
+   */
+  async readSinceCommitted(seq: number, filter: ReplayFilter = {}): Promise<LedgerEvent[]> {
+    const horizon = `inserted_xid < pg_snapshot_xmin(pg_current_snapshot())`;
+
+    const result =
+      filter.missionId === undefined
+        ? await this.pool.query<LedgerEventRow>(
+            `SELECT ${RETURNED_COLUMNS} FROM ledger_event
+             WHERE seq > $1 AND ${horizon} ORDER BY seq ASC`,
+            [seq],
+          )
+        : await this.pool.query<LedgerEventRow>(
+            `SELECT ${RETURNED_COLUMNS} FROM ledger_event
+             WHERE seq > $1 AND mission_id = $2 AND ${horizon} ORDER BY seq ASC`,
+            [seq, filter.missionId],
+          );
+
+    return result.rows.map(toLedgerEvent);
+  }
+
   async count(): Promise<number> {
     const result = await this.pool.query<{ count: string }>(
       'SELECT count(*)::text AS count FROM ledger_event',

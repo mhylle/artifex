@@ -209,3 +209,73 @@ describe('R12 AC-3 — reflection effort is charged against the contract budget'
     expect(result.event.payload).toHaveProperty('critiques');
   });
 });
+
+describe('defect cd677737 — a revision that regresses is rejected', () => {
+  /**
+   * Observed live: the critique was CORRECT (ac-2 unmet, no citation) but the
+   * repair was destructive — "22% in 2024" became "5% in [Source Name]",
+   * corrupting a correct figure and breaking ac-1, which the critique had just
+   * marked met. Reflection that regresses inverts R12's whole economic
+   * argument: it spends budget to make the work worse and still pays for the
+   * Gate B rejection.
+   */
+  const regressive: CritiqueJudge = {
+    async assess() {
+      return {
+        critiques: [
+          { criterionId: 'ac-1', assessment: 'met', note: 'A rate and date are stated.' },
+          { criterionId: 'ac-2', assessment: 'unmet', note: 'No citation.' },
+        ],
+        revisedDeliverable: { answer: 'Adoption reached 5% in [Source Name].' },
+        effortSpent: 1,
+      };
+    },
+  };
+
+  /** Re-checks the revision; reports that the previously-met criterion broke. */
+  const recheckFinds = (met: boolean) => async () => ({
+    critiques: [{ criterionId: 'ac-1', assessment: met ? ('met' as const) : ('unmet' as const), note: 'recheck' }],
+    revisedDeliverable: null,
+    effortSpent: 0,
+  });
+
+  it('keeps the DRAFT when the revision breaks a criterion the critique marked met', async () => {
+    const original = draft();
+    const result = await selfCritique({
+      contract: view(), draft: original, judge: regressive, ...META,
+      recheck: { assess: recheckFinds(false) },
+    });
+
+    expect(result.bundle.deliverable).toEqual(original.deliverable);
+    expect(result.bundle.reflection?.revised).toBe(false);
+    expect(result.regressionRejected).toBe(true);
+  });
+
+  it('DISTRACTOR: a revision that holds the met criteria IS accepted', async () => {
+    // Without this, "always discard the revision" would satisfy the test above
+    // — and reflection would become a very expensive no-op.
+    const result = await selfCritique({
+      contract: view(), draft: draft(), judge: regressive, ...META,
+      recheck: { assess: recheckFinds(true) },
+    });
+
+    expect((result.bundle.deliverable as { answer: string }).answer).toMatch(/5%/);
+    expect(result.bundle.reflection?.revised).toBe(true);
+    expect(result.regressionRejected).toBe(false);
+  });
+
+  it('DISTRACTOR: with no recheck available the revision is still applied — the guard is opt-in, not a silent block', async () => {
+    const result = await selfCritique({ contract: view(), draft: draft(), judge: regressive, ...META });
+
+    expect(result.bundle.reflection?.revised).toBe(true);
+  });
+
+  it('records the rejection so the Learning Agent can see reflection failing', async () => {
+    const result = await selfCritique({
+      contract: view(), draft: draft(), judge: regressive, ...META,
+      recheck: { assess: recheckFinds(false) },
+    });
+
+    expect(result.event.payload['regressionRejected']).toBe(true);
+  });
+});

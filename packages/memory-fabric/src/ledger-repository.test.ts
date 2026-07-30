@@ -168,3 +168,68 @@ describe('R2 AC-2 — replay returns exact append order', () => {
     expect(ids).not.toContain(first.eventId);
   });
 });
+
+describe('defect 8a6ee598 — the live tail must not skip a late-committing event', () => {
+  /**
+   * `seq` is handed out at INSERT, not at COMMIT. Two parallel writers can
+   * therefore make seq 2 visible while seq 1 is still in flight, and a consumer
+   * polling readSince(lastSeq) advances past 1 and never sees it. Reproduced
+   * here with two real transactions, because this is a database behaviour and
+   * mocking it would prove nothing.
+   */
+  it('readSince SKIPS a lower seq that commits later — the bug, reproduced', async () => {
+    const mission = randomUUID();
+    const before = await ledger.count();
+
+    const slow = await db.pool.connect();
+    const fast = await db.pool.connect();
+    try {
+      await slow.query('BEGIN');
+      await fast.query('BEGIN');
+
+      // slow takes the LOWER seq but has not committed.
+      await slow.query(
+        `INSERT INTO ledger_event (event_id, mission_id, task_id, family, type, actor, payload, occurred_at)
+         VALUES ($1,$2,NULL,'execution','slow','{"kind":"worker","id":"w","displayName":null}'::jsonb,'{}'::jsonb, now())`,
+        [randomUUID(), mission],
+      );
+      await fast.query(
+        `INSERT INTO ledger_event (event_id, mission_id, task_id, family, type, actor, payload, occurred_at)
+         VALUES ($1,$2,NULL,'execution','fast','{"kind":"worker","id":"w","displayName":null}'::jsonb,'{}'::jsonb, now())`,
+        [randomUUID(), mission],
+      );
+
+      await fast.query('COMMIT');
+
+      // The naive read sees "fast" and advances past the seq "slow" still holds.
+      const naive = await ledger.readSince(before, { missionId: mission });
+      expect(naive.map((e) => e.type)).toEqual(['fast']);
+
+      // The horizon-aware read returns NOTHING while "slow" is still open —
+      // it refuses to advance past a seq that is not yet safe.
+      const safe = await ledger.readSinceCommitted(before, { missionId: mission });
+      expect(safe).toEqual([]);
+
+      await slow.query('COMMIT');
+    } finally {
+      slow.release();
+      fast.release();
+    }
+
+    // Once both are committed, the horizon read returns BOTH, in seq order.
+    const settled = await ledger.readSinceCommitted(before, { missionId: mission });
+    expect(settled.map((e) => e.type)).toEqual(['slow', 'fast']);
+  });
+
+  it('DISTRACTOR: with no writer in flight, the horizon read returns events immediately', async () => {
+    // Otherwise "always return nothing" would satisfy the test above, and the
+    // live tail would simply never advance.
+    const mission = randomUUID();
+    const before = await ledger.count();
+    await ledger.append(makeEvent({ missionId: mission, type: 'settled' }));
+
+    expect((await ledger.readSinceCommitted(before, { missionId: mission })).map((e) => e.type)).toEqual([
+      'settled',
+    ]);
+  });
+});

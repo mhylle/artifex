@@ -60,9 +60,24 @@ const FRONTIER_TIER = 3;
 export async function runMission(
   mission: TaskContract,
   seams: MissionSeams,
-  options: { readonly now: string },
+  options: {
+    readonly now: string;
+    /**
+     * How many times to retry the SAME tier before spending an escalation rung
+     * (defect `626f6596`). The ladder exists for *substantive* failure — work
+     * that came back wrong. A backend hiccup is not that, and spending
+     * `retry_higher_tier` on one burns a real remedy on a non-problem.
+     *
+     * It matters at scale rather than in the small: every leaf needs a model
+     * call to survive, so with `n` leaves the failure probability compounds —
+     * and fanning out is the direction this system is built to grow in.
+     * Defaults to 1: enough to absorb a hiccup, not enough to hide a fault.
+     */
+    readonly transientRetries?: number;
+  },
 ): Promise<MissionResult> {
   const { now } = options;
+  const transientRetries = options.transientRetries ?? 1;
   const trail: LedgerEventInput[] = [];
   const escalations: Escalation[] = [];
   let seq = 0;
@@ -146,6 +161,8 @@ export async function runMission(
     // Bounded by the ladder AND by maxAttempts — whichever runs out first.
     const maxAttempts = Math.min(child.stoppingConditions.maxAttempts, ladder.length + 1);
 
+    let retriesUsed = 0;
+
     for (let attempt = 0; attempt < maxAttempts && !settled; attempt += 1) {
       let manifest;
       try {
@@ -173,6 +190,16 @@ export async function runMission(
           producedAt: now,
         });
       } catch (error) {
+        // Retry the same tier first. Only a repeated failure is evidence of a
+        // problem the ladder can actually remedy.
+        if (retriesUsed < transientRetries) {
+          retriesUsed += 1;
+          record(child.taskId, 'execution', 'task.retried', 'worker', {
+            reason: describe(error), attempt: retriesUsed,
+          });
+          attempt -= 1; // a retry is not an attempt against the ladder
+          continue;
+        }
         record(child.taskId, 'execution', 'task.failed', 'worker', { reason: describe(error) });
         rungIndex += 1;
         if (rungIndex >= ladder.length) break;

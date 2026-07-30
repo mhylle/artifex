@@ -46,6 +46,11 @@ export interface CritiqueJudge {
 
 export interface SelfCritiqueResult {
   readonly bundle: EvidenceBundle;
+  /**
+   * True when a proposed revision was DISCARDED because it broke a criterion the
+   * critique itself had just marked met (defect `cd677737`).
+   */
+  readonly regressionRejected: boolean;
   readonly event: LedgerEventInput;
   /**
    * Always `true`. Present as a value rather than an assumption so the call site
@@ -63,8 +68,24 @@ export async function selfCritique(input: {
   /** The ledger event holding the pre-reflection draft. */
   readonly priorDraftEventId: string;
   readonly performedAt: string;
+  /**
+   * Optional second look at the REVISION (defect `cd677737`).
+   *
+   * Observed live: a correct critique produced a destructive repair — it fixed
+   * the unmet criterion and broke one it had just marked met, turning "22% in
+   * 2024" into "5% in [Source Name]". Since R12's justification is economic —
+   * a cheap self-pass beats a Gate B rejection — a regressing pass inverts the
+   * argument: it spends budget to make the work worse and still pays for the
+   * rejection.
+   *
+   * The guard invents no threshold: it re-checks only the criteria the critique
+   * ITSELF marked met, and discards the revision if any of them broke. Optional
+   * because it costs another judge call; without it the previous behaviour
+   * stands, so this is opt-in hardening rather than a silent block.
+   */
+  readonly recheck?: CritiqueJudge;
 }): Promise<SelfCritiqueResult> {
-  const { contract, draft, judge, reflectionId, priorDraftEventId, performedAt } = input;
+  const { contract, draft, judge, reflectionId, priorDraftEventId, performedAt, recheck } = input;
 
   const viewCheck = validate(WorkerContractViewSchema, contract);
   if (!viewCheck.ok) {
@@ -88,7 +109,28 @@ export async function selfCritique(input: {
     );
   }
 
-  const revised = revisedDeliverable !== null;
+  let revised = revisedDeliverable !== null;
+  let regressionRejected = false;
+
+  if (revised && recheck !== undefined) {
+    const previouslyMet = critiques.filter((c) => c.assessment === 'met').map((c) => c.criterionId);
+    if (previouslyMet.length > 0) {
+      const second = await recheck.assess({
+        contract,
+        draft: { ...draft, deliverable: revisedDeliverable },
+      });
+      const broke = second.critiques.some(
+        (c) => previouslyMet.includes(c.criterionId) && c.assessment !== 'met',
+      );
+      if (broke) {
+        // Keep the draft. A revision that trades one satisfied criterion for
+        // another is not an improvement, and reflection must not be able to
+        // make the work worse on its own authority.
+        revised = false;
+        regressionRejected = true;
+      }
+    }
+  }
 
   const reflection: ReflectionRecord = {
     reflectionId,
@@ -120,9 +162,16 @@ export async function selfCritique(input: {
     family: 'execution',
     type: 'reflection.pass_completed',
     actor: { kind: 'worker', id: draft.agentId, displayName: null },
-    payload: { reflectionId, priorDraftEventId, revised, effortSpent, critiques: reflection.critiques },
+    payload: {
+      reflectionId, priorDraftEventId, revised, effortSpent,
+      critiques: reflection.critiques,
+      // Recorded so the Learning Agent can see reflection FAILING, not only
+      // succeeding — a pass whose revisions keep getting rejected is evidence
+      // that this seam is costing more than it returns.
+      regressionRejected,
+    },
     occurredAt: performedAt,
   };
 
-  return { bundle, event, gateBRequired: true };
+  return { bundle, event, gateBRequired: true, regressionRejected };
 }

@@ -237,7 +237,10 @@ describe('R9 — a seam that THROWS is a failure, not a crash', () => {
       },
     };
 
-    const result = await runMission(mission(), flaky, { now: AT });
+    // transientRetries: 0 so this exercises the ESCALATION path specifically.
+    // (With the default of 1 the same failure is absorbed by a retry instead —
+    // that behaviour is covered by the 626f6596 tests below.)
+    const result = await runMission(mission(), flaky, { now: AT, transientRetries: 0 });
 
     expect(result.outcome).toBe('delivered');
     expect(result.trail.map((e) => e.type)).toContain('task.failed');
@@ -268,5 +271,63 @@ describe('R9 — a seam that THROWS is a failure, not a crash', () => {
     expect(result.outcome).toBe('surrendered');
     const surrender = result.trail.find((e) => e.type === 'mission.surrendered');
     expect(JSON.stringify(surrender?.payload)).toMatch(/ran away/);
+  });
+});
+
+describe('defect 626f6596 — a TRANSIENT failure is retried before a rung is spent', () => {
+  /**
+   * The escalation ladder exists for SUBSTANTIVE failure — work that came back
+   * wrong. Spending `retry_higher_tier` on a backend hiccup burns a real remedy
+   * on a non-problem, and since every leaf needs a model call to survive, that
+   * failure probability compounds with fan-out.
+   */
+  it('retries the same tier once and delivers, spending NO rung', async () => {
+    let calls = 0;
+    const flaky: MissionSeams = {
+      ...seams(),
+      work: {
+        async execute(args) {
+          calls += 1;
+          if (calls === 1) throw new Error('AI_NoObjectGeneratedError: finish_reason length');
+          return seams().work.execute(args);
+        },
+      },
+    };
+
+    const result = await runMission(mission(), flaky, { now: AT, transientRetries: 1 });
+
+    expect(result.outcome).toBe('delivered');
+    expect(result.escalations).toHaveLength(0);
+    expect(result.trail.map((e) => e.type)).toContain('task.retried');
+  });
+
+  it('DISTRACTOR: a PERSISTENT failure still climbs the ladder — retry is not a way to avoid escalating', async () => {
+    const broken: MissionSeams = {
+      ...seams(),
+      work: { async execute() { throw new Error('backend unreachable'); } },
+    };
+
+    const result = await runMission(mission(), broken, { now: AT, transientRetries: 1 });
+
+    expect(result.outcome).toBe('surrendered');
+    expect(result.escalations.length).toBeGreaterThan(0);
+  });
+
+  it('DISTRACTOR: with retries disabled the old behaviour stands — one rung per failure', async () => {
+    let calls = 0;
+    const flaky: MissionSeams = {
+      ...seams(),
+      work: {
+        async execute(args) {
+          calls += 1;
+          if (calls === 1) throw new Error('transient');
+          return seams().work.execute(args);
+        },
+      },
+    };
+
+    const result = await runMission(mission(), flaky, { now: AT, transientRetries: 0 });
+
+    expect(result.escalations).toHaveLength(1);
   });
 });

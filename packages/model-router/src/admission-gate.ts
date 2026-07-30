@@ -75,6 +75,17 @@ export interface AdmissionResult {
   readonly logicalTier: LogicalTier;
   readonly admitted: boolean;
   readonly failures: AdmissionFailure[];
+  /** How many independent runs the verdict rests on (defect `d678cd8c`). */
+  readonly runs: number;
+  /**
+   * Fraction of runs in which the candidate passed every probe.
+   *
+   * Carried as DATA rather than collapsed into the boolean, because
+   * "reliable enough" is a policy question the Tier Policy engine owns —
+   * ADR-0002 makes tier a computed policy, and this is one of its inputs.
+   * Deciding a threshold here would be this function inventing a cap.
+   */
+  readonly passRate: number;
 }
 
 const AT = '2026-07-26T09:00:00.000Z';
@@ -235,15 +246,34 @@ export async function runAdmissionGate(options: {
   /** Defaults to the probes registered for this tier. */
   readonly probes?: readonly AdmissionProbe[];
   readonly backend: StructuredOutputBackend;
+  /**
+   * How many independent runs to sample (defect `d678cd8c`).
+   *
+   * Model output is stochastic, and a single sample was being recorded as a
+   * permanent catalog fact — the same model was refused at Tier 2 in one phase
+   * and admitted at Tier 2 in the next. Tier resolution should not depend on
+   * which sample happened to run on admission day.
+   *
+   * Admission requires EVERY run to pass. That is unanimity, not an invented
+   * threshold: the `passRate` is carried alongside so the Tier Policy engine
+   * can treat reliability as an input rather than this function deciding what
+   * "reliable enough" means. Defaults to 1, so existing callers are unchanged.
+   */
+  readonly runs?: number;
 }): Promise<AdmissionResult> {
   const { candidate, logicalTier, backend } = options;
   const probes = options.probes ?? probesForTier(logicalTier);
+  const runs = options.runs ?? 1;
 
   if (probes.length === 0) {
     throw new NoProbesForTierError(logicalTier);
   }
 
   const failures: AdmissionFailure[] = [];
+  let cleanRuns = 0;
+
+  for (let run = 0; run < runs; run += 1) {
+    const before = failures.length;
 
   for (const probe of probes) {
     let output: unknown;
@@ -283,7 +313,17 @@ export async function runAdmissionGate(options: {
     if (incoherent.length > 0) {
       failures.push({ probe: probe.name, errors: incoherent });
     }
+    }
+
+    if (failures.length === before) cleanRuns += 1;
   }
 
-  return { candidate, logicalTier, admitted: failures.length === 0, failures };
+  return {
+    candidate,
+    logicalTier,
+    admitted: failures.length === 0,
+    failures,
+    runs,
+    passRate: cleanRuns / runs,
+  };
 }

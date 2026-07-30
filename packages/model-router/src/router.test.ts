@@ -188,3 +188,83 @@ describe('R3 AC-3 — Tier-2 falls back to Claude, explicitly and never silently
     await expect(router.resolveTier(2)).rejects.toBeInstanceOf(NoModelForTierError);
   });
 });
+
+describe('defect d678cd8c — admission samples repeatedly and reports a RATE', () => {
+  /**
+   * A single sample of a stochastic process was being recorded as a permanent
+   * catalog fact: the same model was refused at Tier 2 in P3 and admitted at
+   * Tier 2 in P3.5. Tier resolution should not depend on which sample happened
+   * to run on admission day.
+   */
+  const sampleBackend = (passes: boolean[]) => {
+    let call = 0;
+    return {
+      async generate({ probe }: { probe: { sample: () => unknown } }) {
+        const ok = passes[Math.floor(call / 1) % passes.length];
+        call += 1;
+        return ok ? probe.sample() : { nope: true };
+      },
+    };
+  };
+
+  it('reports the pass rate across runs, not a single verdict', async () => {
+    const result = await runAdmissionGate({
+      candidate: { provider: 'ollama', model: 'flaky' },
+      logicalTier: 1,
+      runs: 4,
+      backend: sampleBackend([true, false, true, true]),
+    });
+
+    expect(result.runs).toBe(4);
+    expect(result.passRate).toBeGreaterThan(0);
+    expect(result.passRate).toBeLessThan(1);
+  });
+
+  it('DISTRACTOR: a model that passes EVERY run has a rate of 1 and is admitted', async () => {
+    const result = await runAdmissionGate({
+      candidate: { provider: 'ollama', model: 'solid' },
+      logicalTier: 1,
+      runs: 3,
+      backend: sampleBackend([true]),
+    });
+
+    expect(result.passRate).toBe(1);
+    expect(result.admitted).toBe(true);
+  });
+
+  it('DISTRACTOR: a model that fails EVERY run has a rate of 0 and is refused', async () => {
+    const result = await runAdmissionGate({
+      candidate: { provider: 'ollama', model: 'hopeless' },
+      logicalTier: 1,
+      runs: 3,
+      backend: sampleBackend([false]),
+    });
+
+    expect(result.passRate).toBe(0);
+    expect(result.admitted).toBe(false);
+  });
+
+  it('a flaky model is NOT admitted — admission requires every run to pass', async () => {
+    // No invented threshold: the bar is unanimity, and the RATE is carried as
+    // data so the Tier Policy engine can treat reliability as an input rather
+    // than this function inventing what "reliable enough" means.
+    const result = await runAdmissionGate({
+      candidate: { provider: 'ollama', model: 'flaky' },
+      logicalTier: 1,
+      runs: 4,
+      backend: sampleBackend([true, false, true, true]),
+    });
+
+    expect(result.admitted).toBe(false);
+  });
+
+  it('defaults to a single run, so existing callers are unchanged', async () => {
+    const result = await runAdmissionGate({
+      candidate: { provider: 'ollama', model: 'solid' },
+      logicalTier: 1,
+      backend: sampleBackend([true]),
+    });
+
+    expect(result.runs).toBe(1);
+  });
+});
