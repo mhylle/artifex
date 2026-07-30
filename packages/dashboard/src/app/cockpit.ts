@@ -9,7 +9,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
-export type CockpitAction = 'pause' | 'resume' | 'cancel' | 'grant_budget' | 'turn_dial' | 'annotate';
+export type CockpitAction = 'pause' | 'resume' | 'cancel' | 'grant_budget' | 'turn_dial' | 'annotate' | 'decide';
 
 export interface CockpitCommand {
   readonly missionId: string;
@@ -18,6 +18,7 @@ export interface CockpitCommand {
   readonly amount?: number;
   readonly autonomyDial?: 'autonomous' | 'checkpointed' | 'supervised';
   readonly note?: string;
+  readonly decision?: 'approve' | 'reject';
 }
 
 /**

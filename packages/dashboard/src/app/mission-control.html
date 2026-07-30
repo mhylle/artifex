@@ -86,6 +86,8 @@
           <span class="badge">{{ item.rung }}</span>
           @if (item.autonomyDial) { <span class="dial">dial: {{ item.autonomyDial }}</span> }
           <button type="button" (click)="select(item.missionId)">Open mission</button>
+          <button type="button" (click)="decide(item, 'approve')">Approve</button>
+          <button type="button" (click)="decide(item, 'reject')">Reject</button>
         </p>
         @if (item.acceptanceCriteria.length) {
           <ul class="criteria">

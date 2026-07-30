@@ -570,3 +570,62 @@ describe('MissionControl — cockpit actions (R17)', () => {
     expect(sent).toHaveLength(0);
   });
 });
+
+/**
+ * R18 AC-2 — the operator must be able to REACH the decision.
+ *
+ * The CockpitService has had a 'decide' action for an iteration, and no button
+ * called it. That is precisely the shape that made focus() unreachable and left
+ * the breadcrumb permanently empty despite green unit tests.
+ */
+describe('MissionControl — deciding an attention item (R18)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let fleet: Fleet;
+  let sent: CockpitCommand[];
+
+  const ITEM = {
+    missionId: 'm-9', taskId: 't-9', objective: 'Count the sand.', rung: 'human_review',
+    autonomyDial: 'checkpointed', findings: ['no census exists'],
+    acceptanceCriteria: [{ criterionId: 'ac-1', statement: 'Exact count.' }],
+    waitingSince: '2026-07-30T09:00:00.000Z',
+  };
+
+  beforeEach(async () => {
+    sent = [];
+    const stub: Pick<Cockpit, 'act'> = { async act(command) { sent.push(command); } };
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting(), { provide: Cockpit, useValue: stub }],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    fleet = TestBed.inject(Fleet);
+    fleet.attention.set([ITEM]);
+    fixture.detectChanges();
+  });
+
+  it('AC-2: an Approve button is rendered on the item and sends the decision', async () => {
+    const buttons = Array.from(
+      fixture.nativeElement.querySelectorAll('.attention button') as NodeListOf<HTMLButtonElement>,
+    );
+    const approve = buttons.find((b) => b.textContent?.trim() === 'Approve');
+    expect(approve, 'no Approve button on the attention item').toBeDefined();
+
+    approve!.click();
+    await fixture.whenStable();
+
+    expect(sent[0]?.action).toBe('decide');
+    expect(sent[0]?.decision).toBe('approve');
+    expect(sent[0]?.taskId).toBe('t-9');
+    expect(sent[0]?.missionId).toBe('m-9');
+  });
+
+  it('DISTRACTOR: Reject sends a different decision, not the same one', async () => {
+    const buttons = Array.from(
+      fixture.nativeElement.querySelectorAll('.attention button') as NodeListOf<HTMLButtonElement>,
+    );
+    buttons.find((b) => b.textContent?.trim() === 'Reject')!.click();
+    await fixture.whenStable();
+
+    expect(sent[0]?.decision).toBe('reject');
+  });
+});

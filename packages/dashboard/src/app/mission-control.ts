@@ -108,6 +108,20 @@ export class MissionControl implements OnInit {
    * Addressed to the MISSION (taskId null), never to a task: the dial is
    * mission-level, fixed at intake, and a child may never widen its own autonomy.
    */
+  /**
+   * Answer an item in the attention queue (R18 AC-2).
+   *
+   * Deciding is the only cockpit action that re-enqueues the mission, because it
+   * is the only one that UNBLOCKS: the runtime resumes by replaying the trail
+   * (R41), and it only replays when a job arrives. The rail refreshes afterwards
+   * so the answered item leaves the queue rather than lingering as a decision
+   * the operator has already made.
+   */
+  async decide(item: { missionId: string; taskId: string }, decision: 'approve' | 'reject'): Promise<void> {
+    await this.#send({ missionId: item.missionId, taskId: item.taskId, action: 'decide', decision });
+    await this.fleet.refresh();
+  }
+
   async turnDial(): Promise<void> {
     const missionId = this.missionId();
     if (missionId.length === 0) return;

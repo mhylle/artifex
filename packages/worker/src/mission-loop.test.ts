@@ -1200,3 +1200,124 @@ describe('R41 — a mission resumes from its trail', () => {
     expect(executed).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Defect `20878859` — the human rung was honoured on ONE of three paths.
+ *
+ * `607a2468` added the stop, but only where a Gate B verdict fails. A task that
+ * climbs by BOUNCING took a different branch and walked straight past
+ * human_review — observed live at seq 520 of mission 4ff64b40. Bouncing is not a
+ * rare path: it is how the system answers an unclear contract, and the clarity
+ * judge's measured false-bounce rate is 17–58% depending on model.
+ */
+describe('20878859 — every path up the ladder honours the human rung', () => {
+  const missionWithHuman = (): TaskContract => ({
+    ...mission(),
+    autonomyDial: 'checkpointed',
+    escalationPolicy: { ladder: ['retry_higher_tier', 'human_review'], humanAt: 'human_review' },
+  });
+
+  /** Bounces every contract, so the task climbs by bouncing and never by verdict. */
+  const alwaysBounces = () => ({
+    ...seams(),
+    clarityJudge: {
+      async assess() {
+        return { restatement: 'unclear', ambiguities: ['everything about this is ambiguous'] };
+      },
+    },
+  });
+
+  it('a task that reaches the human rung BY BOUNCING stops for a human', async () => {
+    const result = await runMission(
+      missionWithHuman(),
+      alwaysBounces() as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(result.trail.some((e) => e.type === 'escalation.awaiting_human')).toBe(true);
+  });
+
+  it('DISTRACTOR: it stops there rather than attempting again', async () => {
+    const result = await runMission(
+      missionWithHuman(),
+      alwaysBounces() as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    const awaiting = result.trail.findIndex((e) => e.type === 'escalation.awaiting_human');
+    const staffedAfter = result.trail
+      .slice(awaiting + 1)
+      .filter((e) => e.type === 'agent.staffed' && e.taskId === result.trail[awaiting]?.taskId);
+    expect(staffedAfter).toHaveLength(0);
+  });
+
+  it('DISTRACTOR: under an autonomous dial a bouncing task still does NOT stop for a human', async () => {
+    // The dial governs both paths identically, or the two would disagree about
+    // when a human is involved.
+    const control = {
+      async check() { return 'run' as const; },
+      async currentDial() { return 'autonomous' as const; },
+    };
+
+    const result = await runMission(
+      missionWithHuman(),
+      { ...alwaysBounces(), control } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(result.trail.some((e) => e.type === 'escalation.awaiting_human')).toBe(false);
+  });
+});
+
+/**
+ * Defect `5236850d` — event ids collided across runs of the same mission.
+ *
+ * Ids were derived from a per-run counter starting at 1, so a RESUMED run
+ * regenerated the original's ids and every append was rejected by the ledger's
+ * unique constraint. The mission did a full run's work and recorded none of it.
+ *
+ * Task ids must STAY deterministic — that is what makes an operator's earlier
+ * decision refer to the right task, and R41 depends on it. Only the EVENT id
+ * needs to distinguish the second telling from the first; the two were conflated.
+ */
+describe('5236850d — a resumed run produces event ids that do not collide', () => {
+  it('shares no event id with the run it resumes', async () => {
+    const first = await runMission(mission(), seams(), { now: AT });
+    const second = await runMission(mission(), seams(), { now: AT, resumeFrom: first.trail });
+
+    const firstIds = new Set(first.trail.map((e) => e.eventId));
+    const collisions = second.trail.filter((e) => firstIds.has(e.eventId));
+
+    expect(collisions).toEqual([]);
+  });
+
+  it('DISTRACTOR: two runs of the same mission also differ, not just resumed ones', async () => {
+    // Any second telling needs distinct ids; resume is only the case that made
+    // the collision visible.
+    const a = await runMission(mission(), seams(), { now: AT });
+    const b = await runMission(mission(), seams(), { now: AT });
+
+    const aIds = new Set(a.trail.map((e) => e.eventId));
+    expect(b.trail.filter((e) => aIds.has(e.eventId))).toEqual([]);
+  });
+
+  it('DISTRACTOR: TASK ids stay deterministic across runs — only event ids vary', async () => {
+    // If task ids drifted, an operator's decision would stop referring to
+    // anything, which is the whole reason R41 works at all.
+    const a = await runMission(mission(), seams(), { now: AT });
+    const b = await runMission(mission(), seams(), { now: AT });
+
+    const taskIds = (r: typeof a) =>
+      r.trail.filter((e) => e.type === 'task.contracted').map((e) => e.taskId).sort();
+
+    expect(taskIds(b)).toEqual(taskIds(a));
+    expect(taskIds(a).length).toBeGreaterThan(0);
+  });
+
+  it('every event id within one run is still unique', async () => {
+    const result = await runMission(mission(), seams(), { now: AT });
+    const ids = result.trail.map((e) => e.eventId);
+
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});

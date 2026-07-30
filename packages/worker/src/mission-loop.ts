@@ -261,6 +261,15 @@ export async function runMission(
   const escalations: Escalation[] = [];
   let seq = 0;
 
+  /**
+   * Distinguishes this run's events from any earlier run of the same mission.
+   *
+   * Six hex digits of randomness rather than a counter: a counter would need
+   * somewhere to persist, and the whole point of resume is that the only
+   * durable state is the trail itself.
+   */
+  const runNonce = Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
+
   const record = (
     taskId: string,
     family: LedgerEventInput['family'],
@@ -270,7 +279,17 @@ export async function runMission(
   ): void => {
     seq += 1;
     const event: LedgerEventInput = {
-      eventId: `${mission.taskId.slice(0, 24)}${seq.toString(16).padStart(12, '0')}`,
+      // Unique per RUN, not merely per mission (defect `5236850d`). Deterministic
+      // ids were fine while a mission ran exactly once; resume made the same
+      // mission legitimately produce more events later, and the id has to
+      // distinguish the second telling from the first or every append is
+      // rejected by the ledger's unique constraint — silently, because the
+      // mission still completes.
+      //
+      // TASK ids stay deterministic on purpose: `childTaskId` derives them from
+      // the parent, which is what makes an operator's earlier decision still
+      // refer to the right task (R41). Only the event id varies.
+      eventId: `${mission.taskId.slice(0, 24)}${runNonce}${seq.toString(16).padStart(6, '0')}`,
       missionId: mission.missionId,
       taskId,
       family,
@@ -349,6 +368,46 @@ export async function runMission(
    * whoever split the work owns reassembling it, level by level, and every
    * assembly faces the same review gate the leaves did.
    */
+  /**
+   * Does arriving at this rung mean stopping for a human?
+   *
+   * Defined once, because there are THREE ways to climb the ladder — staffing
+   * failure, bounce, Gate B failure — and they had already drifted: the human
+   * rung was honoured on exactly one of them (defect `20878859`). A rule about
+   * when a person gets involved cannot live in one branch of three.
+   *
+   * Records the wait as a side effect, so every path produces the same event
+   * with the same payload rather than three near-identical copies.
+   */
+  const stopsForHuman = async (
+    child: TaskContract,
+    rung: EscalationRung,
+    reasons: readonly string[],
+  ): Promise<boolean> => {
+    // The dial is read HERE, at the moment the ladder is climbed, which is what
+    // makes "applies at the next gate, never retroactively" true by construction
+    // rather than by enforcement.
+    const dial = seams.control?.currentDial === undefined
+      ? null
+      : await seams.control.currentDial(mission.missionId).catch(() => null);
+    const effectiveDial = dial ?? mission.autonomyDial;
+    // "Fully autonomous" must mean nobody is asked, or the setting is decorative
+    // in the other direction.
+    const humanAt = effectiveDial === 'autonomous' ? null : child.escalationPolicy.humanAt ?? 'human_review';
+
+    // A task the operator has already ruled on does not stop again, or the queue
+    // would refill with the item just answered.
+    if (humanAt === null || rung !== humanAt || prior.decided.has(child.taskId)) return false;
+
+    record(child.taskId, 'escalation', 'escalation.awaiting_human', 'orchestrator', {
+      objective: child.objective,
+      rung,
+      autonomyDial: effectiveDial,
+      findings: [...reasons],
+    });
+    return true;
+  };
+
   const runSubtree = async (parent: TaskContract, depth: number): Promise<SubtreeOutcome> => {
     // ---- decompose -----------------------------------------------------------
     // A seam that throws is a *failure*, not a crash. Model calls fail for real
@@ -579,6 +638,16 @@ export async function runMission(
           escalations.push({ taskId: child.taskId, rung, fromTier: tier, toTier: tier, reason });
           record(child.taskId, 'escalation', 'escalation.rung_climbed', 'orchestrator', { rung, reason });
 
+          // A bounce climbs the ladder like anything else, so it can arrive at
+          // the human rung too — and until defect `20878859` it walked straight
+          // past. Bouncing is not a rare path: it is how the system answers an
+          // unclear contract, and the clarity judge false-bounces 17-58% of the
+          // time depending on model.
+          if (await stopsForHuman(child, rung, outcome.ambiguities)) {
+            awaitingHuman = true;
+            break;
+          }
+
           // Enact the rung rather than merely recording it: rewrite the contract
           // the worker could not read. Without a clarifier the loop still climbs
           // and surrenders — honestly, but unable to repair anything.
@@ -652,28 +721,7 @@ export async function runMission(
         if (rungIndex >= ladder.length) break;
         const rung = ladder[rungIndex]!;
 
-        // The dial cashes out HERE. Rung 5 of the ladder is "human / surrender —
-        // per the autonomy dial", and until now `humanAt` was inherited by every
-        // child and read by nobody, so `human_review` was climbed like any other
-        // rung and no human was ever asked (defect `607a2468`).
-        const dial = seams.control?.currentDial === undefined
-          ? null
-          : await seams.control.currentDial(mission.missionId).catch(() => null);
-        const effectiveDial = dial ?? mission.autonomyDial;
-        // "Fully autonomous" must mean nobody is asked, or the setting is
-        // decorative in the other direction.
-        const humanAt = effectiveDial === 'autonomous' ? null : child.escalationPolicy.humanAt ?? 'human_review';
-
-        if (humanAt !== null && rung === humanAt && !prior.decided.has(child.taskId)) {
-          record(child.taskId, 'escalation', 'escalation.awaiting_human', 'orchestrator', {
-            objective: child.objective,
-            rung,
-            autonomyDial: effectiveDial,
-            findings: bVerdict.findings.map((f) => f.detail),
-          });
-          // Waiting means stopping. There is nowhere to answer this yet (R18 is
-          // the attention queue), so the mission surrenders naming what it waits
-          // for — which is exactly the payload that queue will consume.
+        if (await stopsForHuman(child, rung, bVerdict.findings.map((f) => f.detail))) {
           awaitingHuman = true;
           break;
         }
