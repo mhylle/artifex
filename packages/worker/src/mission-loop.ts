@@ -814,6 +814,38 @@ export async function runMission(
           continue;
         }
 
+        // ---- the effort FLOOR binds too (R40 AC-2) --------------------------
+        // "Budgets bind in both directions": a ceiling prevents runaway effort,
+        // a floor prevents drive-by shallow work. Checked BEFORE Gate B on
+        // purpose — the floor is a claim about effort, and the reviewer does not
+        // measure effort. Passing thin work to a judge that may well approve it
+        // would record a pass for work nobody did.
+        if (outcome.bundle.effortSpent < child.budget.floor) {
+          record(child.taskId, 'decision', 'task.below_effort_floor', 'orchestrator', {
+            objective: child.objective,
+            effortSpent: outcome.bundle.effortSpent,
+            floor: child.budget.floor,
+            detail:
+              "Delivered below the contract's effort floor — treated as drive-by shallow work, not cheap success.",
+          });
+
+          // Costs a rung, not the task: the ladder exists so a shallow attempt
+          // can be retried by something with more to spend.
+          rungIndex += 1;
+          if (rungIndex >= ladder.length) break;
+          const rung = ladder[rungIndex]!;
+          if (rung === 'retry_higher_tier') tierBump += 1;
+          const toTier = Math.min(manifest.logicalTier + tierBump, FRONTIER_TIER) as LogicalTier;
+          escalations.push({
+            taskId: child.taskId, rung, fromTier: tier, toTier,
+            reason: `delivered ${outcome.bundle.effortSpent} against a floor of ${child.budget.floor}`,
+          });
+          record(child.taskId, 'escalation', 'escalation.rung_climbed', 'orchestrator', {
+            rung, fromTier: tier, toTier, reason: 'below effort floor',
+          });
+          continue;
+        }
+
         spent += outcome.bundle.effortSpent;
         record(child.taskId, 'execution', 'task.executed', 'worker', {
           bundleId: outcome.bundle.bundleId,
@@ -825,6 +857,19 @@ export async function runMission(
           // specified to hold. Without it a resumed mission knows a task passed
           // but not what it produced, so fold-up would have nothing to assemble.
           deliverable: outcome.bundle.deliverable,
+          // The rest of the bundle (R40 AC-1). "Its deliverable must be
+          // verifiable by a stranger who watched none of the work" — which the
+          // trail could not support while it carried only the answer. This is
+          // also the producer defect `d0d555db` was waiting for: assumptions
+          // now reach the ledger, so a requester can be told what was taken for
+          // granted rather than shown an honest blank.
+          //
+          // Recorded even when empty: absent and empty are different claims,
+          // and "nothing was assumed" must not be indistinguishable from
+          // "nobody recorded it".
+          actions: outcome.bundle.actions,
+          consulted: outcome.bundle.consulted,
+          assumptions: outcome.bundle.assumptions,
         });
 
         let bVerdict;

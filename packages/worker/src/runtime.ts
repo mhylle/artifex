@@ -29,6 +29,34 @@ const AnswerSchema = Type.Object(
   { $id: 'WorkerAnswer', additionalProperties: false },
 );
 
+/**
+ * What a worker assumed, asked for in its OWN probe (R40 AC-1).
+ *
+ * "Verifiable by a stranger" is the criterion, and a stranger cannot check work
+ * whose unstated premises stayed in the model's head. So this is asked for
+ * rather than inferred.
+ *
+ * It is a SEPARATE call rather than a second field on {@link AnswerSchema}, so
+ * that eliciting provenance can never cost the deliverable: the answer is
+ * already in hand before this is asked, and a failure here loses a nicety
+ * rather than the work. Latency is not a constraint Artifex is under.
+ *
+ * Do NOT read this split as a fix for tier-1 JSON leakage. It was first adopted
+ * on that theory — `qwen3.5:2b` returned a deliverable of
+ * `", "assumptions": [] } // No specific assumption is needed..."` when the
+ * worker schema carried two properties — but the same corruption reproduced on
+ * the single-field schema afterwards, on the same objective. The leak tracks
+ * the objective, not the schema width. It is open as its own defect; this
+ * comment records the misattribution so nobody re-derives it.
+ *
+ * `assumptions` is read as optional at the use site so a dropped field means
+ * "none declared" rather than losing an answer that was already produced.
+ */
+const AssumptionsSchema = Type.Object(
+  { assumptions: Type.Array(Type.String({ minLength: 1 })) },
+  { $id: 'WorkerAssumptions', additionalProperties: false },
+);
+
 const ClaritySchema = Type.Object(
   {
     restatement: Type.String({ minLength: 1 }),
@@ -407,11 +435,27 @@ export function createMissionSeams(
           ...contract.acceptanceCriteria.map((c) => `  - ${c.statement}`),
         ].join('\n'))) as { answer: string };
 
+        // Asked AFTER the answer exists, and about that specific answer — the
+        // premises are a property of the work that was done, not of the task in
+        // the abstract. Named concretely on purpose: asking for "any
+        // assumptions" gets back a paraphrase of the task, while asking for the
+        // questions you answered for yourself gets back what a reviewer needs.
+        const declared = (await gen(models.worker, AssumptionsSchema, [
+          'List your ASSUMPTIONS: questions the task left open that you answered for',
+          'yourself in order to produce the answer below. State them so a stranger who',
+          'watched none of the work can check them.',
+          'If the task left nothing open, return an empty list — do not invent',
+          'assumptions to fill it.',
+          '',
+          `TASK: ${contract.objective}`,
+          `THE ANSWER YOU GAVE: ${out.answer}`,
+        ].join('\n'))) as { assumptions?: string[] };
+
         return {
           deliverable: { answer: out.answer },
           actions: [],
           consulted: [],
-          assumptions: [],
+          assumptions: declared.assumptions ?? [],
           effortSpent: 1,
         };
       },

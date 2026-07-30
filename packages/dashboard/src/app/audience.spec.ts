@@ -200,3 +200,60 @@ describe('buildRequesterView', () => {
     expect(view.assumptions).toBeNull();
   });
 });
+
+/**
+ * R22 AC-1 — flagged assumptions reach the requester.
+ *
+ * This was unsatisfiable until R40: the evidence bundle declared `assumptions`
+ * but `task.executed` recorded only `{ answer }`, so the view had no honest
+ * choice but `null`. R40 made the worker declare them and the mission loop
+ * record them, so the producer now exists and the view must read it.
+ *
+ * The `null`-means-unavailable distinction survives — it is the whole point of
+ * the field — but it now means "this trail carries none", not "nothing ever can".
+ */
+describe('R22 AC-1 — assumptions reach the requester once the ledger carries them', () => {
+  const executed = (payload: Record<string, unknown>) => [
+    { id: 1, taskId: 't-1', type: 'mission.intake_accepted', payload: { objective: 'Boil an egg.' } },
+    { id: 2, taskId: 't-1', type: 'task.executed', payload },
+  ];
+
+  it('surfaces the assumptions the worker declared', () => {
+    const view = buildRequesterView(
+      executed({ deliverable: { answer: '5' }, assumptions: ['Assumed a medium egg from the fridge.'] }) as never,
+    );
+
+    expect(view.assumptions).toEqual(['Assumed a medium egg from the fridge.']);
+  });
+
+  it('DISTRACTOR: an explicitly EMPTY list is "none declared", not "unavailable"', () => {
+    // These are different claims and the requester acts differently on each.
+    // A worker that was asked and had nothing to declare is a real answer.
+    const view = buildRequesterView(executed({ deliverable: { answer: '5' }, assumptions: [] }) as never);
+
+    expect(view.assumptions).toEqual([]);
+    expect(view.assumptions).not.toBeNull();
+  });
+
+  it('DISTRACTOR: a trail with no executed task still reports UNAVAILABLE', () => {
+    // The original reason for `null`. Nothing was asked, so claiming "none were
+    // assumed" would be invented reassurance.
+    const view = buildRequesterView([
+      { id: 1, taskId: 't-1', type: 'mission.intake_accepted', payload: { objective: 'Boil an egg.' } },
+    ] as never);
+
+    expect(view.assumptions).toBeNull();
+  });
+
+  it('DISTRACTOR: assumptions from EVERY executed task are shown, not just the first', () => {
+    // A multi-task mission's premises are the union. Showing one task's and
+    // calling it the mission's is the same silent-omission failure as `[]`.
+    const view = buildRequesterView([
+      { id: 1, taskId: 'm', type: 'mission.intake_accepted', payload: { objective: 'Cook.' } },
+      { id: 2, taskId: 't-1', type: 'task.executed', payload: { deliverable: {}, assumptions: ['A.'] } },
+      { id: 3, taskId: 't-2', type: 'task.executed', payload: { deliverable: {}, assumptions: ['B.'] } },
+    ] as never);
+
+    expect(view.assumptions).toEqual(['A.', 'B.']);
+  });
+});

@@ -40,15 +40,18 @@ export interface RequesterView {
   /**
    * Flagged assumptions — `null` meaning UNAVAILABLE, never `[]` meaning none.
    *
-   * No event in the vocabulary carries them. The evidence bundle defines an
-   * `assumptions` field, but `task.executed` records only `{ answer }`, so
-   * nothing reaches the ledger. R30 (intake dialogue: "interrogate until
-   * testable, then flag what remains") and R40 (the worker contract ritual) are
-   * the producers, and neither is built.
+   * R40 built the producer: the worker is asked what it assumed and the mission
+   * loop records it on `task.executed`, so this is now read from the trail
+   * rather than pinned to `null`.
    *
-   * An empty list would tell the requester "nothing was assumed" — a claim the
-   * ledger cannot support, and exactly the kind of invented reassurance that
-   * makes a dashboard worse than no dashboard.
+   * The distinction it was created for still holds, and still matters:
+   *   - `null` — nothing in this trail carries assumptions. Either no task has
+   *     executed yet, or the events predate R40. Nobody was asked.
+   *   - `[]` — a worker WAS asked and declared none.
+   *
+   * An empty list where the truth is "unavailable" tells the requester nothing
+   * was assumed, a claim the ledger cannot support — exactly the invented
+   * reassurance that makes a dashboard worse than no dashboard.
    */
   readonly assumptions: readonly string[] | null;
   readonly outcome: 'running' | 'delivered' | 'surrendered';
@@ -184,6 +187,21 @@ export function buildRequesterView(events: readonly LedgerEventView[]): Requeste
       : { criterionId, statement, state: 'unmet' as const, detail: failure };
   });
 
+  // Collected across EVERY executed task: a mission's premises are the union of
+  // its workers', and showing one task's as the mission's is the same silent
+  // omission as reporting `[]` for unavailable.
+  //
+  // Stays `null` unless some `task.executed` actually carried the field, so a
+  // trail written before R40 reads as "nobody was asked" rather than "none".
+  let assumptions: string[] | null = null;
+  for (const event of events) {
+    if (event.type !== 'task.executed') continue;
+    const declared = event.payload?.['assumptions'];
+    if (!Array.isArray(declared)) continue;
+    assumptions ??= [];
+    assumptions.push(...declared.filter((a): a is string => typeof a === 'string'));
+  }
+
   return {
     objective,
     criteria,
@@ -192,7 +210,7 @@ export function buildRequesterView(events: readonly LedgerEventView[]): Requeste
       granted,
       consumed: [...spend.values()].reduce((total, n) => total + n, 0),
     },
-    assumptions: null,
+    assumptions,
     outcome,
   };
 }

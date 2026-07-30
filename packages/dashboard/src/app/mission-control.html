@@ -166,10 +166,21 @@
     <h3>Assumptions</h3>
     @if (requesterView().assumptions === null) {
       <p class="empty">
-        Not recorded. Nothing in this mission's trail carries flagged assumptions — the intake
-        dialogue (R30) and the worker's evidence bundle (R40) that would produce them are not
-        built yet. This says nothing was <em>recorded</em>, not that nothing was assumed.
+        Not recorded. Nothing in this mission's trail carries flagged assumptions — either no
+        task has executed yet, or the trail predates the worker's evidence bundle (R40). This
+        says nobody was <em>asked</em>, not that nothing was assumed.
       </p>
+    } @else if (requesterView().assumptions!.length === 0) {
+      <p class="empty">
+        None declared. The worker was asked what it took for granted and reported nothing —
+        which is an answer, unlike the case above.
+      </p>
+    } @else {
+      <ul class="assumptions">
+        @for (assumption of requesterView().assumptions; track assumption) {
+          <li>{{ assumption }}</li>
+        }
+      </ul>
     }
 
     <h3>What you may change</h3>
