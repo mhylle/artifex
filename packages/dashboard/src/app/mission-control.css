@@ -46,3 +46,12 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .cockpit input, .cockpit select { padding: .3rem .5rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
 .cockpit input[type='number'] { width: 5rem; }
 .cockpit .hint { font-size: .72rem; color: #888; }
+.attention { margin-top: 1.25rem; border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
+.attention h2 { font-size: .9rem; margin: 0 0 .6rem; display: flex; gap: .75rem; align-items: baseline; }
+.attention > ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }
+.attention > ul > li { border: 1px solid #eee; border-left: 3px solid #a8700f; border-radius: 6px; padding: .6rem .8rem; }
+.attention .objective { margin: 0 0 .3rem; font-weight: 500; }
+.attention .why { margin: 0; display: flex; gap: .5rem; align-items: center; font-size: .78rem; }
+.attention .dial { color: #666; }
+.attention .criteria, .attention .findings { margin: .4rem 0 0; padding-left: 1.1rem; font-size: .78rem; }
+.attention .findings { color: #9c2b23; }

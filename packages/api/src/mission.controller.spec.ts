@@ -22,6 +22,7 @@ function harness(over: Partial<LedgerReader> = {}) {
   const reader: LedgerReader = {
     async replay({ missionId }) { calls.push(`replay:${missionId}`); return []; },
     async listMissions() { calls.push('listMissions'); return SUMMARIES; },
+    async listAttentionItems() { calls.push('listAttentionItems'); return []; },
     ...over,
   };
   const intake = {} as MissionIntakeService;

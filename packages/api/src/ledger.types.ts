@@ -25,9 +25,22 @@ export interface MissionSummary {
   readonly lastEventAt: string;
 }
 
+/** One item waiting on a human (R18) — carries everything needed to decide. */
+export interface AttentionItem {
+  readonly missionId: string;
+  readonly taskId: string;
+  readonly objective: string;
+  readonly rung: string;
+  readonly autonomyDial: string | null;
+  readonly findings: readonly string[];
+  readonly acceptanceCriteria: readonly { criterionId: string; statement: string }[];
+  readonly waitingSince: string;
+}
+
 export interface LedgerReader {
   replay(filter: { missionId: string }): Promise<LedgerEvent[]>;
   listMissions(): Promise<MissionSummary[]>;
+  listAttentionItems(): Promise<AttentionItem[]>;
 }
 
 /** A pointer, as the ledger's `LISTEN/NOTIFY` channel delivers it. */

@@ -217,11 +217,39 @@ describe('MissionControl — fleet rail (R21)', () => {
     expect(fleet.running()).toBe(1);
   });
 
-  it('AC-0: surfaces the count of missions needing a human', () => {
+  it('AC-0: surfaces the count of items needing a human (R18)', () => {
+    // This counted surrendered missions until R18 gave it something real. A
+    // surrender is an OUTCOME, not a question — the count now means "blocked
+    // awaiting a decision", which is what the fleet is supposed to advertise.
     fleet.missions.set(SUMMARIES);
+    fleet.attention.set([
+      {
+        missionId: 'm-2', taskId: 't-x', objective: 'Count the sand.', rung: 'human_review',
+        autonomyDial: 'checkpointed', findings: ['no census exists'],
+        acceptanceCriteria: [{ criterionId: 'ac-1', statement: 'Exact count.' }],
+        waitingSince: '2026-07-30T09:00:00.000Z',
+      },
+    ]);
     fixture.detectChanges();
 
     expect(fleet.needingAttention()).toBe(1);
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Count the sand.');
+    // Full context inline, so deciding needs no separate investigation.
+    expect(text).toContain('Exact count.');
+    expect(text).toContain('no census exists');
+  });
+
+  it('AC-0 DISTRACTOR: a surrendered mission alone is NOT something waiting on a human', () => {
+    // The old behaviour. A mission that surrendered has finished — nobody is
+    // being asked anything, and counting it would send an operator looking for
+    // a decision that does not exist.
+    fleet.missions.set(SUMMARIES);
+    fleet.attention.set([]);
+    fixture.detectChanges();
+
+    expect(fleet.needingAttention()).toBe(0);
+    expect(fixture.nativeElement.textContent).toContain('Nothing is waiting on you');
   });
 
   it('AC-1: selecting a mission from the rail switches the view to it', () => {

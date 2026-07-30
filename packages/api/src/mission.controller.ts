@@ -5,7 +5,7 @@ import { CockpitService } from './cockpit.service';
 import type { CockpitRequest } from './cockpit.service';
 import { MissionIntakeService } from './mission-intake.service';
 import type { IntakeRequest } from './mission-intake.service';
-import type { LedgerReader, MissionSummary } from './ledger.types';
+import type { AttentionItem, LedgerReader, MissionSummary } from './ledger.types';
 import { LEDGER_READER } from './tokens';
 import { Inject } from '@nestjs/common';
 
@@ -40,6 +40,18 @@ export class MissionController {
   @Get()
   async fleet(): Promise<MissionSummary[]> {
     return this.ledger.listMissions();
+  }
+
+  /**
+   * Everything waiting on a human (R18).
+   *
+   * Declared before `:missionId/events` for the same reason as the fleet route:
+   * Nest matches in declaration order, and `attention` must not be read as a
+   * mission id.
+   */
+  @Get('attention')
+  async attention(): Promise<AttentionItem[]> {
+    return this.ledger.listAttentionItems();
   }
 
   /**

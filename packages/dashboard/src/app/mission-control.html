@@ -76,6 +76,34 @@
   </ul>
 </section>
 
+<section class="attention" aria-label="attention queue">
+  <h2>Needs a human <span class="totals">{{ fleet.needingAttention() }} waiting</span></h2>
+  <ul>
+    @for (item of fleet.attention(); track item.taskId) {
+      <li>
+        <p class="objective">{{ item.objective || item.taskId }}</p>
+        <p class="why">
+          <span class="badge">{{ item.rung }}</span>
+          @if (item.autonomyDial) { <span class="dial">dial: {{ item.autonomyDial }}</span> }
+          <button type="button" (click)="select(item.missionId)">Open mission</button>
+        </p>
+        @if (item.acceptanceCriteria.length) {
+          <ul class="criteria">
+            @for (c of item.acceptanceCriteria; track c.criterionId) { <li>{{ c.statement }}</li> }
+          </ul>
+        }
+        @if (item.findings.length) {
+          <ul class="findings">
+            @for (f of item.findings; track f) { <li>{{ f }}</li> }
+          </ul>
+        }
+      </li>
+    } @empty {
+      <li class="empty">Nothing is waiting on you.</li>
+    }
+  </ul>
+</section>
+
 @if (feed.tree(); as tree) {
   <section class="mission" [attr.data-status]="tree.status">
     <h2>{{ tree.objective || '(no objective yet)' }}</h2>

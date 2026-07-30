@@ -66,6 +66,37 @@ export interface ReplayFilter {
  * there is no mission table to fall out of step with the trail, and a mission
  * exists in the fleet exactly when it has events.
  */
+/**
+ * One item waiting on a human (R18).
+ *
+ * Everything an operator needs to decide travels with the item — objective,
+ * criteria, what the reviewer found, which rung it stopped at, the dial in force
+ * — because "deciding never requires an investigation". A queue that only
+ * carries ids would send the operator hunting through the trail, which is the
+ * cost this design exists to remove.
+ */
+export interface AttentionItem {
+  readonly missionId: string;
+  readonly taskId: string;
+  readonly objective: string;
+  readonly rung: string;
+  readonly autonomyDial: string | null;
+  readonly findings: readonly string[];
+  readonly acceptanceCriteria: readonly { criterionId: string; statement: string }[];
+  readonly waitingSince: string;
+}
+
+interface AttentionRow {
+  mission_id: string;
+  task_id: string;
+  objective: string | null;
+  rung: string | null;
+  autonomy_dial: string | null;
+  findings: unknown;
+  acceptance_criteria: unknown;
+  waiting_since: Date;
+}
+
 export interface MissionSummary {
   readonly missionId: string;
   /** From the `mission.started` event; null until the runtime picks it up. */
@@ -250,6 +281,68 @@ export class LedgerRepository {
       agentsStaffed: Number(row.agents_staffed),
       tasksToday: Number(row.tasks_today),
       lastEventAt: row.last_event_at.toISOString(),
+    }));
+  }
+
+  /**
+   * Everything waiting on a human, newest first (R18).
+   *
+   * An item is open because the trail says a task reached the human rung and no
+   * decision followed it — there is no queue table, so the queue cannot drift
+   * from the ledger about what is actually waiting.
+   *
+   * The contract's criteria are joined in from `task.contracted` rather than
+   * duplicated onto the escalation event: one fact, recorded once, read where
+   * it is needed.
+   */
+  async listAttentionItems(): Promise<AttentionItem[]> {
+    const result = await this.pool.query<AttentionRow>(`
+      WITH waiting AS (
+        SELECT DISTINCT ON (task_id)
+          mission_id, task_id, payload, occurred_at
+        FROM ledger_event
+        WHERE type = 'escalation.awaiting_human' AND task_id IS NOT NULL
+        ORDER BY task_id, seq DESC
+      ),
+      answered AS (
+        SELECT DISTINCT task_id FROM ledger_event WHERE type = 'operator.decided'
+      ),
+      contracted AS (
+        SELECT DISTINCT ON (task_id)
+          task_id, payload AS contract_payload
+        FROM ledger_event
+        WHERE type = 'task.contracted' AND task_id IS NOT NULL
+        ORDER BY task_id, seq DESC
+      )
+      SELECT
+        w.mission_id,
+        w.task_id,
+        w.payload->>'objective'          AS objective,
+        w.payload->>'rung'               AS rung,
+        w.payload->>'autonomyDial'       AS autonomy_dial,
+        w.payload->'findings'            AS findings,
+        c.contract_payload->'acceptanceCriteria' AS acceptance_criteria,
+        w.occurred_at                    AS waiting_since
+      FROM waiting w
+      LEFT JOIN contracted c ON c.task_id = w.task_id
+      WHERE w.task_id NOT IN (SELECT task_id FROM answered)
+      ORDER BY w.occurred_at DESC
+    `);
+
+    return result.rows.map((row) => ({
+      missionId: row.mission_id,
+      taskId: row.task_id,
+      objective: row.objective ?? '',
+      rung: row.rung ?? 'human_review',
+      autonomyDial: row.autonomy_dial,
+      findings: Array.isArray(row.findings) ? row.findings.map(String) : [],
+      acceptanceCriteria: Array.isArray(row.acceptance_criteria)
+        ? (row.acceptance_criteria as Array<{ criterionId?: unknown; statement?: unknown }>).map((c) => ({
+            criterionId: String(c.criterionId ?? ''),
+            statement: String(c.statement ?? ''),
+          }))
+        : [],
+      waitingSince: row.waiting_since.toISOString(),
     }));
   }
 

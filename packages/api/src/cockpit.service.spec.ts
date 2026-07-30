@@ -21,6 +21,7 @@ function harness(existing: Array<{ taskId: string | null; type: string; occurred
   const reader = {
     async replay() { return existing as never; },
     async listMissions() { return []; },
+    async listAttentionItems() { return []; },
   };
   let n = 0;
   const service = new CockpitService(sink, reader, {
@@ -97,7 +98,7 @@ describe('R17 AC-0 — every cockpit act is a ledger event with the operator on 
         async update() { forbidden.push('update'); },
         async delete() { forbidden.push('delete'); },
       } as unknown as LedgerSink,
-      { async replay() { return [] as never; }, async listMissions() { return []; } },
+      { async replay() { return [] as never; }, async listMissions() { return []; }, async listAttentionItems() { return []; } },
       { now: () => AT, newId: () => TASK },
     );
 

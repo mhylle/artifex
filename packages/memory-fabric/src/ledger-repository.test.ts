@@ -344,3 +344,88 @@ describe('R21 — fleet totals come from the ledger too', () => {
     expect(found?.tasksToday).toBe(1);
   });
 });
+
+/**
+ * R18 — the attention queue. "Each item shows its full context inline — the
+ * contract, the verdicts, what was tried — so deciding never requires an
+ * investigation."
+ *
+ * Derived, like everything else: an item is open because the trail says a task
+ * reached the human rung and nothing has answered it. There is no queue table,
+ * so the queue cannot disagree with the ledger about what is waiting.
+ */
+describe('R18 — the attention queue is folded out of the ledger', () => {
+  it('lists a task that reached the human rung, with the context to decide on', async () => {
+    const missionId = randomUUID();
+    const taskId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Root' } }));
+    await ledger.append(makeEvent({
+      missionId, taskId, type: 'task.contracted',
+      payload: { objective: 'Count the sand.', acceptanceCriteria: [{ criterionId: 'ac-1', statement: 'Exact count.' }] },
+    }));
+    await ledger.append(makeEvent({
+      missionId, taskId, type: 'escalation.awaiting_human',
+      payload: { objective: 'Count the sand.', rung: 'human_review', autonomyDial: 'checkpointed', findings: ['no census exists'] },
+    }));
+
+    const items = await ledger.listAttentionItems();
+    const item = items.find((i) => i.taskId === taskId);
+
+    expect(item).toBeDefined();
+    expect(item?.objective).toBe('Count the sand.');
+    expect(item?.rung).toBe('human_review');
+    expect(item?.findings).toEqual(['no census exists']);
+    expect(item?.missionId).toBe(missionId);
+  });
+
+  it('DISTRACTOR: an ANSWERED item leaves the queue', async () => {
+    // A queue that only grows is a list, not a queue — and an operator would
+    // re-decide the same thing forever.
+    const missionId = randomUUID();
+    const taskId = randomUUID();
+    await ledger.append(makeEvent({ missionId, taskId, type: 'escalation.awaiting_human', payload: { objective: 'X', rung: 'human_review' } }));
+    await ledger.append(makeEvent({ missionId, taskId, type: 'operator.decided', payload: { decision: 'approve' } }));
+
+    const items = await ledger.listAttentionItems();
+
+    expect(items.some((i) => i.taskId === taskId)).toBe(false);
+  });
+
+  it('DISTRACTOR: answering ONE task does not clear another', async () => {
+    const missionId = randomUUID();
+    const answered = randomUUID();
+    const waiting = randomUUID();
+    await ledger.append(makeEvent({ missionId, taskId: answered, type: 'escalation.awaiting_human', payload: { objective: 'A', rung: 'human_review' } }));
+    await ledger.append(makeEvent({ missionId, taskId: waiting, type: 'escalation.awaiting_human', payload: { objective: 'B', rung: 'human_review' } }));
+    await ledger.append(makeEvent({ missionId, taskId: answered, type: 'operator.decided', payload: { decision: 'approve' } }));
+
+    const items = await ledger.listAttentionItems();
+
+    expect(items.some((i) => i.taskId === answered)).toBe(false);
+    expect(items.some((i) => i.taskId === waiting)).toBe(true);
+  });
+
+  it('carries the acceptance criteria so the decision needs no second lookup', async () => {
+    const missionId = randomUUID();
+    const taskId = randomUUID();
+    await ledger.append(makeEvent({
+      missionId, taskId, type: 'task.contracted',
+      payload: { objective: 'Y', acceptanceCriteria: [{ criterionId: 'ac-1', statement: 'Cites a source.' }] },
+    }));
+    await ledger.append(makeEvent({ missionId, taskId, type: 'escalation.awaiting_human', payload: { objective: 'Y', rung: 'human_review' } }));
+
+    const item = (await ledger.listAttentionItems()).find((i) => i.taskId === taskId);
+
+    expect(item?.acceptanceCriteria.map((c) => c.statement)).toEqual(['Cites a source.']);
+  });
+
+  it('DISTRACTOR: a mission with nothing waiting contributes no items', async () => {
+    const missionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Fine' } }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.folded', payload: {} }));
+
+    const items = await ledger.listAttentionItems();
+
+    expect(items.some((i) => i.missionId === missionId)).toBe(false);
+  });
+});
