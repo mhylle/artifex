@@ -13,3 +13,4 @@ export * from './ledger-repository.js';
 export * from './ledger-listener.js';
 export * from './model-catalog-repository.js';
 export * from './asset-registry-repository.js';
+export * from './knowledge-commons-repository.js';
