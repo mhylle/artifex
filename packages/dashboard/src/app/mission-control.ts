@@ -9,9 +9,12 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import type { OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
+import { mayAct, scopeFor } from './audience';
+import type { Audience } from './audience';
 import { CanvasNode } from './canvas-node';
 import { Cockpit } from './cockpit';
 import type { CockpitAction } from './cockpit';
+import { buildRequesterView } from './requester-view';
 import { Fleet } from './fleet';
 import { Inspector } from './inspector';
 import { LensPanels } from './lens-panels';
@@ -60,6 +63,38 @@ export class MissionControl implements OnInit {
    */
   readonly lens = signal<LensName>('canvas');
   readonly lenses: readonly LensName[] = ['canvas', 'workforce', 'timeline', 'learning', 'ledger'];
+
+  /**
+   * Audience scoping (R22) — one substrate, three ways of being allowed to look.
+   *
+   * Not identity: no authentication exists yet and none is implied. This picks
+   * a *view*, and the scope it resolves to decides both what is rendered and
+   * what may be sent.
+   */
+  readonly audience = signal<Audience>('operator');
+  readonly audiences: readonly Audience[] = ['operator', 'requester', 'observer'];
+  readonly scope = computed(() => scopeFor(this.audience()));
+
+  /**
+   * The lens actually showing, after scoping.
+   *
+   * An audience that may not see the selected lens falls back to the first it
+   * is allowed. Keeping `lens()` as the sole authority would leave an observer
+   * staring at the ledger explorer because a signal still said 'ledger'.
+   */
+  readonly activeLens = computed<LensName | null>(() => {
+    const allowed = this.scope().lenses;
+    const current = this.lens();
+    return allowed.includes(current) ? current : (allowed[0] ?? null);
+  });
+
+  /** The requester's own mission, in their terms — never internal task counts. */
+  readonly requesterView = computed(() => buildRequesterView(this.visibleEvents()));
+
+  /** Template-side guard, so a control is drawn only where it could be used. */
+  can(action: CockpitAction): boolean {
+    return mayAct(this.audience(), action);
+  }
 
   readonly selectedTaskId = signal<string | null>(null);
   readonly focusedTaskId = signal<string | null>(null);
@@ -192,13 +227,15 @@ export class MissionControl implements OnInit {
    * the operator has already made.
    */
   async decide(item: { missionId: string; taskId: string }, decision: 'approve' | 'reject'): Promise<void> {
+    // A learning observer may read every mission and steer none of them (R22).
+    if (!this.can('decide')) return;
     await this.#send({ missionId: item.missionId, taskId: item.taskId, action: 'decide', decision });
     await this.fleet.refresh();
   }
 
   async turnDial(): Promise<void> {
     const missionId = this.missionId();
-    if (missionId.length === 0 || this.isPast()) return;
+    if (missionId.length === 0 || this.isPast() || !this.can('turn_dial')) return;
     await this.#send({ missionId, taskId: null, action: 'turn_dial', autonomyDial: this.dial() });
   }
 
@@ -220,7 +257,7 @@ export class MissionControl implements OnInit {
   async #actOnTask(action: CockpitAction, extra: Record<string, unknown> = {}): Promise<void> {
     const missionId = this.missionId();
     const taskId = this.selectedTaskId();
-    if (missionId.length === 0 || taskId === null || this.isPast()) return;
+    if (missionId.length === 0 || taskId === null || this.isPast() || !this.can(action)) return;
     await this.#send({ missionId, taskId, action, ...extra });
   }
 

@@ -1,6 +1,10 @@
 <header>
   <h1>Artifex — Mission Control</h1>
   <div class="watch">
+    <label for="audience" class="audience-label">View as</label>
+    <select id="audience" name="audience" [ngModel]="audience()" (ngModelChange)="audience.set($event)" aria-label="audience">
+      @for (a of audiences; track a) { <option [value]="a">{{ a }}</option> }
+    </select>
     <input [(ngModel)]="missionId" name="missionId" placeholder="mission id" aria-label="mission id" />
     <button (click)="watch()" [disabled]="!missionId()">Watch</button>
     <span class="dot" [class.live]="feed.connected()"></span>
@@ -45,13 +49,20 @@
 
 <section class="fleet">
   <h2>
-    Fleet
-    <span class="totals">
-      {{ fleet.total() }} missions · {{ fleet.running() }} running · {{ fleet.agentsActive() }} agents · {{ fleet.tasksToday() }} tasks today
-      @if (fleet.needingAttention(); as waiting) {
-        <span class="attention">⚠ {{ waiting }} need a human</span>
-      }
-    </span>
+    {{ scope().missions === 'all' ? 'Fleet' : 'Your mission' }}
+    @if (scope().missions === 'all') {
+      <span class="totals">
+        {{ fleet.total() }} missions · {{ fleet.running() }} running · {{ fleet.agentsActive() }} agents · {{ fleet.tasksToday() }} tasks today
+        @if (fleet.needingAttention(); as waiting) {
+          <span class="attention">⚠ {{ waiting }} need a human</span>
+        }
+      </span>
+    } @else {
+      <span class="totals">
+        Pick the mission you requested. Identity is out of scope until the security boundary is
+        lifted, so this stands in for &ldquo;yours&rdquo;.
+      </span>
+    }
   </h2>
 
   @if (fleet.error(); as message) {
@@ -76,6 +87,7 @@
   </ul>
 </section>
 
+@if (scope().attentionQueue) {
 <section class="attention" aria-label="attention queue">
   <h2>Needs a human <span class="totals">{{ fleet.needingAttention() }} waiting</span></h2>
   <ul>
@@ -105,8 +117,97 @@
     }
   </ul>
 </section>
+}
+
+@if (audience() === 'requester') {
+  <section class="requester" aria-label="requester view">
+    <h2>{{ requesterView().objective || 'Your mission' }}</h2>
+    <p class="meta">
+      <span class="badge">{{ requesterView().outcome }}</span>
+      <span class="budget">
+        budget {{ requesterView().budget.consumed }} used
+        of {{ requesterView().budget.granted === null ? 'not stated' : requesterView().budget.granted }} granted
+      </span>
+    </p>
+
+    <h3>What you asked for</h3>
+    <ul class="criteria">
+      @for (c of requesterView().criteria; track c.criterionId) {
+        <li [attr.data-state]="c.state">
+          <span class="mark">{{ c.state === 'met' ? '✓' : c.state === 'unmet' ? '✗' : '○' }}</span>
+          <span class="statement">{{ c.statement }}</span>
+          @if (c.detail) { <span class="detail">{{ c.detail }}</span> }
+        </li>
+      } @empty {
+        <li class="empty">This mission recorded no acceptance criteria.</li>
+      }
+    </ul>
+
+    <h3>Questions for you</h3>
+    <ul class="questions">
+      @for (q of requesterView().questions; track q.taskId) {
+        <li>
+          <p class="objective">{{ q.objective }}</p>
+          @if (q.findings.length) {
+            <ul class="findings">
+              @for (f of q.findings; track f) { <li>{{ f }}</li> }
+            </ul>
+          }
+          @if (can('decide')) {
+            <button type="button" (click)="decide({ missionId: missionId(), taskId: q.taskId }, 'approve')">Approve</button>
+            <button type="button" (click)="decide({ missionId: missionId(), taskId: q.taskId }, 'reject')">Reject</button>
+          }
+        </li>
+      } @empty {
+        <li class="empty">Nothing is waiting on you.</li>
+      }
+    </ul>
+
+    <h3>Assumptions</h3>
+    @if (requesterView().assumptions === null) {
+      <p class="empty">
+        Not recorded. Nothing in this mission's trail carries flagged assumptions — the intake
+        dialogue (R30) and the worker's evidence bundle (R40) that would produce them are not
+        built yet. This says nothing was <em>recorded</em>, not that nothing was assumed.
+      </p>
+    }
+
+    <h3>What you may change</h3>
+    <div class="powers">
+      @if (can('grant_budget')) {
+        <div class="row">
+          <label for="req-grant">Approve more budget</label>
+          <input id="req-grant" type="number" min="1" [ngModel]="grantAmount()" (ngModelChange)="grantAmount.set(+$event)" name="reqGrant" />
+          <button type="button" (click)="grantBudget()">Grant</button>
+        </div>
+      }
+      @if (can('turn_dial')) {
+        <div class="row">
+          <label for="req-dial">How much should Artifex check with you?</label>
+          <select id="req-dial" [ngModel]="dial()" (ngModelChange)="dial.set($event)" name="reqDial">
+            <option value="autonomous">autonomous</option>
+            <option value="checkpointed">checkpointed</option>
+            <option value="supervised">supervised</option>
+          </select>
+          <button type="button" (click)="turnDial()">Adjust</button>
+          <span class="hint">within the limits set at intake</span>
+        </div>
+      }
+      @if (cockpitError(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+    </div>
+  </section>
+}
 
 @if (visibleTree(); as tree) {
+  <!--
+    The operator/observer surface. A requester gets the requester panel INSTEAD,
+    not this with pieces hidden: the inspector, canvas and scrubber are all
+    views of internal task structure, which is exactly what AC-1 says a
+    requester must not be shown.
+  -->
+  @if (scope().lenses.length > 0) {
   <section class="mission" [attr.data-status]="tree.status">
     <h2>{{ tree.objective || '(no objective yet)' }}</h2>
     <p class="meta">
@@ -185,16 +286,18 @@
     }
 
     <nav class="lenses" aria-label="lenses">
-      @for (name of lenses; track name) {
-        <button type="button" [class.active]="lens() === name" (click)="lens.set(name)">{{ name }}</button>
+      @for (name of scope().lenses; track name) {
+        <button type="button" [class.active]="activeLens() === name" (click)="lens.set(name)">{{ name }}</button>
       }
     </nav>
 
-    @if (lens() !== 'canvas') {
-      <app-lens-panels [lens]="lens()" [events]="visibleEvents()" />
+    @if (activeLens(); as showing) {
+      @if (showing !== 'canvas') {
+        <app-lens-panels [lens]="showing" [events]="visibleEvents()" />
+      }
     }
 
-    @if (lens() === 'canvas') {
+    @if (activeLens() === 'canvas') {
     <div class="canvas-bar">
       <nav class="breadcrumb" aria-label="canvas path">
         <button type="button" (click)="clearFocus()">task zero</button>
@@ -236,37 +339,50 @@
         <p class="empty">
           The past is read-only. Return to Live to act on this mission.
         </p>
+      } @else if (scope().actions.length === 0) {
+        <p class="empty">
+          Read-only. A learning observer measures the system and does not steer it — no cockpit
+          action is offered, so the measurement stays worth something.
+        </p>
       } @else {
       @if (selectedTaskId(); as taskId) {
-        <div class="row">
-          <button type="button" (click)="pauseTask()">Pause</button>
-          <button type="button" (click)="resumeTask()">Resume</button>
-          <button type="button" (click)="cancelTask()">Cancel</button>
-        </div>
-        <div class="row">
-          <label for="grant">Top up</label>
-          <input id="grant" type="number" min="1" [ngModel]="grantAmount()" (ngModelChange)="grantAmount.set(+$event)" name="grant" />
-          <button type="button" (click)="grantBudget()">Grant budget</button>
-        </div>
-        <div class="row">
-          <label for="note">Note</label>
-          <input id="note" [ngModel]="noteText()" (ngModelChange)="noteText.set($event)" name="note" placeholder="Context for the Learning Agent" />
-          <button type="button" (click)="annotate()">Annotate</button>
-        </div>
+        @if (can('pause')) {
+          <div class="row">
+            <button type="button" (click)="pauseTask()">Pause</button>
+            <button type="button" (click)="resumeTask()">Resume</button>
+            <button type="button" (click)="cancelTask()">Cancel</button>
+          </div>
+        }
+        @if (can('grant_budget')) {
+          <div class="row">
+            <label for="grant">Top up</label>
+            <input id="grant" type="number" min="1" [ngModel]="grantAmount()" (ngModelChange)="grantAmount.set(+$event)" name="grant" />
+            <button type="button" (click)="grantBudget()">Grant budget</button>
+          </div>
+        }
+        @if (can('annotate')) {
+          <div class="row">
+            <label for="note">Note</label>
+            <input id="note" [ngModel]="noteText()" (ngModelChange)="noteText.set($event)" name="note" placeholder="Context for the Learning Agent" />
+            <button type="button" (click)="annotate()">Annotate</button>
+          </div>
+        }
       } @else {
-        <p class="empty">Select a task to pause, cancel, top up or annotate it.</p>
+        <p class="empty">Select a task to act on it.</p>
       }
 
-      <div class="row">
-        <label for="dial">Autonomy dial (mission)</label>
-        <select id="dial" [ngModel]="dial()" (ngModelChange)="dial.set($event)" name="dial">
-          <option value="autonomous">autonomous</option>
-          <option value="checkpointed">checkpointed</option>
-          <option value="supervised">supervised</option>
-        </select>
-        <button type="button" (click)="turnDial()">Turn dial</button>
-        <span class="hint">applies at the next gate</span>
-      </div>
+      @if (can('turn_dial')) {
+        <div class="row">
+          <label for="dial">Autonomy dial (mission)</label>
+          <select id="dial" [ngModel]="dial()" (ngModelChange)="dial.set($event)" name="dial">
+            <option value="autonomous">autonomous</option>
+            <option value="checkpointed">checkpointed</option>
+            <option value="supervised">supervised</option>
+          </select>
+          <button type="button" (click)="turnDial()">Turn dial</button>
+          <span class="hint">applies at the next gate</span>
+        </div>
+      }
       }
 
       @if (cockpitError(); as message) {
@@ -274,6 +390,7 @@
       }
     </section>
   </section>
+  }
 } @else {
   <p class="empty">Watch a mission to see its trail.</p>
 }

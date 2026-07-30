@@ -76,3 +76,21 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .diff h4 { margin: .5rem 0 .2rem; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #444; }
 .diff ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .2rem; }
 .diff li { font-size: .8rem; color: #444; }
+
+/* Audience scoping (R22). */
+.audience-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; }
+.watch select { padding: .4rem .5rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
+
+.requester { margin-top: 1.25rem; border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
+.requester h2 { font-size: 1rem; margin: 0 0 .4rem; }
+.requester h3 { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; margin: .9rem 0 .35rem; }
+.requester .meta { margin: 0; display: flex; flex-wrap: wrap; gap: .75rem; align-items: baseline; font-size: .8rem; color: #666; }
+.requester ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .3rem; }
+.requester .criteria li { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; font-size: .85rem; padding: .35rem .6rem; border: 1px solid #eee; border-radius: 6px; }
+.requester .criteria li[data-state="met"] .mark { color: #2e9e5b; }
+.requester .criteria li[data-state="unmet"] .mark { color: #9c2b23; }
+.requester .criteria li[data-state="unknown"] .mark { color: #aaa; }
+.requester .detail { color: #9c2b23; font-size: .78rem; }
+.requester .questions li { padding: .45rem .6rem; border: 1px solid #eee; border-radius: 6px; }
+.requester .questions .objective { margin: 0 0 .25rem; font-weight: 500; font-size: .85rem; }
+.requester .findings li { border: 0; padding: 0; font-size: .78rem; color: #666; }

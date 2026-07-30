@@ -909,3 +909,178 @@ describe('MissionControl — time travel (R20)', () => {
     expect(fixture.nativeElement.textContent).not.toContain('delivered');
   });
 });
+
+/**
+ * R22 — audience scoping.
+ *
+ * The scope decision is unit-tested in `audience.spec.ts`. These tests are
+ * about the cockpit OBEYING it — and specifically about the guard living where
+ * the action is sent, not only where the button is drawn. R20 taught that
+ * lesson once; hiding a control is not the same as withholding a capability.
+ */
+describe('MissionControl — audience scoping (R22)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let component: MissionControl;
+  let feed: LedgerFeed;
+  let fleet: Fleet;
+  let sent: CockpitCommand[];
+
+  const trail = () => [
+    ev(1, 'mission.intake_accepted', MISSION, {
+      objective: 'Explain three things about lamps.',
+      budget: { unit: 'effort-units', floor: 1, ceiling: 40 },
+      contract: {
+        acceptanceCriteria: [
+          { criterionId: 'm-1', statement: 'Explains what a light bulb does.' },
+          { criterionId: 'm-2', statement: 'Explains what a light switch does.' },
+        ],
+      },
+    }),
+    ev(2, 'mission.started', MISSION, { objective: 'Explain three things about lamps.' }),
+    ev(3, 'task.contracted', 't-a', {
+      objective: 'INTERNAL bulb subtask', parentTaskId: MISSION,
+      acceptanceCriteria: [{ criterionId: 'm-1', statement: 'Explains what a light bulb does.' }],
+    }),
+    ev(4, 'task.executed', 't-a', { effortSpent: 2 }),
+    ev(5, 'gate_b.verdict_issued', 't-a', { outcome: 'pass', findings: [] }),
+  ];
+
+  beforeEach(async () => {
+    sent = [];
+    const stub: Pick<Cockpit, 'act'> = { async act(command) { sent.push(command); } };
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting(), { provide: Cockpit, useValue: stub }],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    component = fixture.componentInstance;
+    feed = TestBed.inject(LedgerFeed);
+    fleet = TestBed.inject(Fleet);
+
+    component.select(MISSION);
+    feed.events.set(trail());
+    component.selectTask('t-a');
+    fixture.detectChanges();
+  });
+
+  it('AC-0: the operator reaches all five lenses, the raw ledger and the attention queue', () => {
+    const labels = Array.from(
+      fixture.nativeElement.querySelectorAll('.lenses button') as NodeListOf<HTMLButtonElement>,
+    ).map((b) => b.textContent?.trim());
+
+    for (const lens of ['canvas', 'workforce', 'timeline', 'learning', 'ledger']) {
+      expect(labels, `operator cannot reach the "${lens}" lens`).toContain(lens);
+    }
+    expect(fixture.nativeElement.querySelector('section.attention')).toBeTruthy();
+    expect(fixture.nativeElement.querySelectorAll('.cockpit button').length).toBeGreaterThan(0);
+  });
+
+  it('AC-0: the audience is switchable from the UI — the scoping is reachable, not theoretical', () => {
+    const picker = fixture.nativeElement.querySelector('select[name="audience"]') as HTMLSelectElement;
+
+    expect(picker, 'no audience picker on screen').toBeTruthy();
+    expect(Array.from(picker.options).map((o) => o.value).sort())
+      .toEqual(['observer', 'operator', 'requester']);
+  });
+
+  it('AC-1: the requester sees progress against the MISSION criteria and budget, not internal tasks', () => {
+    component.audience.set('requester');
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Explains what a light bulb does.');
+    expect(text).toContain('Explains what a light switch does.');
+    expect(text).toContain('2');  // consumed
+    expect(text).toContain('40'); // granted
+
+    // The internal subtask must not leak into the requester's view.
+    expect(text).not.toContain('INTERNAL bulb subtask');
+  });
+
+  it('AC-1: the requester keeps exactly the three powers intake promised them', async () => {
+    component.audience.set('requester');
+    fixture.detectChanges();
+
+    // A real note, so the refusal is the AUDIENCE guard and not annotate()'s
+    // own empty-note check — otherwise this assertion would pass vacuously.
+    component.noteText.set('Please hurry.');
+
+    await component.pauseTask();
+    await component.cancelTask();
+    await component.annotate();
+    expect(sent, 'a requester must not pause, cancel or annotate').toEqual([]);
+
+    component.grantAmount.set(5);
+    await component.grantBudget();
+    await component.turnDial();
+    expect(sent.map((c) => c.action)).toEqual(['grant_budget', 'turn_dial']);
+  });
+
+  it('AC-1 DISTRACTOR: flagged assumptions are shown as unavailable, never as "none"', () => {
+    // Nothing in the ledger carries them (R30/R40 are the unbuilt producers).
+    // An empty list would tell the requester nothing was assumed.
+    component.audience.set('requester');
+    fixture.detectChanges();
+
+    expect(component.requesterView().assumptions).toBeNull();
+    expect(fixture.nativeElement.textContent).toMatch(/not recorded|unavailable/i);
+  });
+
+  it('AC-2 DISTRACTOR: the learning observer is offered no action at all', async () => {
+    component.audience.set('observer');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelectorAll('.cockpit button').length).toBe(0);
+
+    // ...and the guard holds where the action is SENT, not only where it is drawn.
+    component.noteText.set('Observers should not be able to write this.');
+
+    await component.pauseTask();
+    await component.resumeTask();
+    await component.cancelTask();
+    await component.grantBudget();
+    await component.turnDial();
+    await component.annotate();
+    await component.decide({ missionId: MISSION, taskId: 't-a' }, 'approve');
+
+    expect(sent, 'an observer must not be able to steer the system it measures').toEqual([]);
+  });
+
+  it('AC-2 DISTRACTOR: the observer gets the observatory, not the whole cockpit greyed out', () => {
+    component.audience.set('observer');
+    fixture.detectChanges();
+
+    const labels = Array.from(
+      fixture.nativeElement.querySelectorAll('.lenses button') as NodeListOf<HTMLButtonElement>,
+    ).map((b) => b.textContent?.trim());
+
+    expect(labels).toEqual(['learning']);
+    expect(fixture.nativeElement.querySelector('section.attention')).toBeNull();
+  });
+
+  it('DISTRACTOR: a lens the new audience may not see is left behind, not kept showing', () => {
+    // The operator is on the ledger explorer; switching to observer must not
+    // keep rendering it just because a signal still says 'ledger'.
+    component.lens.set('ledger');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.rows')).toBeTruthy();
+
+    component.audience.set('observer');
+    fixture.detectChanges();
+
+    expect(component.activeLens()).toBe('learning');
+    expect(fixture.nativeElement.querySelector('.rows')).toBeNull();
+  });
+
+  it('DISTRACTOR: scoping changes what is shown, never what the ledger says', () => {
+    const before = JSON.stringify(feed.events());
+
+    for (const audience of ['requester', 'observer', 'operator'] as const) {
+      component.audience.set(audience);
+      fixture.detectChanges();
+    }
+
+    expect(JSON.stringify(feed.events())).toBe(before);
+    expect(feed.events()).toHaveLength(5);
+  });
+});
