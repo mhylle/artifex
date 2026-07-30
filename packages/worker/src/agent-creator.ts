@@ -90,6 +90,39 @@ export interface StaffOptions {
 const PROVEN_OBSERVATIONS = 3;
 
 /**
+ * The capability a free-text category belongs to (R38 AC-0).
+ *
+ * "Clusters the approved task graph into capability categories, so a thousand
+ * tasks might need twelve designs, not a thousand."
+ *
+ * The planner names categories at runtime, in the model's own words — real
+ * examples from live missions: "Technical Writing / Tool Instruction",
+ * "Content Review / Quality Assurance", "Description Task". Hashing those
+ * verbatim gives every task its own design, so nothing reaches the evidence bar
+ * and the reuse market has nothing to trade.
+ *
+ * Normalisation is DERIVED from the shape the model actually produces rather
+ * than from a taxonomy someone froze into the code: take the first segment, drop
+ * case and punctuation, collapse whitespace. That collapses sub-specialisations
+ * of one capability onto one design while leaving genuinely different
+ * capabilities apart — and it leaves the taxonomy open, which matters because
+ * the dossier makes it a *learnable* asset rather than a fixed list.
+ *
+ * Never returns an empty string: an empty capability would hash to one shared id
+ * and silently pool every unlabelled task onto a single agent.
+ */
+export function capabilityOf(category: string): string {
+  const head = category.split('/')[0] ?? '';
+  const normalised = head
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return normalised.length === 0 ? 'uncategorised' : normalised;
+}
+
+/**
  * The design id for a CATEGORY — the identity the reuse market trades on.
  *
  * Derived from the category alone, so every task of a kind resolves to one
@@ -107,7 +140,7 @@ export function designIdFor(contract: TaskContract): string {
   // FNV-1a: small, stable across processes, and dependency-free. The id must be
   // identical in every worker for reuse to converge on one row.
   let hash = 0xcbf29ce4_84222325n;
-  for (const codePoint of contract.category) {
+  for (const codePoint of capabilityOf(contract.category)) {
     hash = BigInt.asUintN(64, (hash ^ BigInt(codePoint.charCodeAt(0))) * 0x100_0001b3n);
   }
   const hex = hash.toString(16).padStart(16, '0');

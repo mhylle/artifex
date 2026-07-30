@@ -20,7 +20,7 @@
  */
 import type { EscalationRung, LedgerEventInput, LogicalTier, TaskContract } from '@artifex/shared-types';
 
-import { staff } from './agent-creator.js';
+import { capabilityOf, staff } from './agent-creator.js';
 import type { DesignAuthor, RegistryLookup } from './agent-creator.js';
 import { decompose, foldUp } from './orchestrator.js';
 import type { Planner, Reconciler } from './orchestrator.js';
@@ -561,6 +561,37 @@ export async function runMission(
     if (aVerdict.outcome === 'fail') {
       return fail('Gate A rejected the decomposition', aVerdict.findings.map((f) => f.detail));
     }
+    }
+
+    // ---- capability audit: can anything here be staffed at all? (R38 AC-3) ---
+    // Asked BEFORE a single task executes, because the value of the signal is
+    // that it is EARLY: a mission that no-bids across its whole graph is telling
+    // the operator something the trail would otherwise only reveal after the
+    // budget had been spent finding out the hard way.
+    //
+    // A warning, never a refusal. A first mission in a new domain no-bids on
+    // everything by definition, and refusing to run would leave the swarm unable
+    // to acquire a capability it does not yet have.
+    if (children.length > 1) {
+      const unserved: string[] = [];
+      for (const child of children) {
+        const bid = await seams.registry.bestForCategory(child.category).catch(() => null);
+        if (bid === null) unserved.push(capabilityOf(child.category));
+      }
+
+      // SYSTEMATIC, not incidental. One unserved capability among served ones is
+      // ordinary — it is how a new specialist enters the registry — and warning
+      // on it would fire the signal on almost every mission and mean nothing.
+      if (unserved.length === children.length) {
+        record(parent.taskId, 'decision', 'staffing.capability_gap', 'agent_creator', {
+          noBids: unserved.length,
+          taskCount: children.length,
+          capabilities: unserved,
+          detail:
+            'No design in the registry can serve any capability this plan needs. ' +
+            'Every specialist will be authored from scratch and judged on its first attempt.',
+        });
+      }
     }
 
     // ---- per-leaf: staff → execute → Gate B → escalate ------------------------
