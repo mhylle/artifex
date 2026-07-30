@@ -49,3 +49,38 @@ describe('R17 — the runtime is wired to operator control', () => {
     await expect(control.check('t-1')).resolves.toBe('run');
   });
 });
+
+/**
+ * R17 AC-2 / defect `9fbee9d6` — operator grants must reach the runtime's
+ * budget arithmetic, not merely exist in the trail.
+ */
+describe('9fbee9d6 — the runtime reads operator budget grants from the ledger', () => {
+  it('sums every grant addressed to the task', async () => {
+    const { createLedgerControl } = await import('./runtime.js');
+
+    const control = createLedgerControl({
+      async replay() {
+        return [
+          { taskId: 't-1', type: 'operator.budget_granted', payload: { amount: 10 } },
+          { taskId: 't-1', type: 'operator.budget_granted', payload: { amount: 15 } },
+        ] as never;
+      },
+    });
+
+    await expect(control.grantedBudget?.('t-1')).resolves.toBe(25);
+  });
+
+  it('DISTRACTOR: a grant to another task does not raise this one\'s ceiling', async () => {
+    const { createLedgerControl } = await import('./runtime.js');
+
+    const control = createLedgerControl({
+      async replay() {
+        return [
+          { taskId: 'someone-else', type: 'operator.budget_granted', payload: { amount: 99 } },
+        ] as never;
+      },
+    });
+
+    await expect(control.grantedBudget?.('t-1')).resolves.toBe(0);
+  });
+});

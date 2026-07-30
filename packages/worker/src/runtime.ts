@@ -92,7 +92,9 @@ function keepKnown<T extends { criterionId: string }>(items: readonly T[], known
 
 /** The slice of the ledger the control seam reads. */
 export interface ControlReader {
-  replay(filter: { missionId: string }): Promise<Array<{ taskId: string | null; type: string }>>;
+  replay(filter: { missionId: string }): Promise<
+    Array<{ taskId: string | null; type: string; payload?: Record<string, unknown> }>
+  >;
 }
 
 /**
@@ -124,6 +126,33 @@ export function createLedgerControl(reader: ControlReader, missionId = ''): Cont
         else if (event.type === 'operator.cancelled') return 'cancelled';
       }
       return state;
+    },
+
+    /**
+     * Effort the operator has granted this task (defect `9fbee9d6`).
+     *
+     * Summed rather than last-wins: two top-ups of 10 are 20 of extra budget,
+     * not 10. Grants accumulate the way spending does.
+     *
+     * A failed read returns 0 — the contract's own ceiling still binds. Failing
+     * the other way would let a database hiccup hand a task unlimited budget.
+     */
+    async grantedBudget(taskId: string) {
+      let events: Array<{ taskId: string | null; type: string; payload?: Record<string, unknown> }>;
+      try {
+        events = await reader.replay({ missionId });
+      } catch {
+        return 0;
+      }
+
+      let total = 0;
+      for (const event of events) {
+        if (event.type !== 'operator.budget_granted') continue;
+        if (event.taskId !== null && event.taskId !== taskId) continue;
+        const amount = event.payload?.['amount'];
+        if (typeof amount === 'number' && amount > 0) total += amount;
+      }
+      return total;
     },
   };
 }

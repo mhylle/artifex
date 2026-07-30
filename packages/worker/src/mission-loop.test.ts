@@ -839,3 +839,109 @@ describe('R17 — the runtime honours operator control signals', () => {
     expect(executed).toBe(0);
   });
 });
+
+/**
+ * Defect `9fbee9d6` — the budget ceiling was recorded and never enforced.
+ *
+ * Invariant #7 and pillar 6 say effort is a currency; `lifecycle.html` says
+ * budgets "bind in both directions — a floor that prevents drive-by shallow
+ * work, a ceiling that prevents runaway effort". `grep budget.ceiling` returned
+ * only writes: the field was carried, divided on decomposition, written to the
+ * ledger, and never once consulted.
+ *
+ * The effective ceiling is the contract's plus whatever the operator has
+ * granted, read from the trail — so R17's budget top-up has something real to
+ * raise, and the limit stays a derived figure like everything else.
+ */
+describe('9fbee9d6 — the budget ceiling actually stops a task', () => {
+  /** Every attempt costs `cost`, so spend crosses any ceiling predictably. */
+  const expensiveSeams = (cost: number, granted = 0) => ({
+    ...seams({ gateBFailuresPerTask: { 0: 99, 1: 99 } }),
+    work: {
+      async execute() {
+        return { deliverable: { answer: 'x' }, actions: [], consulted: [], assumptions: [], effortSpent: cost };
+      },
+    },
+    control: {
+      async check() { return 'run' as const; },
+      async grantedBudget() { return granted; },
+    },
+  });
+
+  const tightBudget = (): TaskContract => ({
+    ...mission(),
+    budget: { floor: 0, ceiling: 2, unit: 'effort-units' },
+  });
+
+  it('refuses a further attempt once spend reaches the ceiling', async () => {
+    // Each attempt costs 1 against a child ceiling of 2*0.4 = 0.8, so the first
+    // attempt already exhausts it and a second must not start.
+    const result = await runMission(
+      tightBudget(),
+      expensiveSeams(1) as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(result.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(true);
+  });
+
+  it('DISTRACTOR: a task within its ceiling is never stopped for budget', async () => {
+    // Without this, "always refuse" would satisfy the test above and halt every
+    // mission in the system.
+    const result = await runMission(mission(), seams(), { now: AT });
+
+    expect(result.outcome).toBe('delivered');
+    expect(result.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(false);
+  });
+
+  it('AC-2 DISTRACTOR: an operator grant RAISES the ceiling, so the task continues', async () => {
+    // This is what makes R17's top-up mean something. Same spend, same contract
+    // — only the grant differs, and the outcome must differ with it.
+    const withoutGrant = await runMission(
+      tightBudget(),
+      expensiveSeams(1, 0) as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+    const withGrant = await runMission(
+      tightBudget(),
+      expensiveSeams(1, 50) as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(withoutGrant.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(true);
+    expect(withGrant.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(false);
+  });
+
+  it('records what was spent against what was allowed, so the stop is auditable', async () => {
+    const result = await runMission(
+      tightBudget(),
+      expensiveSeams(1) as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    const event = result.trail.find((e) => e.type === 'task.budget_exhausted');
+    expect(typeof event?.payload['spent']).toBe('number');
+    expect(typeof event?.payload['ceiling']).toBe('number');
+  });
+
+  it('DISTRACTOR: with no control seam the contract ceiling still binds', async () => {
+    // Enforcement must not depend on an optional seam being present, or budgets
+    // would silently stop binding wherever the cockpit is not wired.
+    const noControl = {
+      ...seams({ gateBFailuresPerTask: { 0: 99, 1: 99 } }),
+      work: {
+        async execute() {
+          return { deliverable: { answer: 'x' }, actions: [], consulted: [], assumptions: [], effortSpent: 1 };
+        },
+      },
+    };
+
+    const result = await runMission(
+      tightBudget(),
+      noControl as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(result.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(true);
+  });
+});

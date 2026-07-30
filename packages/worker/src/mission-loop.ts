@@ -56,6 +56,14 @@ export interface Clarifier {
  */
 export interface ControlSignals {
   check(taskId: string): Promise<'run' | 'paused' | 'cancelled'>;
+  /**
+   * Extra effort the operator has granted this task, folded from the trail.
+   *
+   * Optional so a runtime without a cockpit still enforces the contract's own
+   * ceiling — a budget that stops binding wherever the cockpit is unwired would
+   * be worse than no budget, because it would bind unpredictably.
+   */
+  grantedBudget?(taskId: string): Promise<number>;
 }
 
 export interface MissionSeams {
@@ -296,7 +304,26 @@ export async function runMission(
 
       let retriesUsed = 0;
 
+      // Effort is a currency (invariant #7), so somebody has to charge for it.
+      // The ceiling is DERIVED — the contract's, plus whatever the operator has
+      // granted — which is what makes R17's top-up raise a real limit rather
+      // than a decorative one.
+      const granted = seams.control?.grantedBudget === undefined
+        ? 0
+        : await seams.control.grantedBudget(child.taskId).catch(() => 0);
+      const effectiveCeiling = child.budget.ceiling + granted;
+      let spent = 0;
+
       for (let attempt = 0; attempt < maxAttempts && !settled; attempt += 1) {
+        if (spent >= effectiveCeiling) {
+          // A ceiling that stops nothing is not a ceiling. Recorded with both
+          // figures so the stop is auditable and a grant can be sized against it.
+          record(child.taskId, 'economic', 'task.budget_exhausted', 'orchestrator', {
+            objective: child.objective, spent, ceiling: effectiveCeiling, granted,
+          });
+          break;
+        }
+
         // Checked HERE, at the attempt boundary, and nowhere else. That is what
         // makes a pause graceful: work already in flight finishes its attempt,
         // because the only place the runtime asks is before starting the next.
@@ -428,6 +455,7 @@ export async function runMission(
           continue;
         }
 
+        spent += outcome.bundle.effortSpent;
         record(child.taskId, 'execution', 'task.executed', 'worker', {
           bundleId: outcome.bundle.bundleId,
           // Cost belongs in the trail: value-per-effort is the system's fitness
