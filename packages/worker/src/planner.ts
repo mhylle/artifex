@@ -147,3 +147,84 @@ export function createModelReconciler(options: ModelSeamOptions): Reconciler {
     },
   };
 }
+
+/**
+ * A planner that asks for ONE subtask at a time (defect `8b7e9e95`).
+ *
+ * The array-of-nested-objects schema is what makes small models run away: under
+ * constrained decoding the grammar keeps the output syntactically alive while
+ * the model reasons out loud inside the JSON channel, until it hits the context
+ * limit. Measured: 32,690 completion tokens on a 78-token prompt.
+ *
+ * Flattening removes the cliff rather than raising the guard rail. Each call
+ * returns a single subtask against a shallow schema, so the model never has to
+ * hold an open array across a long generation. It costs N round trips instead of
+ * one — a trade worth making, because the alternative is a planner that fails
+ * stochastically and takes the whole mission with it.
+ *
+ * The count is asked for first, and separately, for the same reason.
+ */
+export const SubtaskCountSchema = Type.Object(
+  { count: Type.Integer({ minimum: 1, maximum: 8 }) },
+  { $id: 'SubtaskCount', additionalProperties: false },
+);
+
+export const SingleSubtaskSchema = Type.Object(
+  {
+    objective: Type.String({ minLength: 1 }),
+    category: Type.String({ minLength: 1 }),
+    criterion: Type.String({ minLength: 1 }),
+    outOfScope: Type.String({ minLength: 1 }),
+    blastRadius: StringEnum(BLAST_RADII),
+  },
+  { $id: 'SingleSubtask', additionalProperties: false },
+);
+
+export function createStepwisePlanner(options: ModelSeamOptions): Planner {
+  return {
+    async propose({ contract }) {
+      const { count } = (await options.generator.generate({
+        provider: options.provider,
+        model: options.model,
+        probe: {
+          schema: SubtaskCountSchema,
+          prompt: `How many INDEPENDENT subtasks fully cover this objective? Answer with a number only.\n\nOBJECTIVE: ${contract.objective}`,
+        },
+      })) as { count: number };
+
+      const subtasks = [];
+      for (let index = 0; index < count; index += 1) {
+        const one = (await options.generator.generate({
+          provider: options.provider,
+          model: options.model,
+          probe: {
+            schema: SingleSubtaskSchema,
+            prompt: [
+              `Describe subtask ${index + 1} of ${count} for this objective.`,
+              `It must be independent of the others and gradeable by a stranger.`,
+              ``,
+              `OBJECTIVE: ${contract.objective}`,
+              ...(subtasks.length > 0
+                ? ['ALREADY COVERED (do not repeat):', ...subtasks.map((s) => `  - ${s.objective}`)]
+                : []),
+            ].join('\n'),
+          },
+        })) as { objective: string; category: string; criterion: string; outOfScope: string; blastRadius: 'low' | 'medium' | 'high' };
+
+        subtasks.push({
+          objective: one.objective,
+          category: one.category,
+          acceptanceCriteria: [{ criterionId: `ac-${index + 1}`, statement: one.criterion }],
+          outOfScope: [one.outOfScope],
+          blastRadius: one.blastRadius,
+          // Shares are assigned here rather than asked for: a model returning
+          // shares that sum above 1 is a refusal the Orchestrator would raise,
+          // and there is nothing to gain from letting it invent them.
+          effortShare: 1 / count,
+        });
+      }
+
+      return { subtasks };
+    },
+  };
+}
