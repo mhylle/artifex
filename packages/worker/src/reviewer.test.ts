@@ -239,3 +239,95 @@ describe('R7 AC-2 — Gate B returns a structured verdict against the contract',
     expect(result.ok, JSON.stringify(result.ok ? {} : result.errors)).toBe(true);
   });
 });
+
+/**
+ * R32 AC-2 — a cyclic dependency graph is refused at Gate A.
+ *
+ * "Anything not dependent on anything else is free to run in parallel" only
+ * works if the graph is acyclic. A cycle is a SPECIFICATION fault: the plan is
+ * unexecutable as written, and the right place to say so is the gate that
+ * audits the plan — before anything is staffed or spent. Discovering it at
+ * execution time means a scheduler that waits forever for a task waiting for it.
+ */
+describe('Gate A - the dependency graph must be acyclic (R32 AC-2)', () => {
+  const covering: CoverageJudge = {
+    async assess({ parent, children }) {
+      return {
+        coverage: parent.acceptanceCriteria.map((c) => ({
+          criterionId: c.criterionId,
+          coveredByTaskIds: children.map((k) => k.taskId),
+        })),
+      };
+    },
+  };
+
+  const linked = (taskId: string, objective: string, consumes: string[]): TaskContract => ({
+    ...child(taskId, objective),
+    dependencies: { consumesTaskIds: consumes, mayRequest: [] },
+  });
+
+  it('refuses a two-task cycle rather than deadlocking at execution time', async () => {
+    const cyclic = [
+      linked(CHILD_A, 'Market share.', [CHILD_B]),
+      linked(CHILD_B, 'Charging infrastructure.', [CHILD_A]),
+    ];
+
+    const verdict = await gateA(contract(), cyclic, covering, META);
+
+    expect(verdict.outcome).toBe('fail');
+    expect(verdict.findings.map((f) => f.detail).join(' ')).toMatch(/cycle|circular/i);
+    expect(verdict.findings[0]?.errorClass).toBe('specification_fault');
+  });
+
+  it('refuses a task that declares itself as its own input', async () => {
+    const selfLoop = [
+      linked(CHILD_A, 'Market share.', [CHILD_A]),
+      child(CHILD_B, 'Charging infrastructure.'),
+    ];
+
+    const verdict = await gateA(contract(), selfLoop, covering, META);
+
+    expect(verdict.outcome).toBe('fail');
+  });
+
+  it('DISTRACTOR: a DIAMOND is not a cycle and must pass', async () => {
+    // The lazy implementation - "fail if any task is reachable from two others",
+    // or "fail if a task appears twice while walking" - rejects a diamond, which
+    // is the single most common legitimate shape: two independent tasks feeding
+    // one consumer. Refusing it would make the whole feature useless.
+    const CHILD_C = 'd1b9123f-8a54-4c7e-9f2b-3e8a7c6d5f41';
+    const diamond = [
+      child(CHILD_A, 'Left branch.'),
+      child(CHILD_B, 'Right branch.'),
+      linked(CHILD_C, 'Merge both.', [CHILD_A, CHILD_B]),
+    ];
+
+    const verdict = await gateA(contract(), diamond, covering, META);
+
+    expect(verdict.outcome).toBe('pass');
+  });
+
+  it('DISTRACTOR: an acyclic chain passes - depth is not a cycle', async () => {
+    const chain = [
+      child(CHILD_A, 'First.'),
+      linked(CHILD_B, 'Second, needs the first.', [CHILD_A]),
+    ];
+
+    const verdict = await gateA(contract(), chain, covering, META);
+
+    expect(verdict.outcome).toBe('pass');
+  });
+
+  it('DISTRACTOR: a dependency on a task OUTSIDE this sibling set is not a cycle', async () => {
+    // Contracts may legitimately consume something from elsewhere in the tree.
+    // Treating an unresolvable id as a cycle would fail valid plans.
+    const outside = [
+      linked(CHILD_A, 'Market share.', ['b0000000-0000-4000-8000-000000000000']),
+      child(CHILD_B, 'Charging infrastructure.'),
+    ];
+
+    const verdict = await gateA(contract(), outside, covering, META);
+
+    expect(verdict.outcome).toBe('pass');
+  });
+});

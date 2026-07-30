@@ -60,6 +60,10 @@ export async function gateA(
     throw new Error(`Gate A on ${parent.taskId}: no children — an empty decomposition cannot cover anything`);
   }
 
+  // A cycle is checked BEFORE the judge is asked, because it needs no model and
+  // because a plan that cannot execute should not cost a model call to reject.
+  const cycle = findDependencyCycle(children);
+
   const { coverage } = await judge.assess({ parent, children });
   const covered = new Map(coverage.map((c) => [c.criterionId, c.coveredByTaskIds]));
 
@@ -74,6 +78,20 @@ export async function gateA(
       detail: `No child task covers "${criterion.statement}" — the decomposition would leave it unmet.`,
     }));
 
+  if (cycle !== null) {
+    findings.push({
+      // Attributed to the parent's first criterion: the cycle is a fault in the
+      // PLAN as a whole, not in any one criterion, and the verdict schema files
+      // every finding against a criterion.
+      criterionId: parent.acceptanceCriteria[0]?.criterionId ?? 'plan',
+      errorClass: 'specification_fault' as const,
+      failingStep: 'Gate A dependency-graph check',
+      detail:
+        `The declared dependencies form a cycle (${cycle.join(' → ')}) — the plan cannot execute in any order. ` +
+        `Refused here rather than at execution time, where it would be a scheduler waiting forever.`,
+    });
+  }
+
   return {
     verdictId: meta.verdictId,
     taskId: parent.taskId,
@@ -85,6 +103,53 @@ export async function gateA(
     redFlags: [],
     issuedAt: meta.issuedAt,
   };
+}
+
+/**
+ * The first dependency cycle among these siblings, or `null` if the graph is
+ * acyclic (R32 AC-2).
+ *
+ * Depth-first with an explicit *on-stack* marker rather than a plain "seen" set.
+ * That distinction is the whole algorithm: a node seen again on the CURRENT path
+ * is a cycle, while a node seen again on a different path is just a shared
+ * dependency. Conflating them rejects a diamond — two independent tasks feeding
+ * one consumer — which is the most common legitimate shape there is.
+ *
+ * Edges pointing outside this sibling set are ignored, not treated as faults: a
+ * contract may legitimately consume something from elsewhere in the tree, and
+ * only these siblings are being audited here.
+ */
+function findDependencyCycle(children: readonly TaskContract[]): string[] | null {
+  const within = new Set(children.map((c) => c.taskId));
+  const edges = new Map(
+    children.map((c) => [c.taskId, c.dependencies.consumesTaskIds.filter((id) => within.has(id))]),
+  );
+
+  const done = new Set<string>();
+  const onStack = new Set<string>();
+  const path: string[] = [];
+
+  const walk = (taskId: string): string[] | null => {
+    if (onStack.has(taskId)) return [...path.slice(path.indexOf(taskId)), taskId];
+    if (done.has(taskId)) return null;
+
+    onStack.add(taskId);
+    path.push(taskId);
+    for (const next of edges.get(taskId) ?? []) {
+      const found = walk(next);
+      if (found !== null) return found;
+    }
+    path.pop();
+    onStack.delete(taskId);
+    done.add(taskId);
+    return null;
+  };
+
+  for (const child of children) {
+    const found = walk(child.taskId);
+    if (found !== null) return found;
+  }
+  return null;
 }
 
 /**

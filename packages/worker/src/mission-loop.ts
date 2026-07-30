@@ -493,17 +493,25 @@ export async function runMission(
     }
 
     // ---- per-leaf: staff → execute → Gate B → escalate ------------------------
-    const completed: Array<{ objective: string; deliverable: unknown }> = [];
+    /**
+     * What one child came to. `skip` is a task the operator cancelled: it
+     * produced nothing and must not be folded, but it did not fail the mission.
+     */
+    type ChildOutcome =
+      | { readonly kind: 'done'; readonly taskId: string; readonly objective: string; readonly deliverable: unknown }
+      | { readonly kind: 'skip'; readonly taskId: string }
+      | { readonly kind: 'fail'; readonly outcome: SubtreeOutcome };
 
-    for (let child of children) {
+    const runChild = async (contracted: TaskContract): Promise<ChildOutcome> => {
+      let child = contracted;
+
       // Already done, per the trail. Re-running it would spend budget to
       // reproduce a verdict the ledger already carries — and could produce a
       // DIFFERENT answer, which would make the resumed mission disagree with
       // its own history.
       const done = prior.verified.get(child.taskId);
       if (done !== undefined) {
-        completed.push({ objective: child.objective, deliverable: done });
-        continue;
+        return { kind: 'done', taskId: child.taskId, objective: child.objective, deliverable: done };
       }
 
       // A task that is not yet atomic is a PARENT: it assembles, it does not
@@ -512,9 +520,8 @@ export async function runMission(
       // verifiable outcome — and no further".
       if (!isAtomic(child) && depth + 1 < depthBound) {
         const sub = await runSubtree(child, depth + 1);
-        if (!sub.ok) return sub;
-        completed.push({ objective: child.objective, deliverable: sub.deliverable });
-        continue;
+        if (!sub.ok) return { kind: 'fail', outcome: sub };
+        return { kind: 'done', taskId: child.taskId, objective: child.objective, deliverable: sub.deliverable };
       }
 
       const ladder = child.escalationPolicy.ladder;
@@ -757,32 +764,87 @@ export async function runMission(
       if (cancelled) {
         // Excluded from the assembly: folding a deliverable the operator stopped
         // would put the cancelled work in the result anyway.
-        continue;
+        return { kind: 'skip', taskId: child.taskId };
       }
 
       if (awaitingHuman) {
-        return fail(
+        return { kind: 'fail', outcome: fail(
           `task ${child.taskId} awaits a human decision`,
           [`"${child.objective}" reached the human rung of its escalation ladder`],
-        );
+        ) };
       }
 
       if (paused) {
-        return fail(
+        return { kind: 'fail', outcome: fail(
           `task ${child.taskId} is paused by an operator`,
           [`"${child.objective}" is paused — resume it to continue this mission`],
-        );
+        ) };
       }
 
       if (!settled) {
-        return fail(
+        return { kind: 'fail', outcome: fail(
           `task ${child.taskId} exhausted its escalation ladder`,
           [`"${child.objective}" could not be verified within ${maxAttempts} attempts`],
+        ) };
+      }
+
+      return { kind: 'done', taskId: child.taskId, objective: child.objective, deliverable: delivered };
+    };
+
+    // ---- schedule across the dependency graph (R32) ---------------------------
+    // Everything whose declared inputs are satisfied runs at once; only a real
+    // edge causes a wait. Before this, siblings ran in declaration order and the
+    // timeline lens measured the cost: waits of 3s/11s/19s against runs of
+    // 7s/8s/7s, each lane queued behind the sum of its predecessors.
+    const within = new Set(children.map((c) => c.taskId));
+    /** Produced a usable, GATE-B-VERIFIED output. */
+    const verified = new Set<string>();
+    const results = new Map<string, { objective: string; deliverable: unknown }>();
+
+    // An edge to something outside this sibling set is not ours to wait on —
+    // only these siblings are being scheduled here.
+    const ready = (c: TaskContract): boolean =>
+      c.dependencies.consumesTaskIds.every((id) => !within.has(id) || verified.has(id));
+
+    let pending = [...children];
+    while (pending.length > 0) {
+      const wave = pending.filter(ready);
+
+      if (wave.length === 0) {
+        // Nothing can start and nothing is running. Either a producer was
+        // cancelled, or a cycle slipped past Gate A. Surrender naming the
+        // blocked tasks rather than waiting forever — a scheduler that hangs
+        // tells the operator nothing at all.
+        return fail(
+          'no task can start — every remaining task is waiting on an input that will never arrive',
+          pending.map((c) => `"${c.objective}" waits on ${c.dependencies.consumesTaskIds.join(', ')}`),
         );
       }
 
-      completed.push({ objective: child.objective, deliverable: delivered });
+      pending = pending.filter((c) => !wave.includes(c));
+
+      const outcomes = await Promise.all(wave.map((c) => runChild(c)));
+
+      // Every outcome in the wave is folded in before any failure is returned,
+      // so work that WAS verified stays verified in the trail. Losing it would
+      // make a resumed mission (R41) redo what the ledger already paid for.
+      let failure: SubtreeOutcome | null = null;
+      for (const outcome of outcomes) {
+        if (outcome.kind === 'fail') failure ??= outcome.outcome;
+        else if (outcome.kind === 'done') {
+          verified.add(outcome.taskId);
+          results.set(outcome.taskId, { objective: outcome.objective, deliverable: outcome.deliverable });
+        }
+      }
+      if (failure !== null) return failure;
     }
+
+    // Assembled in DECLARATION order, not completion order: fold-up must not
+    // depend on which sibling happened to finish first, or the same mission
+    // could fold differently on a re-run.
+    const completed = children
+      .map((c) => results.get(c.taskId))
+      .filter((r): r is { objective: string; deliverable: unknown } => r !== undefined);
 
     // ---- fold up -------------------------------------------------------------
     let folded;

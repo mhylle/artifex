@@ -29,6 +29,21 @@ export interface ProposedSubtask {
   readonly blastRadius: BlastRadius;
   /** Fraction of the parent's ceiling this child may spend, 0–1. */
   readonly effortShare: number;
+  /**
+   * Indexes of the SIBLINGS in this same proposal whose output this subtask
+   * consumes (R32). Omitted or empty means independent — free to run in
+   * parallel with everything else.
+   *
+   * Declared as indexes rather than task ids because the ids do not exist until
+   * `authorContracts` mints them, and a planner that had to predict them would
+   * be guessing at `childTaskId`'s arithmetic.
+   *
+   * Forward references are allowed: sibling 0 may consume sibling 1. Ordering is
+   * the scheduler's job, and a cycle is Gate A's to refuse — restricting
+   * declarations to earlier siblings would make cycles impossible to express and
+   * therefore impossible to catch where a plan can still be rejected cheaply.
+   */
+  readonly consumesIndexes?: readonly number[];
 }
 
 export interface DecompositionProposal {
@@ -142,7 +157,17 @@ export async function decompose(
         toolEntitlements: parent.inputs.toolEntitlements.map((t) => ({ ...t })),
         pinnedDecisions: parent.inputs.pinnedDecisions.map((d) => ({ ...d })),
       },
-      dependencies: { consumesTaskIds: [], mayRequest: [...parent.dependencies.mayRequest] },
+      dependencies: {
+        // The typed dependency graph (R32). An index that names no sibling, or
+        // names the task itself, is dropped rather than carried: a self-edge is
+        // a guaranteed deadlock and an out-of-range index refers to nothing, so
+        // neither can be honoured. A cycle between DIFFERENT siblings is left
+        // intact deliberately — Gate A must see it to refuse the plan.
+        consumesTaskIds: (subtask.consumesIndexes ?? [])
+          .filter((i) => Number.isInteger(i) && i >= 0 && i < ids.length && i !== index)
+          .map((i) => ids[i]!),
+        mayRequest: [...parent.dependencies.mayRequest],
+      },
       stoppingConditions: {
         doneWhen: subtask.acceptanceCriteria.map((c) => `Criterion ${c.criterionId} is demonstrably met.`),
         stopTryingWhen: [...parent.stoppingConditions.stopTryingWhen],
