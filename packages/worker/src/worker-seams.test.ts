@@ -32,6 +32,7 @@ function dependencies() {
     upsert: [] as string[],
     recordOutcome: [] as Array<{ designId: string; score: number }>,
     replay: [] as string[],
+    harnesses: [] as Array<{ checks: string[] } | null>,
   };
 
   const deps: WorkerDependencies = {
@@ -42,7 +43,11 @@ function dependencies() {
     },
     assets: {
       async bestForCategory(category: string) { calls.bestForCategory.push(category); return null; },
-      async upsert(input: { designId: string }) { calls.upsert.push(input.designId); return { version: 7 }; },
+      async upsert(input: { designId: string; validationHarness?: { checks: string[] } }) {
+      calls.upsert.push(input.designId);
+      calls.harnesses.push(input.validationHarness ?? null);
+      return { version: 7 };
+    },
       async recordOutcome(designId: string, score: number) { calls.recordOutcome.push({ designId, score }); },
     },
     ledger: {
@@ -144,6 +149,27 @@ describe('main() uses the assembly rather than duplicating it', () => {
 
     expect(source).toContain('buildWorkerSeams');
     expect(source, 'the inline stub must be gone').not.toContain('async bestForCategory() { return null; }');
+  });
+});
+
+describe('the harness reaches the registry (R28 AC-2)', () => {
+  it('a registered design carries its validation harness, so it can ever be promoted', async () => {
+    // Permanence is decided on harness evidence: a design registered without one
+    // is refused by the ratchet forever. Dropping it here would make every
+    // specialist the swarm authors permanently unpromotable — silently, since
+    // nothing else would look wrong.
+    const { deps, calls } = dependencies();
+
+    const seams = buildWorkerSeams(deps, MISSION_ID);
+    await seams.registry.register?.({
+      designId: 'dddddddd-eeee-4fff-8aaa-000000000002',
+      category: 'research.sub-question',
+      roleInstructions: 'Answer it.',
+      capabilities: ['text'],
+      validationHarness: { checks: ['[ac-1] It is answered.'] },
+    });
+
+    expect(calls.harnesses).toEqual([{ checks: ['[ac-1] It is answered.'] }]);
   });
 });
 

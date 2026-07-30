@@ -22,6 +22,13 @@ const CATEGORY = 'drafting.ratchet';
 let seq = 0;
 const nextId = () => `bbbbbbbb-cccc-4ddd-8eee-${(seq += 1).toString(16).padStart(12, '0')}`;
 const EVIDENCE = ['11111111-2222-4333-8444-555555555555'];
+/**
+ * Every fixture here carries a harness because these tests are about the
+ * RATCHET's scoring, not about measurability. R28 AC-2 later made a missing
+ * harness a refusal, and `earned-permanence.test.ts` owns that rule — a design
+ * without one never reaches the comparison these tests are examining.
+ */
+const HARNESS = { checks: ['[ac-1] It is done.'] };
 
 beforeAll(async () => {
   db = await startTestDatabase();
@@ -40,6 +47,7 @@ async function provenDesign(score: number, over: { roleInstructions?: string; ca
     category: CATEGORY,
     roleInstructions: over.roleInstructions ?? 'Draft the clause carefully and at length.',
     capabilities: over.capabilities ?? ['text', 'citation'],
+    validationHarness: HARNESS,
   });
   await registry.recordOutcome(designId, score);
   return designId;
@@ -188,6 +196,7 @@ describe('R23 AC-1 — the ratchet only turns one way', () => {
     const designId = nextId();
     await registry.upsert({
       designId, category: CATEGORY, roleInstructions: 'Never measured.', capabilities: ['text'],
+      validationHarness: HARNESS,
     });
 
     const result = await registry.proposeDelta({
@@ -292,7 +301,7 @@ describe('registration is idempotent — the ratchet owns version advancement', 
     // reading back what the registry held, so the ledger and the registry
     // disagreed. Registration has to hand back the truth for that to be fixable.
     const designId = nextId();
-    await registry.upsert({ designId, category: CATEGORY, roleInstructions: 'One.', capabilities: ['text'] });
+    await registry.upsert({ designId, category: CATEGORY, roleInstructions: 'One.', capabilities: ['text'], validationHarness: HARNESS });
     await registry.proposeDelta({
       designId,
       changes: [{ field: 'roleInstructions', to: 'Two.' }],

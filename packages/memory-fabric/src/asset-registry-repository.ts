@@ -23,6 +23,10 @@ export interface AgentDesign {
   readonly cladeScore: number | null;
   readonly observations: number;
   readonly active: boolean;
+  readonly parentDesignId: string | null;
+  /** Mean effort per verified run — the COST axis of the Pareto front. */
+  readonly meanEffort: number | null;
+  readonly validationHarness: { readonly checks: string[] } | null;
 }
 
 export interface AgentDesignInput {
@@ -30,11 +34,20 @@ export interface AgentDesignInput {
   readonly category: string;
   readonly roleInstructions: string;
   readonly capabilities: string[];
+  /** The design this one descends from, if any (R28). */
+  readonly parentDesignId?: string | null;
+  /**
+   * The checks this design's work is graded against.
+   *
+   * `null` marks a design whose performance CANNOT be measured, which the
+   * ratchet refuses to promote however well it appeared to do.
+   */
+  readonly validationHarness?: { readonly checks: string[] } | null;
 }
 
 const RETURNED = `
   design_id, category, version, role_instructions, capabilities,
-  clade_score, observations, active
+  clade_score, observations, active, parent_design_id, mean_effort, validation_harness
 `;
 
 interface DesignRow {
@@ -47,6 +60,9 @@ interface DesignRow {
   clade_score: string | null;
   observations: number;
   active: boolean;
+  parent_design_id: string | null;
+  mean_effort: string | null;
+  validation_harness: { checks: string[] } | null;
 }
 
 function toDesign(row: DesignRow): AgentDesign {
@@ -59,6 +75,9 @@ function toDesign(row: DesignRow): AgentDesign {
     cladeScore: row.clade_score === null ? null : Number(row.clade_score),
     observations: row.observations,
     active: row.active,
+    parentDesignId: row.parent_design_id,
+    meanEffort: row.mean_effort === null ? null : Number(row.mean_effort),
+    validationHarness: row.validation_harness,
   };
 }
 
@@ -87,11 +106,18 @@ export class AssetRegistryRepository {
    */
   async upsert(input: AgentDesignInput): Promise<AgentDesign> {
     const { rows } = await this.#pool.query<DesignRow>(
-      `INSERT INTO agent_design (design_id, category, role_instructions, capabilities)
-       VALUES ($1, $2, $3, $4::jsonb)
+      `INSERT INTO agent_design
+         (design_id, category, role_instructions, capabilities, parent_design_id, validation_harness)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb)
        ON CONFLICT (design_id) DO NOTHING
        RETURNING ${RETURNED}`,
-      [input.designId, input.category, input.roleInstructions, JSON.stringify(input.capabilities)],
+      [
+        input.designId, input.category, input.roleInstructions, JSON.stringify(input.capabilities),
+        input.parentDesignId ?? null,
+        input.validationHarness === undefined || input.validationHarness === null
+          ? null
+          : JSON.stringify(input.validationHarness),
+      ],
     );
 
     if (rows.length > 0) return toDesign(rows[0]!);
@@ -133,7 +159,7 @@ export class AssetRegistryRepository {
    * Incremental rather than recomputed so the ratchet never needs the full task
    * history in memory, and so a score always states how much evidence it rests on.
    */
-  async recordOutcome(designId: string, score: number): Promise<AgentDesign> {
+  async recordOutcome(designId: string, score: number, effort?: number): Promise<AgentDesign> {
     if (score < 0 || score > 1) {
       throw new RangeError(`clade score must be within 0..1, received ${score}`);
     }
@@ -141,11 +167,17 @@ export class AssetRegistryRepository {
     const { rows } = await this.#pool.query<DesignRow>(
       `UPDATE agent_design
           SET clade_score  = ((COALESCE(clade_score, 0) * observations) + $2) / (observations + 1),
+              -- Cost folds the same way, and stays NULL while no effort has been
+              -- reported: unmeasured cost is not zero cost (R28 AC-1).
+              mean_effort  = CASE
+                               WHEN $3::numeric IS NULL THEN mean_effort
+                               ELSE ((COALESCE(mean_effort, 0) * observations) + $3::numeric) / (observations + 1)
+                             END,
               observations = observations + 1,
               updated_at   = now()
         WHERE design_id = $1
       RETURNING ${RETURNED}`,
-      [designId, score],
+      [designId, score, effort ?? null],
     );
 
     if (rows.length === 0) {
@@ -195,6 +227,87 @@ export class AssetRegistryRepository {
     );
 
     return rows.map((row) => ({ ...toDesign(row), retired: !row.active }));
+  }
+
+  /**
+   * The clade score — how this design's WHOLE LINEAGE has performed (R28 AC-0).
+   *
+   * Walks ancestors with a recursive CTE and takes an **observation-weighted**
+   * mean. Weighting is the whole point: a plain average of each design's mean
+   * would let one lucky run count as much as thirty, which is the "lucky
+   * audition" the criterion exists to rule out.
+   *
+   * `UNION` rather than `UNION ALL`, and a visited-set guard via `NOT IN`, so a
+   * cycle in the ancestry terminates. Lineage is model-adjacent data; a cycle
+   * must degrade to a finite answer rather than spin inside a live mission.
+   *
+   * Distinct from the design's own `cladeScore`, which is left alone: promotion
+   * reads the clade, but a later delta is measured against the design's own
+   * record, and collapsing the two would make an individual record unreadable.
+   */
+  async cladeScoreFor(designId: string): Promise<{ score: number | null; observations: number }> {
+    const { rows } = await this.#pool.query<{ score: string | null; observations: string }>(
+      `WITH RECURSIVE lineage(design_id, parent_design_id, clade_score, observations, seen) AS (
+         SELECT d.design_id, d.parent_design_id, d.clade_score, d.observations,
+                ARRAY[d.design_id]
+           FROM agent_design d
+          WHERE d.design_id = $1
+         UNION ALL
+         SELECT p.design_id, p.parent_design_id, p.clade_score, p.observations,
+                l.seen || p.design_id
+           FROM agent_design p
+           JOIN lineage l ON p.design_id = l.parent_design_id
+          WHERE NOT p.design_id = ANY(l.seen)
+       )
+       SELECT SUM(clade_score * observations) / NULLIF(SUM(observations), 0) AS score,
+              COALESCE(SUM(observations), 0)                                 AS observations
+         FROM lineage`,
+      [designId],
+    );
+
+    const row = rows[0];
+    return {
+      score: row === undefined || row.score === null ? null : Number(row.score),
+      observations: row === undefined ? 0 : Number(row.observations),
+    };
+  }
+
+  /**
+   * The Pareto front for a category (R28 AC-1).
+   *
+   * "Pareto sets per category rather than single champions, so a cheaper-but-
+   * adequate design is not evicted by a costlier better one." A design is kept
+   * unless another is at least as good on BOTH axes and strictly better on one:
+   * higher clade score, lower mean effort.
+   *
+   * Cost comes from `effortSpent`, which the ledger already records on every
+   * `task.executed` — derived from what the system measured rather than from an
+   * invented price list.
+   *
+   * Unproven designs are excluded. An unmeasured design is not efficient, it is
+   * unknown, and putting it on the front would let a design with no record
+   * displace one that earned its place.
+   */
+  async paretoFor(category: string): Promise<AgentDesign[]> {
+    const { rows } = await this.#pool.query<DesignRow>(
+      `SELECT ${RETURNED} FROM agent_design
+        WHERE category = $1
+          AND clade_score IS NOT NULL
+          AND mean_effort IS NOT NULL
+        ORDER BY clade_score DESC, mean_effort ASC`,
+      [category],
+    );
+
+    const candidates = rows.map(toDesign);
+    return candidates.filter((design) => !candidates.some((rival) => dominates(rival, design)));
+  }
+
+  /** Re-point a design's ancestry. Used by the Learning Agent when a lineage is corrected. */
+  async reparent(designId: string, parentDesignId: string | null): Promise<void> {
+    await this.#pool.query(
+      `UPDATE agent_design SET parent_design_id = $2, updated_at = now() WHERE design_id = $1`,
+      [designId, parentDesignId],
+    );
   }
 
   /** Every ratchet decision against a design, adopted or reverted, newest last. */
@@ -264,6 +377,17 @@ export class AssetRegistryRepository {
       }
 
       const incumbent = toDesign(rows[0]!);
+
+      // "A design without a validation harness cannot earn permanence, by rule"
+      // (R28 AC-2). Refused on MEASURABILITY, not performance: a perfect score
+      // from a design nobody can grade is exactly the case the rule exists for,
+      // because the number cannot be trusted whatever it says.
+      if (incumbent.validationHarness === null) {
+        throw new Error(
+          `design ${input.designId} has no validation harness — a design whose performance cannot be measured cannot earn permanence`,
+        );
+      }
+
       const candidate = applyChanges(incumbent, input.changes);
       const incumbentSimplicity = simplicityOf(incumbent);
       const candidateSimplicity = simplicityOf(candidate);
@@ -365,6 +489,24 @@ interface DeltaRow {
   incumbent_score: string | null;
   outcome: 'adopted' | 'reverted';
   reason: string;
+}
+
+/**
+ * Does `rival` dominate `design` in the Pareto sense?
+ *
+ * At least as good on both axes — higher-or-equal quality, lower-or-equal cost —
+ * and strictly better on at least one. Requiring strict betterness somewhere is
+ * what stops two identical designs from eliminating each other and emptying the
+ * front.
+ */
+function dominates(rival: AgentDesign, design: AgentDesign): boolean {
+  if (rival.designId === design.designId) return false;
+  const quality = (d: AgentDesign) => d.cladeScore ?? 0;
+  const cost = (d: AgentDesign) => d.meanEffort ?? Number.POSITIVE_INFINITY;
+
+  const noWorse = quality(rival) >= quality(design) && cost(rival) <= cost(design);
+  const better = quality(rival) > quality(design) || cost(rival) < cost(design);
+  return noWorse && better;
 }
 
 /**

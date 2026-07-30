@@ -171,12 +171,12 @@ describe('R38 AC-1 — creation feeds the market it is the exception to', () => 
 describe('R38 AC-1 — Gate B feeds the track record', () => {
   it('records a PASS as a win and a FAIL as a loss, against the staffed design', async () => {
     const { runMission } = await import('./mission-loop.js');
-    const outcomes: Array<{ designId: string; score: number }> = [];
+    const outcomes: Array<{ designId: string; score: number; effort?: number }> = [];
 
     const lookup: RegistryLookup = {
       async bestForCategory() { return null; },
       async register() { /* noop */ },
-      async recordOutcome(designId, score) { outcomes.push({ designId, score }); },
+      async recordOutcome(designId, score, effort) { outcomes.push({ designId, score, effort }); },
     };
 
     const mission: TaskContract = contract({
@@ -226,5 +226,8 @@ describe('R38 AC-1 — Gate B feeds the track record', () => {
     // One loss then one win, both against the same category-derived design.
     expect(outcomes.map((o) => o.score)).toEqual([0, 1]);
     expect(new Set(outcomes.map((o) => o.designId)).size).toBe(1);
+    // The COST axis (R28 AC-1) comes from the effort each attempt spent. Without
+    // it `mean_effort` is never written and the Pareto front stays empty.
+    expect(outcomes.map((o) => o.effort)).toEqual([1, 1]);
   });
 });

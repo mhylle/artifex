@@ -27,8 +27,9 @@ export interface AssetStore {
     readonly category: string;
     readonly roleInstructions: string;
     readonly capabilities: string[];
+    readonly validationHarness?: { readonly checks: string[] };
   }): Promise<{ readonly version: number }>;
-  recordOutcome(designId: string, score: number): Promise<unknown>;
+  recordOutcome(designId: string, score: number, effort?: number): Promise<unknown>;
 }
 
 export interface WorkerDependencies {
@@ -60,7 +61,7 @@ export function buildWorkerSeams(deps: WorkerDependencies, missionId: string): M
       // this call proposed is how the ledger and the registry came to disagree
       // about which version did the work (defect `fe690036`).
       register: async (design) => ({ version: (await assets.upsert(design)).version }),
-      recordOutcome: async (designId, score) => void (await assets.recordOutcome(designId, score)),
+      recordOutcome: async (designId, score, effort) => void (await assets.recordOutcome(designId, score, effort)),
     },
   );
 }

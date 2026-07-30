@@ -41,6 +41,15 @@ export interface RegistryLookup {
     readonly category: string;
     readonly roleInstructions: string;
     readonly capabilities: string[];
+    /**
+     * The checks this design's work will be graded against (R28 AC-2).
+     *
+     * Carried at registration because permanence is decided on harness
+     * evidence: a design registered without one can never be promoted, so
+     * omitting it here would quietly make every swarm-authored specialist
+     * permanently unpromotable.
+     */
+    readonly validationHarness?: { readonly checks: string[] };
   }): Promise<{ readonly version: number } | void>;
   /**
    * Fold one verified outcome into a design's track record.
@@ -49,7 +58,7 @@ export interface RegistryLookup {
    * without it `bestForCategory`'s evidence bar can never be met, so every bid
    * is a no-bid whatever the registry holds.
    */
-  recordOutcome?(designId: string, score: number): Promise<void>;
+  recordOutcome?(designId: string, score: number, effort?: number): Promise<void>;
 }
 
 /** Authors a fresh specialist when nothing in the registry bids. */
@@ -176,6 +185,7 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
       category: contract.category,
       roleInstructions: design.roleInstructions,
       capabilities: design.capabilities,
+      validationHarness: harnessFor(contract),
     }).catch(() => undefined);
 
     // Report the version the registry actually holds. Registration is

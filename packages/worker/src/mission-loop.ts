@@ -819,6 +819,11 @@ export async function runMission(
         await seams.registry.recordOutcome?.(
           manifest.designId,
           bVerdict.outcome === 'pass' ? 1 : 0,
+          // The COST axis of the Pareto front (R28 AC-1), taken from the effort
+          // this attempt actually spent. Omitting it leaves `mean_effort` null
+          // forever, and a front that needs both axes would stay permanently
+          // empty — the cost half of "cheaper-but-adequate" with no data.
+          outcome.bundle.effortSpent,
         ).catch(() => undefined);
 
         if (bVerdict.outcome === 'pass') {
