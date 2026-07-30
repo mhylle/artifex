@@ -18,6 +18,7 @@
 import { Type } from '@sinclair/typebox';
 
 import type { RegistryLookup } from './agent-creator.js';
+import { composeDesign } from './design-playbook.js';
 import type { ControlSignals, DecompositionGate } from './mission-loop.js';
 import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
@@ -335,12 +336,16 @@ export function createMissionSeams(
      */
     registry: registry ?? { async bestForCategory() { return null; } },
 
+    /**
+     * Composed from the design playbook's typed blocks (R38 AC-2), not from a
+     * template string and not from freeform generation. The design space is
+     * constrained by construction: the composer can only emit known block
+     * kinds, each filled from a named contract field.
+     */
     author: {
       async design({ contract }) {
-        return {
-          roleInstructions: `You answer exactly this task, and nothing beyond it: ${contract.objective}`,
-          capabilities: ['text'],
-        };
+        const composed = composeDesign(contract);
+        return { roleInstructions: composed.roleInstructions, capabilities: composed.capabilities };
       },
     },
 

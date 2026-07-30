@@ -21,6 +21,7 @@
 import type { EscalationRung, LedgerEventInput, LogicalTier, TaskContract } from '@artifex/shared-types';
 
 import { capabilityOf, staff } from './agent-creator.js';
+import { concurrencyFor } from './design-playbook.js';
 import type { DesignAuthor, RegistryLookup } from './agent-creator.js';
 import { decompose, foldUp } from './orchestrator.js';
 import type { Planner, Reconciler } from './orchestrator.js';
@@ -693,7 +694,15 @@ export async function runMission(
 
         let manifest;
         try {
-          manifest = await staff({ contract: child, registry: seams.registry, author: seams.author });
+          manifest = await staff({
+            contract: child,
+            registry: seams.registry,
+            author: seams.author,
+            // Both derived, and both previously supplied by nobody: the tier
+            // policy has always accepted them and always received defaults.
+            fanIn: children.filter((c) => c.dependencies.consumesTaskIds.includes(child.taskId)).length,
+            budgetHeadroom: effectiveCeiling <= 0 ? 0 : Math.max(0, (effectiveCeiling - spent) / effectiveCeiling),
+          });
         } catch (error) {
           rungIndex += 1;
           if (rungIndex >= ladder.length) break;
@@ -950,7 +959,14 @@ export async function runMission(
 
     let pending = [...children];
     while (pending.length > 0) {
-      const wave = pending.filter(ready);
+      const ready_ = pending.filter(ready);
+      // Effort scaling (R38 AC-2): only as many run at once as the parent's
+      // budget can carry at their floors, narrowed further when the wave
+      // carries blast radius. Without this the scheduler starts everything
+      // ready, which is the "fifty agents for a triviality" half of the
+      // criterion — and on a large graph it commits the whole budget before
+      // the first verdict comes back.
+      const wave = ready_.slice(0, concurrencyFor(parent, ready_));
 
       if (wave.length === 0) {
         // Nothing can start and nothing is running. Either a producer was

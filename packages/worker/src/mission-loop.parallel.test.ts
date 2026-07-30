@@ -249,3 +249,62 @@ describe('R32 — parallel execution stays deterministic', () => {
     expect(folded).toEqual(['Answer part 1.', 'Answer part 2.']);
   });
 });
+
+/**
+ * R38 AC-2 — effort scaling, asserted where it is HONOURED.
+ *
+ * `concurrencyFor` is unit-tested in `design-playbook.test.ts`. This is the
+ * other half: that the scheduler actually narrows its wave to it. A correct
+ * calculation the scheduler ignores is the "value written that nothing reads"
+ * shape this project has shipped six times.
+ */
+describe('R38 AC-2 — the scheduler runs no more at once than the budget carries', () => {
+  it('a HIGH-blast-radius wave is throttled — not everything ready starts', async () => {
+    // Two high-risk children: the risk bound allows a quarter of the wave at
+    // once, so one. If the scheduler ignored `concurrencyFor` both would enter
+    // `work` together and `peak` would be 2.
+    //
+    // Risk rather than budget, because the budget bound cannot bite here by
+    // construction: `authorContracts` caps a child's floor at its own ceiling,
+    // which is `effortShare` of the parent's — so with shares that sum to 1 the
+    // parent can always afford at least two concurrently. The budget half is
+    // unit-tested in `design-playbook.test.ts`; this asserts the scheduler
+    // honours whatever bound it is given.
+    let live = 0;
+    let peak = 0;
+    const script: Script = {
+      subtasks: [part(1, { blastRadius: 'high' }), part(2, { blastRadius: 'high' })],
+      async onWork() {
+        live += 1;
+        peak = Math.max(peak, live);
+        await new Promise((resolve) => { setTimeout(resolve, 15); });
+        live -= 1;
+      },
+    };
+
+    const result = await withinTime(runMission(mission(), seams(script), { now: () => AT }));
+
+    expect(result.outcome).toBe('delivered');
+    expect(peak, 'a high-risk wave runs one at a time').toBe(1);
+  });
+
+  it('DISTRACTOR: a generous budget still runs them together — throttling is not the default', async () => {
+    // Without this, "always run one at a time" would pass the test above while
+    // undoing R32 entirely.
+    let live = 0;
+    let peak = 0;
+    const script: Script = {
+      subtasks: [part(1), part(2)],
+      async onWork() {
+        live += 1;
+        peak = Math.max(peak, live);
+        await new Promise((resolve) => { setTimeout(resolve, 15); });
+        live -= 1;
+      },
+    };
+
+    await withinTime(runMission(mission(), seams(script), { now: () => AT }));
+
+    expect(peak).toBe(2);
+  });
+});

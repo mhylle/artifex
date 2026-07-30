@@ -177,4 +177,30 @@ describe('the harness reaches the registry (R28 AC-2)', () => {
   });
 });
 
+describe('the author seam composes from the playbook (R38 AC-2)', () => {
+  it('produces block-structured instructions, not a template string', async () => {
+    // The seam used to return `You answer exactly this task...` regardless of
+    // the contract. Asserting the BLOCK STRUCTURE is what distinguishes a
+    // composed design from a string with the objective interpolated into it.
+    const { deps } = dependencies();
+    const seams = buildWorkerSeams(deps, MISSION_ID);
+
+    const design = await seams.author.design({
+      contract: {
+        category: 'research.sub-question',
+        objective: 'Explain how a bicycle bell works.',
+        acceptanceCriteria: [{ criterionId: 'ac-1', statement: 'Names the mechanism.' }],
+        boundaries: { outOfScope: ['No traffic law.'], siblingOwners: [] },
+        inputs: { entitlements: [], toolEntitlements: [], pinnedDecisions: [] },
+        stoppingConditions: { doneWhen: [], stopTryingWhen: ['No source.'], maxAttempts: 3, stallLimit: 2 },
+      } as never,
+    });
+
+    expect(design.roleInstructions).toContain('OUT OF SCOPE');
+    expect(design.roleInstructions).toContain('STOP TRYING IF');
+    expect(design.roleInstructions).toContain('Names the mechanism.');
+    expect(design.roleInstructions).toContain('No traffic law.');
+  });
+});
+
 vi.mock('bullmq', () => ({ Worker: class {} }));
