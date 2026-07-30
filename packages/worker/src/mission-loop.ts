@@ -117,6 +117,34 @@ export interface MissionSeams {
    * silently claims a judgement nobody made.
    */
   readonly decompositionGate?: DecompositionGate;
+  /**
+   * The Knowledge Commons producer (defect `753bc6dd`).
+   *
+   * Optional: the store is a side benefit, and every caller predates it. A
+   * mission with no commons runs exactly as before.
+   */
+  readonly commons?: KnowledgeCommonsSubmitter;
+}
+
+/**
+ * What the mission loop needs from the Knowledge Commons (defect `753bc6dd`).
+ *
+ * Structural rather than an import of the repository, so the worker package
+ * keeps depending on `shared-types` and its own seams — the same shape the
+ * registry lookup uses.
+ */
+export interface KnowledgeCommonsSubmitter {
+  submit(entry: {
+    readonly claim: string;
+    readonly impact: 'low' | 'high';
+    readonly provenance: {
+      readonly producedByDesignId: string;
+      readonly missionId: string;
+      readonly taskId: string;
+      readonly evidence: readonly string[];
+      readonly verifiedBy: string;
+    };
+  }): Promise<unknown>;
 }
 
 export interface Escalation {
@@ -354,7 +382,10 @@ export async function runMission(
     type: string,
     actorKind: LedgerEventInput['actor']['kind'],
     payload: Record<string, unknown>,
-  ): void => {
+    // Returns the event id so a caller can CITE what it just wrote. The
+    // Knowledge Commons refuses a finding with no evidence, and the evidence it
+    // wants is ledger event ids — which only this function knows.
+  ): string => {
     seq += 1;
     const event: LedgerEventInput = {
       // Unique per RUN, not merely per mission (defect `5236850d`). Deterministic
@@ -388,6 +419,8 @@ export async function runMission(
       // A subscriber's failure is not a mission failure. The event is already in
       // the trail, so nothing is lost that replay cannot recover.
     }
+
+    return event.eventId;
   };
 
   const verdictMeta = (n: number) => ({
@@ -921,7 +954,7 @@ export async function runMission(
         }
 
         spent += outcome.bundle.effortSpent;
-        record(child.taskId, 'execution', 'task.executed', 'worker', {
+        const executedEventId = record(child.taskId, 'execution', 'task.executed', 'worker', {
           bundleId: outcome.bundle.bundleId,
           // Cost belongs in the trail: value-per-effort is the system's fitness
           // function, and it cannot be computed from a bundle id.
@@ -963,7 +996,7 @@ export async function runMission(
           });
           continue;
         }
-        record(child.taskId, 'verification', 'gate_b.verdict_issued', 'reviewer', { ...bVerdict });
+        const verdictEventId = record(child.taskId, 'verification', 'gate_b.verdict_issued', 'reviewer', { ...bVerdict });
 
         // The design's track record, folded from the verdict the reviewer just
         // issued (R38/R28). Derived, not invented: a pass is 1 and a fail is 0,
@@ -986,6 +1019,37 @@ export async function runMission(
         ).catch(() => undefined);
 
         if (bVerdict.outcome === 'pass') {
+          // ---- the finding reaches the commons (defect `753bc6dd`) ----------
+          // Submitted ONLY here. Gate B's pass is the admission ticket: doing it
+          // at execution would fill the store with the unreviewed output that
+          // quarantine exists to keep out.
+          //
+          // The claim is the verified deliverable keyed to the objective that
+          // produced it. A cleverer producer would ask a model to extract
+          // "reusable knowledge" — a new seam and a new thing to be wrong about
+          // — but the store was built guilty-until-proven-useful precisely so
+          // the producer need not be a perfect judge: everything lands in
+          // quarantine, and only a stranger's re-derivation publishes a
+          // high-impact claim. A parochial finding sits there harmlessly.
+          //
+          // Impact is DERIVED from blast radius, which already says what being
+          // wrong costs; a second scale could only disagree with the first.
+          //
+          // Failure is swallowed for the same reason the track record's is: a
+          // knowledge store is a side benefit, and losing verified work because
+          // a bookkeeping write failed trades the product for the receipt.
+          await seams.commons?.submit({
+            claim: `${child.objective} ${JSON.stringify(outcome.bundle.deliverable)}`,
+            impact: child.blastRadius === 'high' ? 'high' : 'low',
+            provenance: {
+              producedByDesignId: manifest.designId,
+              missionId: mission.missionId,
+              taskId: child.taskId,
+              evidence: [executedEventId, verdictEventId],
+              verifiedBy: 'gate_b',
+            },
+          }).catch(() => undefined);
+
           delivered = outcome.bundle.deliverable;
           settled = true;
           break;

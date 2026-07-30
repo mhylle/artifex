@@ -31,6 +31,7 @@ function dependencies() {
     bestForCategory: [] as string[],
     upsert: [] as string[],
     recordOutcome: [] as Array<{ designId: string; score: number }>,
+    submitted: [] as Array<{ claim: string }>,
     replay: [] as string[],
     harnesses: [] as Array<{ checks: string[] } | null>,
     capabilities: 0,
@@ -54,6 +55,9 @@ function dependencies() {
     },
     ledger: {
       async replay() { calls.replay.push(MISSION_ID); return []; },
+    },
+    commons: {
+      async submit(entry: { claim: string }) { calls.submitted.push(entry); return { entryId: 'e-1' }; },
     },
   };
 
@@ -204,3 +208,38 @@ describe('the author seam composes from the playbook (R38 AC-2)', () => {
 });
 
 vi.mock('bullmq', () => ({ Worker: class {} }));
+
+/**
+ * Defect 753bc6dd — the Knowledge Commons had no producer.
+ *
+ * The store was built, correct, and unreachable: nothing called `submit`. That
+ * is the same failure shape as the Asset Registry above, and it stayed hidden
+ * for the same reason — a store with no caller looks exactly like a store with
+ * one, from the inside.
+ */
+describe('buildWorkerSeams — the Knowledge Commons producer', () => {
+  it('wires the commons through, so a verified task can submit its finding', async () => {
+    const { deps, calls } = dependencies();
+
+    const seams = buildWorkerSeams(deps, MISSION_ID);
+    await seams.commons?.submit({
+      claim: 'Water boils at 100C at sea level.',
+      impact: 'low',
+      provenance: {
+        producedByDesignId: 'd-1', missionId: MISSION_ID, taskId: 't-1',
+        evidence: ['ev-1'], verifiedBy: 'gate_b',
+      },
+    });
+
+    expect(calls.submitted).toHaveLength(1);
+  });
+
+  it('DISTRACTOR: the seam is PRESENT, not merely optional-and-absent', async () => {
+    // `commons?.submit(...)` silently does nothing when the seam is missing, so
+    // an unwired commons and a working one are indistinguishable at the call
+    // site — precisely the mutant that `41f7555c` survived for the registry.
+    const { deps } = dependencies();
+
+    expect(buildWorkerSeams(deps, MISSION_ID).commons).toBeDefined();
+  });
+});

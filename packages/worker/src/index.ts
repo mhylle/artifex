@@ -11,6 +11,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   AssetRegistryRepository,
+  KnowledgeCommonsRepository,
   LedgerRepository,
   ModelCatalogRepository,
   runMigrations,
@@ -60,6 +61,9 @@ export async function main(): Promise<void> {
   const ledger = new LedgerRepository(pool);
   const catalog = new ModelCatalogRepository(pool);
   const assets = new AssetRegistryRepository(pool);
+  // The Knowledge Commons (defect `753bc6dd`). Built in R24 and reachable by
+  // nothing until R40 gave a verified task an evidence bundle worth submitting.
+  const commons = new KnowledgeCommonsRepository(pool);
   const router = new ModelRouter({
     catalog: {
       // `null` means "no admitted model for this tier"; a rejection would mean
@@ -116,7 +120,7 @@ export async function main(): Promise<void> {
         // Registry stayed a null-bidding stub for the project's whole life
         // (defect `41f7555c`) with every suite green.
         buildWorkerSeams(
-          { generator, models: { worker, evaluator }, assets, ledger },
+          { generator, models: { worker, evaluator }, assets, ledger, commons },
           contract.missionId,
         ),
         {

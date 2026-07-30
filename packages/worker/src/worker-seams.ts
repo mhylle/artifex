@@ -14,7 +14,7 @@
  * repositories satisfy it without this module importing them.
  */
 import type { RegisteredDesign } from './agent-creator.js';
-import type { MissionSeams } from './mission-loop.js';
+import type { KnowledgeCommonsSubmitter, MissionSeams } from './mission-loop.js';
 import type { StructuredGenerator } from './planner.js';
 import { createLedgerControl, createMissionSeams } from './runtime.js';
 import type { ControlReader, RuntimeModels } from './runtime.js';
@@ -39,6 +39,15 @@ export interface WorkerDependencies {
   readonly assets: AssetStore;
   /** Read-only: the control seam DERIVES operator signals from the trail. */
   readonly ledger: ControlReader;
+  /**
+   * The Knowledge Commons (defect `753bc6dd`).
+   *
+   * The store shipped correct and unreachable — nothing called `submit`, which
+   * is the same failure the Asset Registry had and just as invisible from the
+   * inside. Required here rather than optional so a missing commons is a
+   * compile error at the composition root instead of a silently inert store.
+   */
+  readonly commons: KnowledgeCommonsSubmitter;
 }
 
 /**
@@ -67,5 +76,6 @@ export function buildWorkerSeams(deps: WorkerDependencies, missionId: string): M
       // normalising each proposal alone, and the planner never repeats a name.
       knownCapabilities: () => assets.knownCapabilities(),
     },
+    deps.commons,
   );
 }

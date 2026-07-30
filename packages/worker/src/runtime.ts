@@ -19,7 +19,7 @@ import { Type } from '@sinclair/typebox';
 
 import type { RegistryLookup } from './agent-creator.js';
 import { composeDesign } from './design-playbook.js';
-import type { ControlSignals, DecompositionGate } from './mission-loop.js';
+import type { ControlSignals, DecompositionGate, KnowledgeCommonsSubmitter } from './mission-loop.js';
 import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
 import type { MissionSeams } from './mission-loop.js';
@@ -280,6 +280,7 @@ export function createMissionSeams(
   models: RuntimeModels,
   control?: ControlSignals,
   registry?: RegistryLookup,
+  commons?: KnowledgeCommonsSubmitter,
 ): MissionSeams {
   const gen = (
     m: { provider: string; model: string },
@@ -291,6 +292,7 @@ export function createMissionSeams(
     // Passed through rather than constructed here: the runtime owns the ledger
     // connection, and this module owns the model seams.
     ...(control === undefined ? {} : { control }),
+    ...(commons === undefined ? {} : { commons }),
 
     planner: createStepwisePlanner({
       generator,
