@@ -64,6 +64,16 @@ export interface ControlSignals {
    * be worse than no budget, because it would bind unpredictably.
    */
   grantedBudget?(taskId: string): Promise<number>;
+  /**
+   * The autonomy dial as it stands NOW, from the latest `operator.dial_turned`.
+   *
+   * `null` means the operator has not turned it, so the contract's own setting
+   * governs. Read at the moment the ladder is climbed, which is what makes
+   * "applies at the next gate, never retroactively" true by construction: a
+   * verdict already issued is never revisited, because the dial is only ever
+   * consulted going forward.
+   */
+  currentDial?(missionId: string): Promise<'autonomous' | 'checkpointed' | 'supervised' | null>;
 }
 
 export interface MissionSeams {
@@ -298,6 +308,7 @@ export async function runMission(
       let settled = false;
       let cancelled = false;
       let paused = false;
+      let awaitingHuman = false;
 
       // Bounded by the ladder AND by maxAttempts — whichever runs out first.
       const maxAttempts = Math.min(child.stoppingConditions.maxAttempts, ladder.length + 1);
@@ -493,6 +504,32 @@ export async function runMission(
         rungIndex += 1;
         if (rungIndex >= ladder.length) break;
         const rung = ladder[rungIndex]!;
+
+        // The dial cashes out HERE. Rung 5 of the ladder is "human / surrender —
+        // per the autonomy dial", and until now `humanAt` was inherited by every
+        // child and read by nobody, so `human_review` was climbed like any other
+        // rung and no human was ever asked (defect `607a2468`).
+        const dial = seams.control?.currentDial === undefined
+          ? null
+          : await seams.control.currentDial(mission.missionId).catch(() => null);
+        const effectiveDial = dial ?? mission.autonomyDial;
+        // "Fully autonomous" must mean nobody is asked, or the setting is
+        // decorative in the other direction.
+        const humanAt = effectiveDial === 'autonomous' ? null : child.escalationPolicy.humanAt ?? 'human_review';
+
+        if (humanAt !== null && rung === humanAt) {
+          record(child.taskId, 'escalation', 'escalation.awaiting_human', 'orchestrator', {
+            objective: child.objective,
+            rung,
+            autonomyDial: effectiveDial,
+            findings: bVerdict.findings.map((f) => f.detail),
+          });
+          // Waiting means stopping. There is nowhere to answer this yet (R18 is
+          // the attention queue), so the mission surrenders naming what it waits
+          // for — which is exactly the payload that queue will consume.
+          awaitingHuman = true;
+          break;
+        }
         const fromTier = tier;
         // A tier bump IS a rung, so only that rung changes the tier; the others
         // change who or what runs, not how much model is thrown at it.
@@ -512,6 +549,13 @@ export async function runMission(
         // Excluded from the assembly: folding a deliverable the operator stopped
         // would put the cancelled work in the result anyway.
         continue;
+      }
+
+      if (awaitingHuman) {
+        return fail(
+          `task ${child.taskId} awaits a human decision`,
+          [`"${child.objective}" reached the human rung of its escalation ladder`],
+        );
       }
 
       if (paused) {

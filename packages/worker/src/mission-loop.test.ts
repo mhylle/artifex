@@ -945,3 +945,106 @@ describe('9fbee9d6 — the budget ceiling actually stops a task', () => {
     expect(result.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(true);
   });
 });
+
+/**
+ * Defects `607a2468` + `0d39d84b` — the ladder never stopped for a human, and
+ * the dial that governs where the human sits was read by nobody.
+ *
+ * Two halves of one gap. `escalationPolicy.humanAt` was inherited by children
+ * and consulted by no one, so `human_review` was treated as an ordinary retry
+ * rung; and `operator.dial_turned` was written to the trail and never read. A
+ * dial with three settings that changes nothing is not a dial.
+ */
+describe('607a2468 — the ladder stops for a human, per the dial', () => {
+  const alwaysFails = () => seams({ gateBFailuresPerTask: { 0: 99, 1: 99 } });
+
+  // The dial and humanAt must agree, because intake derives one from the other
+  // (`humanAt: dial === 'autonomous' ? null : 'human_review'`). The base fixture
+  // is autonomous, so a mission that expects a human has to say so on the dial.
+  const missionWithHuman = (): TaskContract => ({
+    ...mission(),
+    autonomyDial: 'checkpointed',
+    escalationPolicy: { ladder: ['retry_higher_tier', 'human_review'], humanAt: 'human_review' },
+  });
+
+  it('records that the task awaits a human when the ladder reaches that rung', async () => {
+    const result = await runMission(missionWithHuman(), alwaysFails(), { now: AT });
+
+    expect(result.trail.some((e) => e.type === 'escalation.awaiting_human')).toBe(true);
+  });
+
+  it('DISTRACTOR: it does NOT keep retrying past the human rung', async () => {
+    // The bug: human_review was climbed like any other rung and the task simply
+    // carried on. Waiting means stopping, or the dial governs nothing.
+    const result = await runMission(missionWithHuman(), alwaysFails(), { now: AT });
+
+    const awaiting = result.trail.findIndex((e) => e.type === 'escalation.awaiting_human');
+    const executedAfter = result.trail
+      .slice(awaiting + 1)
+      .filter((e) => e.type === 'task.executed' && e.taskId === result.trail[awaiting]?.taskId);
+    expect(executedAfter).toHaveLength(0);
+  });
+
+  it('AC-3: an autonomous dial removes the human rung entirely', async () => {
+    // "Fully autonomous" has to mean nobody is asked; otherwise the setting is
+    // decorative in the other direction.
+    const control = {
+      async check() { return 'run' as const; },
+      async currentDial() { return 'autonomous' as const; },
+    };
+
+    const result = await runMission(
+      missionWithHuman(),
+      { ...alwaysFails(), control } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(result.trail.some((e) => e.type === 'escalation.awaiting_human')).toBe(false);
+  });
+
+  it('AC-3: turning the dial to supervised mid-flight makes the ladder stop for a human', async () => {
+    // The mission was contracted autonomous; the operator tightened it. Same
+    // contract, different trail, different behaviour.
+    const autonomous: TaskContract = {
+      ...mission(),
+      autonomyDial: 'autonomous',
+      escalationPolicy: { ladder: ['retry_higher_tier', 'human_review'], humanAt: null },
+    };
+    const control = {
+      async check() { return 'run' as const; },
+      async currentDial() { return 'supervised' as const; },
+    };
+
+    const result = await runMission(
+      autonomous,
+      { ...alwaysFails(), control } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(result.trail.some((e) => e.type === 'escalation.awaiting_human')).toBe(true);
+  });
+
+  it('AC-3 DISTRACTOR: a dial change never re-opens a verdict already issued', async () => {
+    // "Takes effect at the next gate, never retroactively." The dial is read
+    // when the ladder is climbed, so verdicts behind it are untouched — this
+    // asserts the count of issued verdicts is unchanged by the dial.
+    const withDial = {
+      ...alwaysFails(),
+      control: { async check() { return 'run' as const; }, async currentDial() { return 'supervised' as const; } },
+    };
+
+    const plain = await runMission(missionWithHuman(), alwaysFails(), { now: AT });
+    const dialled = await runMission(
+      missionWithHuman(),
+      withDial as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    const verdicts = (r: typeof plain) => r.trail.filter((e) => e.type === 'gate_b.verdict_issued');
+    for (const verdict of verdicts(dialled)) {
+      expect(verdict.payload['outcome']).toBe('fail');
+    }
+    expect(verdicts(dialled).length).toBeGreaterThan(0);
+    expect(verdicts(plain).length).toBeGreaterThan(0);
+  });
+});

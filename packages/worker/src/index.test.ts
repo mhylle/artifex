@@ -84,3 +84,31 @@ describe('9fbee9d6 — the runtime reads operator budget grants from the ledger'
     await expect(control.grantedBudget?.('t-1')).resolves.toBe(0);
   });
 });
+
+/**
+ * Defect `0d39d84b` — the dial must reach the runtime, not merely the trail.
+ */
+describe('0d39d84b — the runtime reads the operator dial from the ledger', () => {
+  it('takes the LATEST dial setting, because turning a dial replaces it', async () => {
+    const { createLedgerControl } = await import('./runtime.js');
+
+    const control = createLedgerControl({
+      async replay() {
+        return [
+          { taskId: null, type: 'operator.dial_turned', payload: { autonomyDial: 'supervised' } },
+          { taskId: null, type: 'operator.dial_turned', payload: { autonomyDial: 'autonomous' } },
+        ] as never;
+      },
+    });
+
+    await expect(control.currentDial?.('m-1')).resolves.toBe('autonomous');
+  });
+
+  it('DISTRACTOR: an untouched dial reports null, so the contract governs', async () => {
+    const { createLedgerControl } = await import('./runtime.js');
+
+    const control = createLedgerControl({ async replay() { return [] as never; } });
+
+    await expect(control.currentDial?.('m-1')).resolves.toBeNull();
+  });
+});

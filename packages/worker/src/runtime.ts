@@ -154,6 +154,34 @@ export function createLedgerControl(reader: ControlReader, missionId = ''): Cont
       }
       return total;
     },
+
+    /**
+     * The autonomy dial as the operator last set it (defect `0d39d84b`).
+     *
+     * Last-wins rather than summed: unlike budget grants, turning a dial
+     * replaces the setting rather than adding to it.
+     *
+     * `null` on failure or absence, so the contract's own dial governs — the
+     * mission behaves as it was commissioned when the trail says nothing.
+     */
+    async currentDial(_missionId: string) {
+      let events: Array<{ taskId: string | null; type: string; payload?: Record<string, unknown> }>;
+      try {
+        events = await reader.replay({ missionId });
+      } catch {
+        return null;
+      }
+
+      let dial: 'autonomous' | 'checkpointed' | 'supervised' | null = null;
+      for (const event of events) {
+        if (event.type !== 'operator.dial_turned') continue;
+        const value = event.payload?.['autonomyDial'];
+        if (value === 'autonomous' || value === 'checkpointed' || value === 'supervised') {
+          dial = value;
+        }
+      }
+      return dial;
+    },
   };
 }
 
