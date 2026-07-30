@@ -42,6 +42,14 @@ export interface RegistryLookup {
     readonly roleInstructions: string;
     readonly capabilities: string[];
     /**
+     * The design this one was derived from, if any (R28 AC-0).
+     *
+     * Only a REDESIGN has a parent. A design authored because nothing bid is an
+     * origin, and attributing a parent to it would invent lineage the system
+     * never had — which the clade query would then aggregate as if it were real.
+     */
+    readonly parentDesignId?: string | null;
+    /**
      * The checks this design's work will be graded against (R28 AC-2).
      *
      * Carried at registration because permanence is decided on harness
@@ -78,6 +86,20 @@ export interface DesignAuthor {
 }
 
 export interface StaffOptions {
+  /**
+   * The design this staffing REPLACES, when the ladder reached `agent_redesign`
+   * (R28 AC-0).
+   *
+   * Absent for ordinary staffing, which must keep reusing a proven incumbent —
+   * a redesign path leaking into normal staffing would author a fresh design per
+   * task and undo R38's reuse market entirely.
+   *
+   * `null` means the rung was reached but there is no incumbent to derive from,
+   * which makes the new design an ORIGIN rather than pointing at a design that
+   * does not exist and breaking the clade recursion on a dangling id.
+   */
+  readonly redesignFrom?: string | null;
+
   readonly contract: TaskContract;
   readonly registry: RegistryLookup;
   readonly author: DesignAuthor;
@@ -249,7 +271,7 @@ function harnessFor(contract: TaskContract): { checks: string[] } {
  * budget equivalent of grading your own homework.
  */
 export async function staff(options: StaffOptions): Promise<CapabilityManifest> {
-  const { contract, registry, author } = options;
+  const { contract, registry, author, redesignFrom } = options;
 
   // Resolve the planner's freshly-invented category against what the registry
   // already knows (R38 AC-0), so a taxonomy converges instead of growing by one
@@ -258,7 +280,11 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
   const known = await registry.knownCapabilities?.().catch(() => []) ?? [];
   const capability = resolveCapability(contract.category, known);
 
-  const bid = await registry.bestForCategory(capability);
+  // A REDESIGN never reuses (R28 AC-0). Every other rung of the ladder changes
+  // who or how much runs; `agent_redesign` is the one that changes the DESIGN,
+  // so staffing the incumbent again would leave the rung doing nothing — which
+  // is exactly what it did before this existed.
+  const bid = redesignFrom === undefined ? await registry.bestForCategory(capability) : null;
   const proven = bid !== null && bid.cladeScore !== null && bid.observations >= PROVEN_OBSERVATIONS;
 
   let design;
@@ -273,7 +299,16 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
       capabilities: bid.capabilities,
     };
   } else {
-    design = { designId: designIdForCapability(capability), version: 1, ...(await author.design({ contract })) };
+    // A redesign must not collide with its parent: `designIdForCapability` is
+    // deterministic per capability, so a second design for the same capability
+    // would otherwise reuse the parent's id and the lineage would be a self-edge.
+    // Deriving from the parent id keeps it deterministic — the same redesign of
+    // the same design always lands on the same id, so a replay is faithful.
+    const designId = typeof redesignFrom === 'string'
+      ? designIdForCapability(`${capability}#redesign-of-${redesignFrom}`)
+      : designIdForCapability(capability);
+
+    design = { designId, version: 1, ...(await author.design({ contract })) };
 
     // Creation feeds the market it is the exception to. Without this the
     // registry never learns the design exists, so the next task of the same
@@ -292,6 +327,10 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
       roleInstructions: design.roleInstructions,
       capabilities: design.capabilities,
       validationHarness: harnessFor(contract),
+      // Null rather than absent when there is nothing to derive from, so the
+      // registry stores an explicit "this is an origin" rather than leaving the
+      // column to whatever a previous write happened to put there.
+      parentDesignId: typeof redesignFrom === 'string' ? redesignFrom : null,
     }).catch(() => undefined);
 
     // Report the version the registry actually holds. Registration is

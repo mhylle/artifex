@@ -27,6 +27,8 @@ export interface AssetStore {
     readonly category: string;
     readonly roleInstructions: string;
     readonly capabilities: string[];
+    /** Set only for a redesign (R28 AC-0); null marks an origin explicitly. */
+    readonly parentDesignId?: string | null;
     readonly validationHarness?: { readonly checks: string[] };
   }): Promise<{ readonly version: number }>;
   recordOutcome(designId: string, score: number, effort?: number): Promise<unknown>;

@@ -964,6 +964,18 @@ export async function runMission(
             contract: child,
             registry: seams.registry,
             author: seams.author,
+            // The `agent_redesign` rung, ENACTED (R28 AC-0). Until now it was a
+            // name in the ladder that changed nothing: the loop climbed past it
+            // and staffed the same design again. A redesign is derived from the
+            // design that failed, so this is where lineage is born — and the
+            // clade score has had a recursive query and no ancestry to walk
+            // since R28 (defect `cb939996`).
+            //
+            // `undefined` on every other rung, so ordinary staffing keeps
+            // reusing a proven incumbent and R38's reuse market is untouched.
+            ...(rungIndex >= 0 && ladder[rungIndex] === 'agent_redesign'
+              ? { redesignFrom: manifest?.designId ?? null }
+              : {}),
             // Both derived, and both previously supplied by nobody: the tier
             // policy has always accepted them and always received defaults.
             fanIn: children.filter((c) => c.dependencies.consumesTaskIds.includes(child.taskId)).length,
