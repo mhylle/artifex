@@ -94,3 +94,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .requester .questions li { padding: .45rem .6rem; border: 1px solid #eee; border-radius: 6px; }
 .requester .questions .objective { margin: 0 0 .25rem; font-weight: 500; font-size: .85rem; }
 .requester .findings li { border: 0; padding: 0; font-size: .78rem; color: #666; }
+
+/* A node the decompose-or-delegate gate kept whole (R31). */
+.kept-whole { border: 1px dashed #b98b3a; border-radius: 8px; padding: .75rem .9rem; background: #fdf8ee; }
+.kept-whole .headline { margin: 0 0 .3rem; font-weight: 600; font-size: .88rem; color: #8a5a10; }
+.kept-whole .why { margin: 0 0 .4rem; font-size: .84rem; color: #444; }
+.kept-whole .hint { margin: 0; font-size: .78rem; color: #777; }

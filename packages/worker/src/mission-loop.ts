@@ -47,6 +47,25 @@ export interface Clarifier {
 }
 
 /**
+ * The decompose-or-delegate gate (R31).
+ *
+ * "Atomization is a weapon to aim, not a reflex." Work that is inherently
+ * sequential and constraint-entangled is measurably *damaged* by splitting, so
+ * the Orchestrator asks at every node whether to split at all — and the answer,
+ * either way, is recorded.
+ *
+ * Optional: a runtime without a gate still runs, and records that it defaulted
+ * to splitting. Silence would leave every such mission claiming a decision it
+ * never made.
+ */
+export interface DecompositionGate {
+  assess(input: { readonly contract: TaskContract }): Promise<{
+    readonly keepWhole: boolean;
+    readonly rationale: string;
+  }>;
+}
+
+/**
  * The operator's control signals, derived from the ledger (R17).
  *
  * Deliberately a *query* rather than a stored flag: pause and cancel are facts
@@ -91,6 +110,12 @@ export interface MissionSeams {
    * every existing caller predates operator control.
    */
   readonly control?: ControlSignals;
+  /**
+   * Optional (R31). Absent means "always split", which is what every caller
+   * predating the gate did — but the default is still RECORDED, so no mission
+   * silently claims a judgement nobody made.
+   */
+  readonly decompositionGate?: DecompositionGate;
 }
 
 export interface Escalation {
@@ -423,15 +448,59 @@ export async function runMission(
   };
 
   const runSubtree = async (parent: TaskContract, depth: number): Promise<SubtreeOutcome> => {
+    // ---- decompose-or-delegate (R31) -----------------------------------------
+    // Asked BEFORE any splitting, because the question is whether to split at
+    // all. Work that is inherently sequential and constraint-entangled is
+    // damaged by being cut up, so the Orchestrator aims atomization rather than
+    // reflexively applying it.
+    //
+    // Skipped on resume: the decision is already in the trail, and re-deciding
+    // could reach a different answer than the tree that was actually built.
+    const alreadyDecided = prior.childrenOf.has(parent.taskId) || prior.verified.has(parent.taskId);
+    let keepWhole = false;
+
+    if (!alreadyDecided) {
+      let verdict: { keepWhole: boolean; rationale: string };
+      if (seams.decompositionGate === undefined) {
+        // Recorded even with no gate configured. A default that recorded nothing
+        // would leave the mission claiming a judgement nobody made — the exact
+        // shape of the "value written that nothing reads" defects this project
+        // has shipped repeatedly, inverted.
+        verdict = { keepWhole: false, rationale: 'No decompose-or-delegate gate configured — defaulting to split.' };
+      } else {
+        try {
+          verdict = await seams.decompositionGate.assess({ contract: parent });
+        } catch (error) {
+          // A gate that cannot answer must not cost the mission: splitting is
+          // the behaviour every caller had before the gate existed.
+          verdict = { keepWhole: false, rationale: `Gate could not be evaluated (${describe(error)}) — defaulting to split.` };
+        }
+      }
+
+      keepWhole = verdict.keepWhole;
+      record(parent.taskId, 'decision', 'decomposition.decided', 'orchestrator', {
+        decision: keepWhole ? 'keep_whole' : 'split',
+        rationale: verdict.rationale,
+        objective: parent.objective,
+        // The budget the decision implies, so a reviewer can see what "a larger
+        // budget" actually meant here rather than inferring it.
+        ceiling: parent.budget.ceiling,
+        criterionCount: parent.acceptanceCriteria.length,
+      });
+    }
+
     // ---- decompose -----------------------------------------------------------
     // A seam that throws is a *failure*, not a crash. Model calls fail for real
     // reasons — a small model running away under constrained decoding, a backend
     // timing out — and a mission that dies on one of those loses its whole ledger
     // trail and tells the operator nothing. Surrender is the designed outcome for
     // "cannot proceed"; an unhandled exception is not.
-    let children;
+    let children: TaskContract[] = [];
     const recovered = prior.childrenOf.get(parent.taskId);
-    if (recovered !== undefined && recovered.length > 0) {
+    if (keepWhole) {
+      // Deliberately nothing: the node is handed whole to a single agent below,
+      // with its own full budget rather than a share of it.
+    } else if (recovered !== undefined && recovered.length > 0) {
       // Rebuilt from the trail, so every id is the one it had before — which is
       // what makes an operator's earlier decision still refer to this task.
       children = recovered;
@@ -478,7 +547,9 @@ export async function runMission(
     // Skipped when the plan came from the trail: it was gated when it was first
     // proposed, and re-gating an unchanged plan would spend a model call to
     // re-derive a verdict the ledger already holds.
-    if (recovered === undefined || recovered.length === 0) {
+    // Nothing to audit when nothing was split: Gate A grades a decomposition,
+    // and a node kept whole has none. Its work is still verified at Gate B.
+    if (!keepWhole && (recovered === undefined || recovered.length === 0)) {
     let aVerdict;
     try {
       aVerdict = await gateA(parent, children, seams.coverageJudge, verdictMeta(seq));
@@ -502,7 +573,7 @@ export async function runMission(
       | { readonly kind: 'skip'; readonly taskId: string }
       | { readonly kind: 'fail'; readonly outcome: SubtreeOutcome };
 
-    const runChild = async (contracted: TaskContract): Promise<ChildOutcome> => {
+    const runChild = async (contracted: TaskContract, asLeaf = false): Promise<ChildOutcome> => {
       let child = contracted;
 
       // Already done, per the trail. Re-running it would spend budget to
@@ -518,7 +589,11 @@ export async function runMission(
       // execute. This is the recursion the dossier specifies — "splitting
       // continues until each leaf carries exactly one responsibility with one
       // verifiable outcome — and no further".
-      if (!isAtomic(child) && depth + 1 < depthBound) {
+      // `asLeaf` is the decompose-or-delegate gate's decision made binding
+      // (R31). Without it a kept-whole node carrying several criteria would be
+      // found non-atomic here and split one level down — the gate would appear
+      // to work while changing nothing at all.
+      if (!asLeaf && !isAtomic(child) && depth + 1 < depthBound) {
         const sub = await runSubtree(child, depth + 1);
         if (!sub.ok) return { kind: 'fail', outcome: sub };
         return { kind: 'done', taskId: child.taskId, objective: child.objective, deliverable: sub.deliverable };
@@ -790,6 +865,22 @@ export async function runMission(
 
       return { kind: 'done', taskId: child.taskId, objective: child.objective, deliverable: delivered };
     };
+
+    // ---- kept whole: one agent, the node's own full budget (R31 AC-1) --------
+    if (keepWhole) {
+      const outcome = await runChild(parent, true);
+      if (outcome.kind === 'fail') return outcome.outcome;
+      if (outcome.kind === 'skip') {
+        return fail(
+          `task ${parent.taskId} was cancelled`,
+          [`"${parent.objective}" was cancelled by an operator before it produced anything`],
+        );
+      }
+      // No fold-up: there are no siblings to reconcile. Folding one deliverable
+      // would spend a model call to rephrase it, and rephrasing is exactly the
+      // damage keeping the work whole was meant to avoid.
+      return { ok: true, deliverable: outcome.deliverable };
+    }
 
     // ---- schedule across the dependency graph (R32) ---------------------------
     // Everything whose declared inputs are satisfied runs at once; only a real

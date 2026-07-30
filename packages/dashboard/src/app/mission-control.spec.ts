@@ -1158,3 +1158,71 @@ describe('MissionControl — canvas dependency edges (R15 AC-0)', () => {
     expect(chips.join(' ')).toContain('t-elsewhere');
   });
 });
+
+/**
+ * R31 — a mission the gate kept WHOLE must not look like a mission that never
+ * started.
+ *
+ * When the decompose-or-delegate gate declines to split, no child task is ever
+ * contracted, so the canvas has no nodes to draw — and its empty state said
+ * "No tasks contracted yet." on a mission that had run three attempts and been
+ * verified three times. That is the one thing the canvas must never do: be
+ * quietly less complete than the ledger, so the operator cannot tell a missing
+ * node from a finished one.
+ */
+describe('MissionControl — a node kept whole by the gate (R31)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let feed: LedgerFeed;
+
+  const keptWhole = () => [
+    ev(1, 'mission.started', MISSION, { objective: 'Compose a single limerick.' }),
+    ev(2, 'decomposition.decided', MISSION, {
+      decision: 'keep_whole',
+      rationale: 'Rhyme and metre constrain each other; splitting would damage it.',
+      ceiling: 30,
+    }),
+    ev(3, 'agent.staffed', MISSION, { designId: 'poet', version: 1, logicalTier: 1 }),
+    ev(4, 'task.executed', MISSION, { effortSpent: 4, ceiling: 30 }),
+  ];
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    feed = TestBed.inject(LedgerFeed);
+  });
+
+  it('says the work was kept whole, and why, instead of "no tasks contracted"', () => {
+    feed.events.set(keptWhole());
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toMatch(/kept whole/i);
+    expect(text).toContain('Rhyme and metre constrain each other');
+    expect(text, 'the old message is a lie on this mission').not.toContain('No tasks contracted yet');
+  });
+
+  it('DISTRACTOR: a mission that genuinely has not started yet still says so', () => {
+    // Without this, "always claim it was kept whole" would pass the test above
+    // and mislabel every mission that is merely still decomposing.
+    feed.events.set([ev(1, 'mission.started', MISSION, { objective: 'Something else.' })]);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('No tasks contracted yet');
+  });
+
+  it('DISTRACTOR: a mission the gate SPLIT shows its nodes, not the kept-whole notice', () => {
+    feed.events.set([
+      ev(1, 'mission.started', MISSION, { objective: 'Two things.' }),
+      ev(2, 'decomposition.decided', MISSION, { decision: 'split', rationale: 'Unrelated.', ceiling: 30 }),
+      ev(3, 'task.contracted', 't-a', { objective: 'Thing one.', parentTaskId: MISSION }),
+    ]);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Thing one.');
+    expect(text).not.toMatch(/kept whole/i);
+  });
+});

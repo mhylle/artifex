@@ -326,7 +326,19 @@
           />
         </li>
       } @empty {
-        <li class="empty">No tasks contracted yet.</li>
+        @if (keptWhole(); as gate) {
+          <li class="kept-whole">
+            <p class="headline">Kept whole — not split into subtasks.</p>
+            <p class="why">{{ gate.rationale }}</p>
+            <p class="hint">
+              The decompose-or-delegate gate judged this work too entangled to divide, so one agent
+              holds the whole objective on the mission's full budget. Its execution is on the
+              timeline and in the ledger.
+            </p>
+          </li>
+        } @else {
+          <li class="empty">No tasks contracted yet.</li>
+        }
       }
     </ul>
 

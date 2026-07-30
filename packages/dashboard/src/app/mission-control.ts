@@ -92,6 +92,23 @@ export class MissionControl implements OnInit {
   readonly requesterView = computed(() => buildRequesterView(this.visibleEvents()));
 
   /**
+   * The decompose-or-delegate gate's verdict for this node, when it declined to
+   * split (R31).
+   *
+   * A kept-whole mission contracts no children, so the canvas has nothing to
+   * draw — and "No tasks contracted yet" is then a lie about a mission that ran.
+   * The canvas must never be quietly less complete than the ledger.
+   */
+  readonly keptWhole = computed(() => {
+    const decision = [...this.visibleEvents()]
+      .reverse()
+      .find((event) => event.type === 'decomposition.decided');
+    if (decision === undefined || decision.payload['decision'] !== 'keep_whole') return null;
+    const rationale = decision.payload['rationale'];
+    return { rationale: typeof rationale === 'string' ? rationale : '' };
+  });
+
+  /**
    * `taskId` → objective for every task in the moment being shown, so a
    * dependency edge can name the task it points at rather than counting them
    * (R15 AC-0). Built from the same projection the canvas draws, so it cannot

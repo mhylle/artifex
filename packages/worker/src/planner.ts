@@ -289,6 +289,23 @@ export const CriterionAssignmentSchema = Type.Object(
 );
 
 /**
+ * Split this node, or keep it whole for one agent? (R31)
+ *
+ * Two shallow fields, and the boolean is `keepWhole` rather than `split` on
+ * purpose: the safe default is to split, and an absent or malformed field then
+ * reads as `false` — the behaviour every caller had before the gate existed. A
+ * `split` field would fail the other way, quietly collapsing the swarm into a
+ * single agent whenever the model hesitated.
+ */
+export const DecomposeOrDelegateSchema = Type.Object(
+  {
+    keepWhole: Type.Boolean(),
+    rationale: Type.String({ minLength: 1 }),
+  },
+  { $id: 'DecomposeOrDelegate', additionalProperties: false },
+);
+
+/**
  * Which sibling each subtask consumes (R32).
  *
  * `dependsOn[i]` is the index of the subtask whose output subtask `i` needs, or

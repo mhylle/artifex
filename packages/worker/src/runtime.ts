@@ -18,7 +18,7 @@
 import { Type } from '@sinclair/typebox';
 
 import type { ControlSignals } from './mission-loop.js';
-import { createModelReconciler, createStepwisePlanner } from './planner.js';
+import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
 import type { MissionSeams } from './mission-loop.js';
 
@@ -206,6 +206,43 @@ export function createMissionSeams(
       provider: models.evaluator.provider,
       model: models.evaluator.model,
     }),
+
+    /**
+     * The decompose-or-delegate gate (R31).
+     *
+     * Runs on the EVALUATIVE tier, not the worker tier: "should this be split"
+     * is a judgement about the shape of the work, and fold-up taught us that
+     * evaluative questions belong a tier above the doing (insight `1aad1dd5`).
+     *
+     * The prompt asks for the entangled case explicitly rather than for a
+     * general opinion, because the default has to be splitting — a gate that
+     * kept everything whole would quietly turn the swarm back into one agent.
+     */
+    decompositionGate: {
+      async assess({ contract }) {
+        const out = (await gen(models.evaluator, DecomposeOrDelegateSchema, [
+          'Decide whether this work should be SPLIT into independent subtasks or KEPT WHOLE for one agent.',
+          '',
+          'Keep it whole only when the parts are so entangled that splitting would damage the result:',
+          'when each part constrains the others, when it must be done in one continuous line of reasoning,',
+          'or when a later part cannot be written without holding the earlier part in mind.',
+          'Otherwise split — most work splits cleanly, and splitting is the default.',
+          '',
+          `OBJECTIVE: ${contract.objective}`,
+          'MUST SATISFY:',
+          ...contract.acceptanceCriteria.map((c) => `  - ${c.statement}`),
+        ].join('\n'))) as { keepWhole?: unknown; rationale?: unknown };
+
+        // Anything malformed reads as "split": that is what every caller did
+        // before the gate existed, so a confused model costs nothing.
+        return {
+          keepWhole: out.keepWhole === true,
+          rationale: typeof out.rationale === 'string' && out.rationale.length > 0
+            ? out.rationale
+            : 'The gate returned no rationale.',
+        };
+      },
+    },
 
     coverageJudge: {
       async assess({ parent, children }) {
