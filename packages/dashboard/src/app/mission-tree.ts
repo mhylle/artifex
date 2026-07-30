@@ -41,6 +41,11 @@ export interface TaskNode {
   readonly logicalTier: number | null;
   readonly escalations: number;
   readonly blastRadius: string | null;
+  /** The kind of specialist this task is staffed by — shown on the node (R15). */
+  readonly category: string | null;
+  readonly parentTaskId: string | null;
+  /** Sibling outputs this task consumes — the canvas's dependency edges. */
+  readonly dependsOn: readonly string[];
   readonly children: TaskNode[];
 }
 
@@ -59,6 +64,9 @@ interface Accumulator {
   logicalTier: number | null;
   escalations: number;
   blastRadius: string | null;
+  category: string | null;
+  parentTaskId: string | null;
+  dependsOn: string[];
 }
 
 function str(payload: Record<string, unknown>, key: string): string | null {
@@ -86,6 +94,7 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
     if (existing !== undefined) return existing;
     const created: Accumulator = {
       objective: '', status: 'contracted', logicalTier: null, escalations: 0, blastRadius: null,
+      category: null, parentTaskId: null, dependsOn: [],
     };
     tasks.set(taskId, created);
     order.push(taskId);
@@ -113,6 +122,10 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
         const node = touch(taskId);
         node.objective = str(payload, 'objective') ?? '';
         node.blastRadius = str(payload, 'blastRadius');
+        node.category = str(payload, 'category');
+        node.parentTaskId = str(payload, 'parentTaskId');
+        const consumes = payload['dependsOn'];
+        node.dependsOn = Array.isArray(consumes) ? consumes.map(String) : [];
         node.status = 'contracted';
         break;
       }
@@ -165,17 +178,67 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
     status: missionStatus,
     blockers,
     eventCount: ordered.length,
-    children: order.map((taskId) => {
-      const node = tasks.get(taskId)!;
-      return {
-        taskId,
-        objective: node.objective,
-        status: node.status,
-        logicalTier: node.logicalTier,
-        escalations: node.escalations,
-        blastRadius: node.blastRadius,
-        children: [],
-      };
-    }),
+    children: nest(order, tasks, missionId),
   };
+}
+
+/**
+ * Fold the flat accumulator map into the parent/child graph the canvas draws.
+ *
+ * Two safeguards, both because this data is written by a model-driven loop and
+ * arrives over a websocket rather than being constructed here:
+ *
+ *  - **An unknown parent does not lose the task.** It is attached at the root
+ *    instead. A canvas quietly less complete than the ledger is the one thing it
+ *    must never be — the operator cannot tell a missing node from a finished one.
+ *  - **A parent cycle terminates.** Two tasks naming each other must degrade to
+ *    a flat rendering, not spin the browser.
+ */
+function nest(
+  order: readonly string[],
+  tasks: ReadonlyMap<string, Accumulator>,
+  missionId: string,
+): TaskNode[] {
+  const nodes = new Map<string, TaskNode>();
+  for (const taskId of order) {
+    const acc = tasks.get(taskId)!;
+    nodes.set(taskId, {
+      taskId,
+      objective: acc.objective,
+      status: acc.status,
+      logicalTier: acc.logicalTier,
+      escalations: acc.escalations,
+      blastRadius: acc.blastRadius,
+      category: acc.category,
+      parentTaskId: acc.parentTaskId,
+      dependsOn: acc.dependsOn,
+      children: [],
+    });
+  }
+
+  /** Walks up the recorded parents; returns false if the chain loops. */
+  const reachesRoot = (from: string): boolean => {
+    const seen = new Set<string>([from]);
+    let cursor = tasks.get(from)?.parentTaskId ?? null;
+    while (cursor !== null && cursor !== missionId) {
+      if (seen.has(cursor) || !nodes.has(cursor)) return false;
+      seen.add(cursor);
+      cursor = tasks.get(cursor)?.parentTaskId ?? null;
+    }
+    return true;
+  };
+
+  const roots: TaskNode[] = [];
+  for (const taskId of order) {
+    const node = nodes.get(taskId)!;
+    const parentId = node.parentTaskId;
+    const parent = parentId === null || parentId === missionId ? undefined : nodes.get(parentId);
+
+    if (parent === undefined || !reachesRoot(taskId)) {
+      roots.push(node);
+      continue;
+    }
+    parent.children.push(node);
+  }
+  return roots;
 }

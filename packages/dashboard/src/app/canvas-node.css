@@ -1,0 +1,59 @@
+/*
+ * State is border + icon + label. Colour is layered on top of markings that
+ * already carry the meaning, never used as the only signal — the canvas has to
+ * read correctly in greyscale and to a colour-blind operator.
+ */
+:host { display: block; }
+
+.node-row { display: flex; align-items: stretch; gap: .25rem; }
+
+.twisty {
+  flex: 0 0 1.4rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #666;
+  font-size: .8rem;
+  padding: 0;
+}
+.twisty.spacer { cursor: default; }
+
+.node {
+  flex: 1;
+  display: flex;
+  gap: .55rem;
+  align-items: center;
+  text-align: left;
+  font: inherit;
+  padding: .45rem .7rem;
+  margin: .15rem 0;
+  background: #fff;
+  cursor: pointer;
+  border: 1px solid #d8d8d8;
+  border-left-width: 4px;
+  border-radius: 6px;
+}
+.node:hover { border-color: #5a78c8; }
+.node.selected { outline: 2px solid #5a78c8; outline-offset: 1px; }
+
+.icon { font-size: .95rem; width: 1rem; text-align: center; }
+.state { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; color: #444; min-width: 5.5rem; }
+.objective { flex: 1; }
+.category, .tier, .esc, .deps { font-size: .72rem; color: #666; white-space: nowrap; }
+.category { background: #f2f2f5; border-radius: 3px; padding: .1rem .35rem; }
+
+/* Border STYLE varies with state as well as colour, so the distinction survives
+   greyscale printing and colour-blindness. */
+.node[data-status='verified']   { border-left-color: #1f6b40; }
+.node[data-status='failed']     { border-left-color: #9c2b23; border-left-style: solid; }
+.node[data-status='bounced']    { border-left-color: #a8700f; border-left-style: dashed; }
+.node[data-status='executing']  { border-left-color: #33477d; }
+.node[data-status='staffed']    { border-left-color: #5a78c8; border-left-style: dotted; }
+.node[data-status='contracted'] { border-left-color: #bbb; border-left-style: dotted; }
+
+.children {
+  list-style: none;
+  margin: 0 0 0 1.1rem;
+  padding: 0 0 0 .75rem;
+  border-left: 1px solid #e4e4e4;
+}

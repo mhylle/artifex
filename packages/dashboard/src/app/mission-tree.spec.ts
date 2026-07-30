@@ -101,3 +101,72 @@ describe('R10 AC-2 — the task tree renders from ledger events', () => {
     expect(tree?.blockers).toEqual(['no source']);
   });
 });
+
+/**
+ * R15 — the canvas lens needs structure the flat list never carried: each
+ * node's category, its parent, and what it depends on. Edges cannot be drawn
+ * from data that was never recorded.
+ */
+describe('R15 — the projection carries the graph, not just a list', () => {
+  const ev = (seq: number, type: string, taskId: string | null, payload: Record<string, unknown> = {}) =>
+    ({ seq, eventId: `e-${seq}`, missionId: 'm-1', taskId, family: 'contract', type, payload });
+
+  it('AC-0: a task carries its category and its parent', () => {
+    const tree = buildMissionTree([
+      ev(1, 'mission.started', 'm-1', { objective: 'Root' }),
+      ev(2, 'task.contracted', 't-a', { objective: 'A', category: 'research', parentTaskId: 'm-1' }),
+    ]);
+
+    expect(tree?.children[0]?.category).toBe('research');
+    expect(tree?.children[0]?.parentTaskId).toBe('m-1');
+  });
+
+  it('AC-0: a task carries the sibling outputs it consumes', () => {
+    const tree = buildMissionTree([
+      ev(1, 'mission.started', 'm-1', { objective: 'Root' }),
+      ev(2, 'task.contracted', 't-a', { objective: 'A', parentTaskId: 'm-1' }),
+      ev(3, 'task.contracted', 't-b', { objective: 'B', parentTaskId: 'm-1', dependsOn: ['t-a'] }),
+    ]);
+
+    const b = tree?.children.find((c) => c.taskId === 't-b');
+    expect(b?.dependsOn).toEqual(['t-a']);
+  });
+
+  it('AC-0: children nest under their parent rather than sitting in one flat row', () => {
+    const tree = buildMissionTree([
+      ev(1, 'mission.started', 'm-1', { objective: 'Root' }),
+      ev(2, 'task.contracted', 't-a', { objective: 'A', parentTaskId: 'm-1' }),
+      ev(3, 'task.contracted', 't-a1', { objective: 'A1', parentTaskId: 't-a' }),
+    ]);
+
+    expect(tree?.children).toHaveLength(1);
+    expect(tree?.children[0]?.taskId).toBe('t-a');
+    expect(tree?.children[0]?.children[0]?.taskId).toBe('t-a1');
+  });
+
+  it('DISTRACTOR: a task whose parent was never recorded still appears, at the root', () => {
+    // Losing a task because its parent event is missing would make the canvas
+    // quietly less complete than the ledger — the one thing it must never be.
+    const tree = buildMissionTree([
+      ev(1, 'mission.started', 'm-1', { objective: 'Root' }),
+      ev(2, 'task.contracted', 't-orphan', { objective: 'Orphan', parentTaskId: 'nobody' }),
+    ]);
+
+    expect(tree?.children.map((c) => c.taskId)).toContain('t-orphan');
+  });
+
+  it('DISTRACTOR: a cycle in the recorded parents does not hang the projection', () => {
+    // The ledger is append-only and written by a model-driven loop; a malformed
+    // pair must degrade, not spin forever.
+    const tree = buildMissionTree([
+      ev(1, 'mission.started', 'm-1', { objective: 'Root' }),
+      ev(2, 'task.contracted', 't-x', { objective: 'X', parentTaskId: 't-y' }),
+      ev(3, 'task.contracted', 't-y', { objective: 'Y', parentTaskId: 't-x' }),
+    ]);
+
+    expect(tree).not.toBeNull();
+    const ids = JSON.stringify(tree);
+    expect(ids).toContain('t-x');
+    expect(ids).toContain('t-y');
+  });
+});

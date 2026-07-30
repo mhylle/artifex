@@ -1,0 +1,48 @@
+@let task = node();
+@let mark = glyph(task.status);
+
+<div class="node-row">
+  @if (task.children.length) {
+    <button
+      type="button"
+      class="twisty"
+      (click)="toggle()"
+      [attr.aria-expanded]="!collapsed()"
+      [attr.aria-label]="(collapsed() ? 'Expand ' : 'Collapse ') + task.objective"
+    >{{ collapsed() ? '▸' : '▾' }}</button>
+  } @else {
+    <span class="twisty spacer"></span>
+  }
+
+  <button
+    type="button"
+    class="node"
+    [attr.data-status]="task.status"
+    [class.selected]="task.taskId === selectedTaskId()"
+    (click)="selectTask.emit(task.taskId)"
+  >
+    <span class="icon" aria-hidden="true">{{ mark.icon }}</span>
+    <span class="state">{{ mark.label }}</span>
+    <span class="objective">{{ task.objective || task.taskId }}</span>
+    @if (task.category) { <span class="category">{{ task.category }}</span> }
+    @if (task.logicalTier !== null) { <span class="tier">tier {{ task.logicalTier }}</span> }
+    @if (task.escalations) { <span class="esc">↑{{ task.escalations }}</span> }
+    @if (task.dependsOn.length) {
+      <span class="deps">after {{ task.dependsOn.length }}</span>
+    }
+  </button>
+</div>
+
+@if (task.children.length && !collapsed()) {
+  <ul class="children">
+    @for (child of task.children; track child.taskId) {
+      <li>
+        <app-canvas-node
+          [node]="child"
+          [selectedTaskId]="selectedTaskId()"
+          (selectTask)="selectTask.emit($event)"
+        />
+      </li>
+    }
+  </ul>
+}

@@ -252,3 +252,87 @@ describe('MissionControl — fleet rail (R21)', () => {
     expect(fixture.nativeElement.textContent).toContain('Failed to fetch');
   });
 });
+
+/**
+ * R15 AC-2/AC-3 — the canvas is a way of LOOKING at the ledger.
+ *
+ * Collapse, focus and zoom are properties of the viewer, not of the mission.
+ * If any of them could alter what the projection reports, the dashboard would
+ * have become a second truth (invariant #1).
+ */
+describe('MissionControl — canvas lens (R15)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let component: MissionControl;
+  let feed: LedgerFeed;
+
+  const nested = () => [
+    ev(1, 'mission.started', MISSION, { objective: 'Root' }),
+    ev(2, 'task.contracted', 't-a', { objective: 'Part A', category: 'research', parentTaskId: MISSION }),
+    ev(3, 'task.contracted', 't-a1', { objective: 'Part A1', category: 'research', parentTaskId: 't-a' }),
+  ];
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    component = fixture.componentInstance;
+    feed = TestBed.inject(LedgerFeed);
+  });
+
+  it('AC-0: renders the node with its category alongside objective and state', () => {
+    feed.events.set(nested());
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Part A');
+    expect(text).toContain('research');
+    expect(text).toContain('contracted');
+  });
+
+  it('AC-2 DISTRACTOR: focusing a subtree does not change the projection', () => {
+    // The canvas may show less; the ledger must still report everything.
+    feed.events.set(nested());
+    fixture.detectChanges();
+    const before = JSON.stringify(feed.tree());
+
+    component.focus('t-a');
+    fixture.detectChanges();
+
+    expect(component.visibleNodes()).toHaveLength(1);
+    expect(JSON.stringify(feed.tree())).toBe(before);
+    expect(feed.events()).toHaveLength(3);
+  });
+
+  it('AC-3: the breadcrumb shows the path from task zero to the focused subtree', () => {
+    feed.events.set(nested());
+    fixture.detectChanges();
+
+    component.focus('t-a1');
+
+    expect(component.breadcrumb().map((n) => n.taskId)).toEqual(['t-a', 't-a1']);
+  });
+
+  it('AC-3 DISTRACTOR: zoom is bounded, so the canvas cannot be driven illegible', () => {
+    for (let i = 0; i < 40; i += 1) component.zoomOut();
+    expect(component.zoom()).toBeGreaterThanOrEqual(0.5);
+
+    for (let i = 0; i < 40; i += 1) component.zoomIn();
+    expect(component.zoom()).toBeLessThanOrEqual(2);
+
+    component.resetZoom();
+    expect(component.zoom()).toBe(1);
+  });
+
+  it('AC-3 DISTRACTOR: focusing a task that has since vanished falls back to the whole tree', () => {
+    // A focus pinned to a task the ledger no longer reports would otherwise
+    // render an empty canvas the operator cannot explain or escape.
+    feed.events.set(nested());
+    fixture.detectChanges();
+
+    component.focus('t-does-not-exist');
+
+    expect(component.visibleNodes().length).toBeGreaterThan(0);
+  });
+});

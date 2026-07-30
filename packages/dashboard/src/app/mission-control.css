@@ -32,3 +32,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .objective { flex: 1; }
 .tier, .esc { font-size: .75rem; color: #666; }
 .empty { color: #888; }
+.canvas-bar { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; justify-content: space-between; margin: .75rem 0 .25rem; }
+.breadcrumb { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; font-size: .78rem; }
+.breadcrumb button { border: none; background: none; padding: .1rem .2rem; color: #33477d; cursor: pointer; font: inherit; text-decoration: underline; }
+.zoom { display: flex; gap: .3rem; align-items: center; }
+.zoom button { padding: .15rem .5rem; font-size: .8rem; }
+.zoom .level { font-size: .72rem; color: #666; min-width: 2.6rem; text-align: right; }
+.canvas { list-style: none; padding: 0; margin: 0; }

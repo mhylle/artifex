@@ -90,18 +90,35 @@
       </ul>
     }
 
-    <ol class="tasks">
-      @for (task of tree.children; track task.taskId) {
-        <li [attr.data-status]="task.status">
-          <span class="badge">{{ task.status }}</span>
-          <span class="objective">{{ task.objective }}</span>
-          @if (task.logicalTier !== null) { <span class="tier">tier {{ task.logicalTier }}</span> }
-          @if (task.escalations) { <span class="esc">↑{{ task.escalations }}</span> }
+    <div class="canvas-bar">
+      <nav class="breadcrumb" aria-label="canvas path">
+        <button type="button" (click)="clearFocus()">task zero</button>
+        @for (crumb of breadcrumb(); track crumb.taskId) {
+          <span aria-hidden="true">›</span>
+          <button type="button" (click)="focus(crumb.taskId)">{{ crumb.objective || crumb.taskId }}</button>
+        }
+      </nav>
+      <div class="zoom">
+        <button type="button" (click)="zoomOut()" aria-label="zoom out">−</button>
+        <button type="button" (click)="resetZoom()">fit</button>
+        <button type="button" (click)="zoomIn()" aria-label="zoom in">+</button>
+        <span class="level">{{ zoomPercent() }}%</span>
+      </div>
+    </div>
+
+    <ul class="canvas" [style.zoom]="zoom()">
+      @for (task of visibleNodes(); track task.taskId) {
+        <li>
+          <app-canvas-node
+            [node]="task"
+            [selectedTaskId]="selectedTaskId()"
+            (selectTask)="selectTask($event)"
+          />
         </li>
       } @empty {
         <li class="empty">No tasks contracted yet.</li>
       }
-    </ol>
+    </ul>
   </section>
 } @else {
   <p class="empty">Watch a mission to see its trail.</p>

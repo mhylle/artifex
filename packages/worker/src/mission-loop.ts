@@ -172,7 +172,15 @@ export async function runMission(
   }
   for (const child of children) {
     record(child.taskId, 'contract', 'task.contracted', 'orchestrator', {
-      objective: child.objective, ceiling: child.budget.ceiling, blastRadius: child.blastRadius,
+      objective: child.objective,
+      ceiling: child.budget.ceiling,
+      blastRadius: child.blastRadius,
+      // The graph, not just the label (R15). Edges can only be drawn from data
+      // that was recorded — the canvas is a projection, so anything it needs to
+      // show has to exist in the trail first.
+      category: child.category,
+      parentTaskId: child.parentTaskId,
+      dependsOn: [...child.dependencies.consumesTaskIds],
     });
   }
 

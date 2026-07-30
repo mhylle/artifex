@@ -5,18 +5,20 @@
  * state: everything on screen is a `computed` over the raw event list, so what
  * the operator sees cannot disagree with the audit trail.
  */
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import type { OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
+import { CanvasNode } from './canvas-node';
 import { Fleet } from './fleet';
 import { LedgerFeed } from './ledger-feed';
 import { MissionIntake, toLines } from './mission-intake';
+import type { TaskNode } from './mission-tree';
 
 @Component({
   selector: 'app-mission-control',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, CanvasNode],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './mission-control.html',
   styleUrl: './mission-control.css',
@@ -34,6 +36,63 @@ export class MissionControl implements OnInit {
   readonly outOfScopeText = signal('');
   readonly submitting = signal(false);
   readonly error = signal<string | null>(null);
+
+  /**
+   * Canvas view state — zoom, which subtree is focused, which node is selected.
+   *
+   * All of it lives here and none of it in the projection: these are properties
+   * of *looking at* a mission, not facts about it, and the tree must remain a
+   * pure function of the ledger (invariant #1).
+   */
+  readonly selectedTaskId = signal<string | null>(null);
+  readonly focusedTaskId = signal<string | null>(null);
+  readonly zoom = signal(1);
+
+  readonly zoomPercent = computed(() => Math.round(this.zoom() * 100));
+
+  /** The path from task zero down to the focused subtree. */
+  readonly breadcrumb = computed(() => {
+    const focused = this.focusedTaskId();
+    if (focused === null) return [];
+    return pathTo(this.feed.tree()?.children ?? [], focused);
+  });
+
+  /** What the canvas draws: the whole tree, or the focused subtree. */
+  readonly visibleNodes = computed(() => {
+    const roots = this.feed.tree()?.children ?? [];
+    const focused = this.focusedTaskId();
+    if (focused === null) return roots;
+    const node = findTask(roots, focused);
+    // A focus that no longer exists falls back to the whole tree rather than
+    // rendering an empty canvas the operator cannot explain.
+    return node === null ? roots : [node];
+  });
+
+  selectTask(taskId: string): void {
+    this.selectedTaskId.set(taskId);
+  }
+
+  focus(taskId: string): void {
+    this.focusedTaskId.set(taskId);
+  }
+
+  clearFocus(): void {
+    this.focusedTaskId.set(null);
+  }
+
+  // Zoom is bounded so the canvas cannot be driven to a size nothing is legible
+  // at, in either direction.
+  zoomIn(): void {
+    this.zoom.update((z) => Math.min(2, Math.round((z + 0.1) * 10) / 10));
+  }
+
+  zoomOut(): void {
+    this.zoom.update((z) => Math.max(0.5, Math.round((z - 0.1) * 10) / 10));
+  }
+
+  resetZoom(): void {
+    this.zoom.set(1);
+  }
 
   ngOnInit(): void {
     // The rail is what makes this screen usable cold; fetch it before the
@@ -96,6 +155,26 @@ export class MissionControl implements OnInit {
       this.submitting.set(false);
     }
   }
+}
+
+/** Depth-first search for one task in the projected tree. */
+function findTask(nodes: readonly TaskNode[], taskId: string): TaskNode | null {
+  for (const node of nodes) {
+    if (node.taskId === taskId) return node;
+    const found = findTask(node.children, taskId);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/** The ancestors of `taskId`, task-zero-first, including the task itself. */
+function pathTo(nodes: readonly TaskNode[], taskId: string): TaskNode[] {
+  for (const node of nodes) {
+    if (node.taskId === taskId) return [node];
+    const below = pathTo(node.children, taskId);
+    if (below.length > 0) return [node, ...below];
+  }
+  return [];
 }
 
 /** Prefers the control plane's own words over a generic transport message. */
