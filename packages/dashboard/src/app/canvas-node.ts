@@ -59,6 +59,8 @@ export class CanvasNode {
   readonly node = input.required<TaskNode>();
   readonly selectedTaskId = input<string | null>(null);
   readonly selectTask = output<string>();
+  /** Drill into this subtree — the affordance the breadcrumb needs to exist. */
+  readonly focusTask = output<string>();
 
   /** View state only. Collapsing hides nothing from the ledger. */
   readonly collapsed = signal(false);

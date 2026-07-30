@@ -121,6 +121,75 @@ export function createModelPlanner(options: ModelSeamOptions): Planner {
   };
 }
 
+type Criterion = { readonly criterionId: string; readonly statement: string };
+
+/**
+ * Ask which subtask covers each parent criterion, and return the partition.
+ *
+ * Three properties this enforces regardless of what the model returns, because
+ * a small model returns indices that do not exist and piles everything on one
+ * subtask:
+ *
+ *  - **Nothing is lost.** An out-of-range or missing index falls back to a
+ *    round-robin slot, so every parent criterion lands somewhere. A dropped
+ *    criterion is a silently dropped requirement.
+ *  - **Nothing is invented.** Children can only hold criteria the parent had.
+ *  - **It strictly shrinks.** If the model puts every criterion on one subtask,
+ *    that is not a split — the criteria are redistributed round-robin instead,
+ *    so no child can equal its parent and recursion cannot fail to terminate.
+ */
+async function partitionCriteria(
+  ask: <T>(schema: unknown, prompt: string) => Promise<T>,
+  contract: TaskContract,
+  objectives: readonly string[],
+): Promise<Criterion[][]> {
+  const criteria = contract.acceptanceCriteria;
+
+  let assignments: number[] = [];
+  try {
+    const out = await ask<{ assignments: number[] }>(
+      CriterionAssignmentSchema,
+      [
+        `For each acceptance criterion, say which subtask covers it.`,
+        `Answer with one subtask number per criterion, in order.`,
+        ``,
+        `SUBTASKS:`,
+        ...objectives.map((o, i) => `  ${i}: ${o}`),
+        ``,
+        `CRITERIA:`,
+        ...criteria.map((c, i) => `  ${i}: ${c.statement}`),
+      ].join('\n'),
+    );
+    assignments = Array.isArray(out.assignments) ? out.assignments : [];
+  } catch {
+    // A failed assignment call is not a failed decomposition — fall through to
+    // the round-robin, which is a valid partition by construction.
+    assignments = [];
+  }
+
+  const slotFor = (index: number): number => {
+    const proposed = assignments[index];
+    const valid = typeof proposed === 'number' && Number.isInteger(proposed) && proposed >= 0 && proposed < objectives.length;
+    return valid ? proposed : index % objectives.length;
+  };
+
+  const build = (slot: (index: number) => number): Criterion[][] => {
+    const buckets: Criterion[][] = objectives.map(() => []);
+    criteria.forEach((criterion, index) => {
+      buckets[slot(index)]!.push({ criterionId: criterion.criterionId, statement: criterion.statement });
+    });
+    return buckets;
+  };
+
+  const buckets = build(slotFor);
+
+  // "All in one bucket" is the model declining to split. Redistributing is not
+  // second-guessing its judgement about *content* — it is refusing to accept a
+  // partition that would make the child identical to its parent.
+  const nonEmpty = buckets.filter((b) => b.length > 0).length;
+  return nonEmpty <= 1 ? build((index) => index % objectives.length) : buckets;
+}
+
 /** A reconciler backed by a real model, constrained by {@link ReconciliationSchema}. */
 export function createModelReconciler(options: ModelSeamOptions): Reconciler {
   return {
@@ -195,6 +264,22 @@ export const SingleSubtaskSchema = Type.Object(
 export const SubtaskOutlineSchema = Type.Object(
   { objectives: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 8 }) },
   { $id: 'SubtaskOutline', additionalProperties: false },
+);
+
+/**
+ * Which subtask covers each of the parent's criteria (defect `5e245281`).
+ *
+ * `assignments[i]` is the subtask index that covers the parent's criterion `i`.
+ * A flat array of integers keeps the shallow-schema discipline that `8b7e9e95`
+ * demanded — there is no nested object for the grammar to hold open.
+ *
+ * Asking for an assignment rather than for new criteria is what makes the tree
+ * shape follow the contract: children can only ever hold criteria their parent
+ * already had, so the count strictly shrinks and recursion terminates (ADR-0009).
+ */
+export const CriterionAssignmentSchema = Type.Object(
+  { assignments: Type.Array(Type.Integer({ minimum: 0 })) },
+  { $id: 'CriterionAssignment', additionalProperties: false },
 );
 
 /**
@@ -274,8 +359,21 @@ export function createStepwisePlanner(options: ModelSeamOptions): Planner {
       // will formalize. Two identical children never is.
       if (accepted.length === 0) accepted.push(contract.objective);
 
+      // Partition the parent's criteria across the accepted objectives. A parent
+      // with one criterion has nothing to partition, so its child's criterion is
+      // authored by the model as before — that is the only case where a new
+      // criterion is invented, and it is a leaf anyway.
+      const partition =
+        contract.acceptanceCriteria.length > 1 && accepted.length > 1
+          ? await partitionCriteria(ask, contract, accepted)
+          : null;
+
       const subtasks = [];
       for (const [index, objective] of accepted.entries()) {
+        const covered = partition?.[index] ?? null;
+        // A subtask covering nothing cannot be graded, so it is not a subtask.
+        if (partition !== null && (covered === null || covered.length === 0)) continue;
+
         const one = await ask<{
           objective: string;
           category: string;
@@ -298,7 +396,8 @@ export function createStepwisePlanner(options: ModelSeamOptions): Planner {
           // model could reintroduce a duplicate at the last step, past the guard.
           objective,
           category: one.category,
-          acceptanceCriteria: [{ criterionId: `ac-${index + 1}`, statement: one.criterion }],
+          acceptanceCriteria:
+            covered ?? [{ criterionId: `ac-${index + 1}`, statement: one.criterion }],
           outOfScope: [one.outOfScope],
           blastRadius: one.blastRadius,
           // Computed from what SURVIVED, not from what was asked for: shares

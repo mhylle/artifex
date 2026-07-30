@@ -31,6 +31,16 @@
       <span class="deps">after {{ task.dependsOn.length }}</span>
     }
   </button>
+
+  @if (task.children.length) {
+    <button
+      type="button"
+      class="drill"
+      (click)="focusTask.emit(task.taskId)"
+      [attr.aria-label]="'Drill into ' + task.objective"
+      title="Drill into this subtree"
+    >⤢</button>
+  }
 </div>
 
 @if (task.children.length && !collapsed()) {
@@ -41,6 +51,7 @@
           [node]="child"
           [selectedTaskId]="selectedTaskId()"
           (selectTask)="selectTask.emit($event)"
+          (focusTask)="focusTask.emit($event)"
         />
       </li>
     }

@@ -181,3 +181,151 @@ describe('2e5eaece — the planner never proposes the same subtask twice', () =>
     expect(total).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Defect `5e245281` — the planner manufactured one criterion per subtask.
+ *
+ * Under ADR-0009 a contract with a single acceptance criterion is a leaf, so
+ * inventing exactly one criterion per child made every child atomic by
+ * construction and the recursion added for `a910ed8d` could never fire. Worse,
+ * it produced children like "Compare the operational mechanisms, efficiency
+ * ratings, and primary costs of heat pump technology" — three outcomes wearing
+ * one criterion — which the worker then could not execute.
+ *
+ * The fix is to PARTITION the parent's criteria rather than author new ones.
+ * That is deterministic (so a tree replays), cannot inflate the criteria count,
+ * and strictly shrinks — which is what keeps recursion terminating.
+ */
+describe('5e245281 — subtasks partition the parent criteria rather than inventing them', () => {
+  const parentWith = (statements: string[]): TaskContract => ({
+    ...contract(),
+    acceptanceCriteria: statements.map((statement, i) => ({ criterionId: `ac-${i + 1}`, statement })),
+  });
+
+  /** Scripts the outline and the criterion→subtask assignment. */
+  function partitioningGenerator(script: { objectives: string[]; assignments?: number[] }) {
+    const generator: StructuredGenerator = {
+      async generate({ probe }) {
+        const id = (probe.schema as { $id?: string }).$id ?? '';
+        if (id === 'SubtaskCount') return { count: script.objectives.length };
+        if (id === 'SubtaskOutline') return { objectives: script.objectives };
+        if (id === 'CriterionAssignment') {
+          return { assignments: script.assignments ?? script.objectives.map((_, i) => i) };
+        }
+        return {
+          objective: 'IGNORED',
+          category: 'answer',
+          criterion: 'model-authored fallback',
+          outOfScope: 'Not the sibling.',
+          blastRadius: 'low' as const,
+        };
+      },
+    };
+    return generator;
+  }
+
+  it('gives each subtask the parent criteria it covers', async () => {
+    const generator = partitioningGenerator({
+      objectives: ['Explain heat pumps.', 'Explain gas boilers.'],
+      assignments: [0, 1],
+    });
+
+    const result = await plannerOn(generator).propose({
+      contract: parentWith(['Heat pump explained.', 'Gas boiler explained.']),
+    });
+
+    expect(result.subtasks[0]?.acceptanceCriteria.map((c) => c.statement)).toEqual(['Heat pump explained.']);
+    expect(result.subtasks[1]?.acceptanceCriteria.map((c) => c.statement)).toEqual(['Gas boiler explained.']);
+  });
+
+  it('DISTRACTOR: every parent criterion lands somewhere, and none is invented', async () => {
+    // Losing a criterion means the mission silently drops a requirement;
+    // inventing one means the tree grades work nobody asked for.
+    const parent = parentWith(['One.', 'Two.', 'Three.']);
+    const generator = partitioningGenerator({
+      objectives: ['A', 'B'],
+      assignments: [0, 1, 0],
+    });
+
+    const result = await plannerOn(generator).propose({ contract: parent });
+
+    const covered = result.subtasks.flatMap((s) => s.acceptanceCriteria.map((c) => c.statement)).sort();
+    expect(covered).toEqual(['One.', 'Three.', 'Two.']);
+  });
+
+  it('a subtask that covers several criteria keeps them all, so it can be split again', async () => {
+    // This is what makes depth possible: a child with two criteria is NOT a leaf.
+    const generator = partitioningGenerator({
+      objectives: ['Everything about heating.', 'Insulation.'],
+      assignments: [0, 0, 1],
+    });
+
+    const result = await plannerOn(generator).propose({
+      contract: parentWith(['Heat pumps.', 'Gas boilers.', 'Insulation.']),
+    });
+
+    expect(result.subtasks[0]?.acceptanceCriteria).toHaveLength(2);
+  });
+
+  it('DISTRACTOR: a subtask covering no criterion is dropped, not shipped empty', async () => {
+    // A task with nothing to satisfy cannot be graded and would fail its own
+    // contract check downstream.
+    const generator = partitioningGenerator({
+      objectives: ['Covers everything.', 'Covers nothing.'],
+      assignments: [0, 0],
+    });
+
+    const result = await plannerOn(generator).propose({
+      contract: parentWith(['One.', 'Two.']),
+    });
+
+    expect(result.subtasks.every((s) => s.acceptanceCriteria.length > 0)).toBe(true);
+  });
+
+  it('DISTRACTOR: an assignment that puts everything on ONE subtask still shrinks', async () => {
+    // Otherwise the child equals its parent and recursion never terminates —
+    // the partition must be a real partition.
+    const parent = parentWith(['One.', 'Two.', 'Three.']);
+    const generator = partitioningGenerator({
+      objectives: ['A', 'B', 'C'],
+      assignments: [0, 0, 0],
+    });
+
+    const result = await plannerOn(generator).propose({ contract: parent });
+
+    for (const subtask of result.subtasks) {
+      expect(subtask.acceptanceCriteria.length).toBeLessThan(parent.acceptanceCriteria.length);
+    }
+  });
+
+  it('a parent with a single criterion cannot be partitioned, so the model authors one', async () => {
+    const generator = partitioningGenerator({ objectives: ['Only part.'] });
+
+    const result = await plannerOn(generator).propose({ contract: parentWith(['The only thing.']) });
+
+    expect(result.subtasks[0]?.acceptanceCriteria).toHaveLength(1);
+  });
+
+  it('DISTRACTOR: an out-of-range assignment falls back to its own slot, not onto subtask 0', async () => {
+    // Small models return indices that do not exist. Dumping every invalid index
+    // onto subtask 0 keeps the criterion "covered" while silently unbalancing the
+    // split — so this asserts WHERE it lands, not merely that it survives.
+    // Three subtasks keeps the all-in-one-bucket guard out of the way, so the
+    // fallback is the only thing under test.
+    const generator = partitioningGenerator({
+      objectives: ['A', 'B', 'C'],
+      assignments: [0, 99, 2],
+    });
+
+    const result = await plannerOn(generator).propose({
+      contract: parentWith(['One.', 'Two.', 'Three.']),
+    });
+
+    expect(result.subtasks).toHaveLength(3);
+    expect(result.subtasks.map((s) => s.acceptanceCriteria.map((c) => c.statement))).toEqual([
+      ['One.'],
+      ['Two.'],
+      ['Three.'],
+    ]);
+  });
+});

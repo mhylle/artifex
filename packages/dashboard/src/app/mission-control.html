@@ -113,6 +113,7 @@
             [node]="task"
             [selectedTaskId]="selectedTaskId()"
             (selectTask)="selectTask($event)"
+            (focusTask)="focus($event)"
           />
         </li>
       } @empty {

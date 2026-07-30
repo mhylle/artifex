@@ -57,3 +57,5 @@
   padding: 0 0 0 .75rem;
   border-left: 1px solid #e4e4e4;
 }
+.drill { flex: 0 0 auto; border: 1px solid #d8d8d8; background: #fff; border-radius: 4px; margin: .15rem 0 .15rem .25rem; padding: 0 .45rem; cursor: pointer; color: #33477d; font-size: .8rem; }
+.drill:hover { border-color: #5a78c8; }
