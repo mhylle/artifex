@@ -11,6 +11,8 @@ import { pathToFileURL } from 'node:url';
 
 export * from './constitution.js';
 export * from './tier-policy.js';
+export * from './orchestrator.js';
+export * from './planner.js';
 
 export const PACKAGE_NAME = '@artifex/worker';
 

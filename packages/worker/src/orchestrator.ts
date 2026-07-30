@@ -1,0 +1,197 @@
+/**
+ * The Orchestrator — decompose, contract, fold up.
+ *
+ * Two responsibilities, both governed by invariants rather than taste:
+ *
+ *  - **Decompose** splits a contract into atomic children, each of which gets a
+ *    *full* contract authored by this level (invariant #2: no work without a
+ *    contract). The planner proposes; the Orchestrator is what turns a proposal
+ *    into something executable, and it refuses proposals that cannot be graded or
+ *    cannot be afforded. A planner is an LLM and will happily suggest a task with
+ *    no acceptance criteria — that must fail here, loudly, because by execution
+ *    time the contract is the only specification that exists.
+ *
+ *  - **Fold up** reconciles children into ONE result. Not a concatenation: two
+ *    children can disagree about the same fact, and joining their outputs ships
+ *    both as though both were true. Reconciliation is where that gets caught.
+ *
+ * The planner and reconciler are seams. Both are model-backed in production (via
+ * `@artifex/model-router`, never a provider SDK directly), and both are scripted
+ * in tests so the contract-authoring rules can be verified deterministically.
+ */
+import type { BlastRadius, TaskContract } from '@artifex/shared-types';
+
+export interface ProposedSubtask {
+  readonly objective: string;
+  readonly category: string;
+  readonly acceptanceCriteria: ReadonlyArray<{ readonly criterionId: string; readonly statement: string }>;
+  readonly outOfScope: readonly string[];
+  readonly blastRadius: BlastRadius;
+  /** Fraction of the parent's ceiling this child may spend, 0–1. */
+  readonly effortShare: number;
+}
+
+export interface DecompositionProposal {
+  readonly subtasks: readonly ProposedSubtask[];
+}
+
+export interface Planner {
+  propose(input: { readonly contract: TaskContract }): Promise<DecompositionProposal>;
+}
+
+export interface ChildResult {
+  readonly objective: string;
+  readonly deliverable: unknown;
+}
+
+export interface Reconciler {
+  reconcile(input: {
+    readonly parent: TaskContract;
+    readonly children: readonly ChildResult[];
+  }): Promise<{ readonly deliverable: unknown; readonly conflicts: readonly string[] }>;
+}
+
+export interface FoldResult {
+  readonly taskId: string;
+  readonly childCount: number;
+  readonly deliverable: unknown;
+  readonly conflicts: readonly string[];
+}
+
+/**
+ * Deterministic child ids — a decomposition must be replayable from the ledger,
+ * so the same parent and the same proposal must yield the same tree.
+ *
+ * Derived by incrementing the parent's final group, which keeps the child inside
+ * the `8-4-4-4-12` shape the contract schema requires. Splitting the string at an
+ * arbitrary offset does not: it lands mid-segment and produces something that
+ * looks like a UUID but fails validation.
+ */
+function childTaskId(parentTaskId: string, index: number): string {
+  const head = parentTaskId.slice(0, 24);
+  const tail = parentTaskId.slice(24);
+  const bumped = (BigInt(`0x${tail}`) + BigInt(index + 1)).toString(16).padStart(12, '0').slice(-12);
+
+  return `${head}${bumped}`;
+}
+
+/**
+ * Author full contracts for a proposed split.
+ *
+ * Everything the children inherit is inherited deliberately:
+ *   - `autonomyDial` is mission-level, fixed at intake — a child may never widen
+ *     its own autonomy.
+ *   - `escalationPolicy` and `verificationPlan` come from the parent, because a
+ *     task does not get to choose how hard it will be checked.
+ *   - the budget is **divided**, never copied. Copying it multiplies spend by the
+ *     fan-out, which is the fastest way to bankrupt a mission (invariant #7).
+ */
+export async function decompose(
+  parent: TaskContract,
+  planner: Planner,
+): Promise<TaskContract[]> {
+  const proposal = await planner.propose({ contract: parent });
+
+  if (proposal.subtasks.length === 0) {
+    throw new Error('decomposition produced no subtasks — nothing to execute');
+  }
+
+  for (const [index, subtask] of proposal.subtasks.entries()) {
+    if (subtask.acceptanceCriteria.length === 0) {
+      throw new Error(
+        `subtask ${index} ("${subtask.objective}") has no acceptance criteria — a task nobody can grade is not a task`,
+      );
+    }
+    if (subtask.outOfScope.length === 0) {
+      throw new Error(
+        `subtask ${index} ("${subtask.objective}") declares no anti-scope — siblings would be free to overlap`,
+      );
+    }
+  }
+
+  const totalShare = proposal.subtasks.reduce((sum, s) => sum + s.effortShare, 0);
+  if (totalShare > 1) {
+    throw new Error(
+      `proposed effort shares total ${totalShare.toFixed(2)} of the parent budget — over-subscribed; effort is a currency`,
+    );
+  }
+
+  const ids = proposal.subtasks.map((_, index) => childTaskId(parent.taskId, index));
+
+  return proposal.subtasks.map((subtask, index) => {
+    const ceiling = parent.budget.ceiling * subtask.effortShare;
+
+    return {
+      taskId: ids[index]!,
+      missionId: parent.missionId,
+      parentTaskId: parent.taskId,
+      category: subtask.category,
+      depth: parent.depth + 1,
+      objective: subtask.objective,
+      acceptanceCriteria: subtask.acceptanceCriteria.map((c) => ({ ...c })),
+      boundaries: {
+        outOfScope: [...subtask.outOfScope],
+        // Every child is told who owns the neighbouring concerns, so overlap is
+        // a contract violation rather than a discovery made at fold-up.
+        siblingOwners: proposal.subtasks
+          .map((sibling, siblingIndex) => ({ concern: sibling.objective, taskId: ids[siblingIndex]! }))
+          .filter((_, siblingIndex) => siblingIndex !== index),
+      },
+      inputs: {
+        entitlements: [...parent.inputs.entitlements],
+        toolEntitlements: parent.inputs.toolEntitlements.map((t) => ({ ...t })),
+        pinnedDecisions: parent.inputs.pinnedDecisions.map((d) => ({ ...d })),
+      },
+      dependencies: { consumesTaskIds: [], mayRequest: [...parent.dependencies.mayRequest] },
+      stoppingConditions: {
+        doneWhen: subtask.acceptanceCriteria.map((c) => `Criterion ${c.criterionId} is demonstrably met.`),
+        stopTryingWhen: [...parent.stoppingConditions.stopTryingWhen],
+        maxAttempts: parent.stoppingConditions.maxAttempts,
+        stallLimit: parent.stoppingConditions.stallLimit,
+      },
+      budget: {
+        // The floor scales with the share too — a child given 20% of the work
+        // should not carry the parent's whole minimum-effort obligation.
+        floor: Math.min(parent.budget.floor * subtask.effortShare, ceiling),
+        ceiling,
+        unit: parent.budget.unit,
+      },
+      escalationPolicy: {
+        ladder: [...parent.escalationPolicy.ladder],
+        humanAt: parent.escalationPolicy.humanAt,
+      },
+      verificationPlan: { ...parent.verificationPlan },
+      blastRadius: subtask.blastRadius,
+      autonomyDial: parent.autonomyDial,
+      createdAt: parent.createdAt,
+    };
+  });
+}
+
+/**
+ * Reconcile completed children into one result.
+ *
+ * The reconciler is required, not optional, and that is the whole point of this
+ * function: the decomposition tree run in reverse has to *resolve* what the
+ * children said, because they were deliberately kept ignorant of each other (no
+ * peer chatter, invariant #6). Nobody else in the system is positioned to notice
+ * that two siblings contradict each other.
+ */
+export async function foldUp(
+  parent: TaskContract,
+  children: readonly ChildResult[],
+  reconciler: Reconciler,
+): Promise<FoldResult> {
+  if (children.length === 0) {
+    throw new Error(`task ${parent.taskId} has no children to fold up — nothing to reconcile`);
+  }
+
+  const { deliverable, conflicts } = await reconciler.reconcile({ parent, children });
+
+  return {
+    taskId: parent.taskId,
+    childCount: children.length,
+    deliverable,
+    conflicts: [...conflicts],
+  };
+}
