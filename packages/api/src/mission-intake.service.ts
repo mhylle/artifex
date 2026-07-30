@@ -25,11 +25,26 @@ export interface IntakeRequest {
   readonly budget: { readonly floor: number; readonly ceiling: number; readonly unit: string };
   readonly blastRadius: BlastRadius;
   readonly requestedBy: string;
+  /** A surrendered mission this one re-enters (R37 AC-2). */
+  readonly priorMissionId?: string;
 }
 
 export interface MissionJob {
   readonly missionId: string;
   readonly contract: TaskContract;
+}
+
+/**
+ * Where a prior mission's surrender dossier comes from (R37 AC-2).
+ *
+ * A seam rather than a repository import, so the control plane keeps depending
+ * on shapes rather than on the fabric — and so intake can be tested without a
+ * database. Returns null when there is no such dossier: a requester quoting a
+ * mission id that no longer exists should still get a mission, and inventing
+ * context for it would be worse than having none.
+ */
+export interface DossierLookup {
+  forMission(missionId: string): Promise<Record<string, unknown> | null>;
 }
 
 export interface MissionQueue {
@@ -47,6 +62,8 @@ export class MissionIntakeService {
     private readonly queue: MissionQueue,
     private readonly ledger: LedgerSink,
     private readonly clock: IntakeClock,
+    /** Optional: without it, re-entry simply carries nothing forward. */
+    private readonly dossiers?: DossierLookup,
   ) {}
 
   async accept(request: IntakeRequest): Promise<{ contract: TaskContract }> {
@@ -90,6 +107,24 @@ export class MissionIntakeService {
     const missionId = this.clock.newId();
     const createdAt = this.clock.now();
 
+    // ---- re-entry: start from what the first attempt already learned --------
+    // Pinned rather than merely attached: `pinnedDecisions` is inherited by every
+    // child contract, so the planner and each worker see the prior blockers.
+    // Recording it on the intake event alone would put it in the trail and out
+    // of the swarm's way, which is exactly the rediscovery this prevents.
+    //
+    // A failed lookup is swallowed. A control plane that refuses to start a
+    // mission because a *historical* record could not be read has turned an
+    // optional convenience into a hard dependency.
+    let priorDossier: Record<string, unknown> | null = null;
+    if (typeof request.priorMissionId === 'string' && this.dossiers !== undefined) {
+      priorDossier = await this.dossiers.forMission(request.priorMissionId).catch(() => null);
+    }
+
+    const inherited = ((priorDossier?.['whatItWouldTake'] as unknown[] | undefined) ?? [])
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((decision, index) => ({ id: `prior-${index + 1}`, decision }));
+
     const contract: TaskContract = {
       taskId: missionId,
       // The mission IS task zero: it is its own mission, has no parent, sits at
@@ -104,7 +139,7 @@ export class MissionIntakeService {
         statement,
       })),
       boundaries: { outOfScope: [...request.outOfScope], siblingOwners: [] },
-      inputs: { entitlements: [], toolEntitlements: [], pinnedDecisions: [] },
+      inputs: { entitlements: [], toolEntitlements: [], pinnedDecisions: inherited },
       dependencies: { consumesTaskIds: [], mayRequest: [] },
       stoppingConditions: {
         doneWhen: request.successCriteria.map((s) => `Demonstrably met: ${s}`),
@@ -148,6 +183,11 @@ export class MissionIntakeService {
         // (R41): a mission cannot be resumed from a trail that does not contain
         // the contract it is being judged against.
         contract,
+        // What this attempt inherited, and from where (R37 AC-2). Recorded even
+        // though the pinned decisions are already in the contract: the trail
+        // should show that this was a SECOND attempt, not a fresh one that
+        // happened to arrive with constraints attached.
+        ...(priorDossier === null ? {} : { priorMissionId: request.priorMissionId, priorDossier }),
       },
       occurredAt: createdAt,
     });

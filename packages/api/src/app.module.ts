@@ -56,8 +56,28 @@ function connectionString(): string {
     { provide: INTAKE_CLOCK, useValue: { now: () => new Date().toISOString(), newId: () => randomUUID() } },
     {
       provide: MissionIntakeService,
-      useFactory: (q, sink, clock) => new MissionIntakeService(q, sink, clock),
-      inject: [MISSION_QUEUE, LEDGER_SINK, INTAKE_CLOCK],
+      useFactory: (q, sink, clock, reader: LedgerReader) =>
+        new MissionIntakeService(q, sink, clock, {
+          /**
+           * A prior mission's surrender dossier, read back from its trail
+           * (R37 AC-2).
+           *
+           * Derived here rather than stored: the dossier lives on the
+           * `mission.surrendered` event, so re-reading the trail is the same
+           * fold the worker performed, not a second copy that can drift.
+           *
+           * Null when the mission never surrendered — including when it
+           * delivered. Re-entering a mission that SUCCEEDED carries nothing
+           * forward, which is right: there are no blockers to avoid.
+           */
+          async forMission(missionId: string) {
+            const trail = await reader.replay({ missionId });
+            const surrender = [...trail].reverse().find((e) => e.type === 'mission.surrendered');
+            const dossier = (surrender?.payload as { dossier?: unknown } | undefined)?.dossier;
+            return (dossier ?? null) as Record<string, unknown> | null;
+          },
+        }),
+      inject: [MISSION_QUEUE, LEDGER_SINK, INTAKE_CLOCK, LEDGER_READER],
     },
     {
       // Human action is a first-class ledger write, which is why the control

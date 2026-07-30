@@ -43,6 +43,14 @@ export const MissionIntakeRequestSchema = Type.Object(
     ),
     blastRadius: BlastRadiusSchema,
     requestedBy: Type.String({ minLength: 1 }),
+    /**
+     * A surrendered mission this one re-enters (R37 AC-2).
+     *
+     * Optional, because re-entry is the exception. When present, intake starts
+     * the new mission with the prior dossier so the second attempt does not
+     * spend budget rediscovering a blocker the first one already wrote down.
+     */
+    priorMissionId: Type.Optional(Type.String({ minLength: 1 })),
   },
   {
     $id: 'MissionIntakeRequest',

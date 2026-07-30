@@ -174,3 +174,84 @@ describe('R14 AC-3 — intake refuses a malformed request with a stated reason',
     expect(enqueued).toHaveLength(0);
   });
 });
+
+/**
+ * R37 AC-2 — "given a surrendered mission, when it is re-entered at intake, then
+ * the dossier is available as its starting context so the second attempt does
+ * not rediscover the first attempt's blockers."
+ *
+ * The point is not that the dossier is *stored somewhere reachable* — it always
+ * was, in the ledger. It is that the second attempt STARTS with it, so the swarm
+ * does not spend budget rediscovering a blocker it already wrote down.
+ */
+describe('R37 AC-2 — a re-entered mission starts with the prior dossier', () => {
+  const priorDossier = {
+    reason: 'Gate B could not be satisfied',
+    whatItWouldTake: [
+      'Supply a capability for: live data lookup.',
+      'Relax or restate: "An exact figure is given" — no verification ever met it.',
+    ],
+    blockers: [{ taskId: 't-1', detail: 'no source available', errorClass: 'capability_gap', evidence: ['ev-9'] }],
+    completed: [{ taskId: 't-0', objective: 'Cover the background.', depth: 'single', criteria: ['m-1'], evidence: ['ev-3'] }],
+    escalations: [], assumptions: [], verified: [],
+    budget: { spent: 18, ceiling: 20, unit: 'effort-units' }, missionId: 'prior-1',
+  };
+
+  function harnessWithPrior() {
+    const enqueued: unknown[] = [];
+    const appended: unknown[] = [];
+    const queue: MissionQueue = { async enqueue(job) { enqueued.push(job); } };
+    const ledger: LedgerSink = { async append(event) { appended.push(event); return event; } };
+    const dossiers = {
+      async forMission(missionId: string) {
+        return missionId === 'prior-1' ? priorDossier : null;
+      },
+    };
+    const service = new MissionIntakeService(
+      queue, ledger,
+      { now: () => AT, newId: (() => { let n = 0; return () => `00000000-0000-4000-8000-${(n += 1).toString(16).padStart(12, '0')}`; })() },
+      dossiers,
+    );
+    return { service, appended };
+  }
+
+  it('pins what it would take, so the planner sees it rather than rediscovering it', async () => {
+    const { service } = harnessWithPrior();
+
+    const { contract } = await service.accept(request({ priorMissionId: 'prior-1' }));
+
+    const pinned = contract.inputs.pinnedDecisions.map((d) => d.decision).join(' ');
+    expect(pinned).toMatch(/live data lookup/);
+  });
+
+  it('records the dossier on the intake event, so the trail shows what was inherited', async () => {
+    const { service, appended } = harnessWithPrior();
+
+    await service.accept(request({ priorMissionId: 'prior-1' }));
+
+    const intake = appended.find((e) => (e as { type: string }).type === 'mission.intake_accepted') as
+      { payload: Record<string, unknown> };
+    expect(intake.payload['priorMissionId']).toBe('prior-1');
+    expect(intake.payload['priorDossier']).toBeDefined();
+  });
+
+  it('DISTRACTOR: a mission with no prior is unchanged — re-entry is the exception', async () => {
+    // Every ordinary mission must not gain an empty pinned decision that reads
+    // like a constraint nobody set.
+    const { service } = harnessWithPrior();
+
+    const { contract } = await service.accept(request());
+
+    expect(contract.inputs.pinnedDecisions).toEqual([]);
+  });
+
+  it('DISTRACTOR: an UNKNOWN prior mission does not fail intake, and says nothing false', async () => {
+    // A requester quoting a mission id that no longer exists should still get a
+    // mission. Inventing context for it would be worse than having none.
+    const { service } = harnessWithPrior();
+
+    const { contract } = await service.accept(request({ priorMissionId: 'does-not-exist' }));
+
+    expect(contract.inputs.pinnedDecisions).toEqual([]);
+  });
+});

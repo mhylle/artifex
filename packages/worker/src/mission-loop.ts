@@ -27,6 +27,7 @@ import { decompose, foldUp } from './orchestrator.js';
 import type { Planner, Reconciler } from './orchestrator.js';
 import { gateA, gateB } from './reviewer.js';
 import type { CompletionJudge, CoverageJudge, IntentJudge, PlanJudge } from './reviewer.js';
+import { pedigreeOf, surrenderDossier } from './dossier.js';
 import { entryRungFor, isStalled, worstClass } from './escalation.js';
 import type { AttemptSignature } from './escalation.js';
 import { runSpecialist } from './specialist.js';
@@ -470,7 +471,17 @@ export async function runMission(
   }
 
   const surrender = (reason: string, blockers: string[]): MissionResult => {
-    record(mission.taskId, 'escalation', 'mission.surrendered', 'orchestrator', { reason, blockers });
+    // The dossier is DERIVED from the trail at the moment of surrender (R37
+    // AC-1), not accumulated as the mission ran. A second copy kept alongside
+    // the ledger is a second truth, and the two drift.
+    //
+    // A surrender is a handover, not a total loss: whatever was verified stays
+    // verified, and the next attempt should not have to rediscover any of it.
+    record(mission.taskId, 'escalation', 'mission.surrendered', 'orchestrator', {
+      reason,
+      blockers,
+      dossier: surrenderDossier(mission, trail, reason, blockers),
+    });
     return { outcome: 'surrendered', deliverable: null, trail, escalations };
   };
 
@@ -1313,9 +1324,15 @@ export async function runMission(
     } catch (error) {
       return fail('fold-up failed', [describe(error)]);
     }
-    record(parent.taskId, 'contract', parent.taskId === mission.taskId ? 'mission.folded' : 'task.folded', 'orchestrator', {
-        childCount: folded.childCount, conflicts: folded.conflicts,
-      });
+    const isMission = parent.taskId === mission.taskId;
+    record(parent.taskId, 'contract', isMission ? 'mission.folded' : 'task.folded', 'orchestrator', {
+      childCount: folded.childCount,
+      conflicts: folded.conflicts,
+      // Only the MISSION fold carries a pedigree (R37 AC-0). An inner fold is
+      // an intermediate step, and attaching a whole-mission account to each one
+      // would repeat the same growing blob at every level of the tree.
+      ...(isMission ? { pedigree: pedigreeOf(mission, trail) } : {}),
+    });
 
 
     return { ok: true, deliverable: folded.deliverable };
@@ -1323,6 +1340,21 @@ export async function runMission(
 
   const root = await runSubtree(mission, 0);
   if (!root.ok) return root.result;
+
+  // ---- one terminal event for EVERY delivered mission (R37 AC-0) ------------
+  // The pedigree used to hang off `mission.folded`, and a mission the
+  // decompose-or-delegate gate keeps WHOLE never folds — it delivered with no
+  // pedigree and no terminal event at all, which is also why the fleet view had
+  // nothing to mark such a mission finished with. Found on live mission
+  // d042175f, where the worker logged "delivered" and the trail simply stopped.
+  //
+  // Recorded here rather than in the fold so it fires on both paths exactly
+  // once. The fold keeps its own pedigree for the split case, where it is the
+  // event that actually assembled the result.
+  record(mission.taskId, 'contract', 'mission.delivered', 'orchestrator', {
+    objective: mission.objective,
+    pedigree: pedigreeOf(mission, trail),
+  });
 
   return { outcome: 'delivered', deliverable: root.deliverable, trail, escalations };
 }
