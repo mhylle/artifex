@@ -18,7 +18,7 @@
 import { Type } from '@sinclair/typebox';
 
 import type { RegistryLookup } from './agent-creator.js';
-import type { ControlSignals } from './mission-loop.js';
+import type { ControlSignals, DecompositionGate } from './mission-loop.js';
 import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
 import type { MissionSeams } from './mission-loop.js';
@@ -186,6 +186,66 @@ export function createLedgerControl(reader: ControlReader, missionId = ''): Cont
   };
 }
 
+/**
+ * Wrap a decompose-or-delegate gate so keeping work whole requires UNANIMITY
+ * across `samples` calls (defect `890cdea5`).
+ *
+ * Splitting is the safe default and the recoverable one: a plan split too finely
+ * costs coordination, while a plan wrongly kept whole hands an entire task graph
+ * to one agent. Mission `8dd66596` did exactly that — five independent tool
+ * descriptions collapsed onto one worker, which bounced, escalated and
+ * surrendered — and the gate's own rationale in that run argued for splitting
+ * while its boolean said otherwise. No schema catches a confident wrong answer;
+ * repetition does.
+ *
+ * The pattern is not new here: the admission gate already samples N times and
+ * requires unanimity (`d678cd8c`) rather than trusting a single call. This is
+ * the same guard applied to the decision that shapes the whole tree.
+ *
+ * A sample that THROWS counts as a dissent. A call that failed did not vote to
+ * keep whole, and treating an error as assent would let a flaky backend collapse
+ * a task graph.
+ */
+export function sampledDecompositionGate(
+  gate: DecompositionGate,
+  samples: number,
+): DecompositionGate {
+  return {
+    async assess(input) {
+      const verdicts = await Promise.all(
+        Array.from({ length: Math.max(1, samples) }, async () => {
+          try {
+            return await gate.assess(input);
+          } catch (error) {
+            return { keepWhole: false, rationale: `Gate sample failed (${describeError(error)}).` };
+          }
+        }),
+      );
+
+      const dissent = verdicts.find((verdict) => !verdict.keepWhole);
+      if (dissent === undefined) {
+        return { keepWhole: true, rationale: verdicts[0]?.rationale ?? 'Unanimous: keep whole.' };
+      }
+
+      const dissenters = verdicts.filter((verdict) => !verdict.keepWhole).length;
+      // The rationale reported is the one that DECIDED the outcome. Reporting a
+      // majority's reasoning beside a split decision would make the trail
+      // explain something that did not happen.
+      return {
+        keepWhole: false,
+        rationale:
+          dissenters === verdicts.length
+            ? dissent.rationale
+            : `${dissent.rationale} (${dissenters} of ${verdicts.length} samples dissented; keeping work whole requires unanimity.)`,
+      };
+    },
+  };
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function createMissionSeams(
   generator: StructuredGenerator,
   models: RuntimeModels,
@@ -220,7 +280,7 @@ export function createMissionSeams(
      * general opinion, because the default has to be splitting — a gate that
      * kept everything whole would quietly turn the swarm back into one agent.
      */
-    decompositionGate: {
+    decompositionGate: sampledDecompositionGate({
       async assess({ contract }) {
         const out = (await gen(models.evaluator, DecomposeOrDelegateSchema, [
           'Decide whether this work should be SPLIT into independent subtasks or KEPT WHOLE for one agent.',
@@ -244,7 +304,12 @@ export function createMissionSeams(
             : 'The gate returned no rationale.',
         };
       },
-    },
+      // Three samples, unanimity required to keep whole (defect `890cdea5`).
+      // Three because that is what the admission gate already uses for the same
+      // job — turning a single confident answer into a repeated one — and
+      // because splitting is the recoverable direction, so the cost of a false
+      // split is far below the cost of a false collapse.
+    }, 3),
 
     coverageJudge: {
       async assess({ parent, children }) {
