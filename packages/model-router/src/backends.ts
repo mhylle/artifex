@@ -20,7 +20,31 @@ export interface BackendOptions {
   /** OpenAI-compatible base URL — Ollama in dev, vLLM in prod. */
   readonly localBaseUrl: string;
   readonly anthropicApiKey?: string | undefined;
+  /**
+   * Hard bound on generated tokens. See {@link DEFAULT_MAX_OUTPUT_TOKENS}.
+   */
+  readonly maxOutputTokens?: number | undefined;
 }
+
+/**
+ * A bound on structured-output generation.
+ *
+ * This is not an arbitrary cap — an unbounded ceiling already exists (the model's
+ * context window), and hitting *that* is a hard failure: the response stops
+ * mid-JSON with `finish_reason: "length"` and the whole call throws.
+ * Observed live in P9: `qwen3.5:2b` ran away to 32,690 completion tokens on a
+ * 78-token prompt and took the entire mission down with it.
+ *
+ * Small models under constrained decoding do this — the grammar keeps the output
+ * syntactically alive long after the model has stopped saying anything. An
+ * explicit bound converts an expensive crash into a fast, attributable failure
+ * that the escalation ladder can respond to.
+ *
+ * Sized for the schemas Artifex actually hands models (contracts, verdicts,
+ * proposals — all comfortably under a thousand tokens), with generous headroom.
+ * Override per backend when a genuinely larger artefact is expected.
+ */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
 
 function languageModelFor(
   provider: string,
@@ -64,6 +88,7 @@ export function createBackend(options: BackendOptions): StructuredOutputBackend 
         model: languageModelFor(provider, model, options),
         schema: jsonSchema(toJsonSchema(probe.schema) as unknown as JSONSchema7),
         prompt: probe.prompt,
+        maxOutputTokens: options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
       });
       return object;
     },
