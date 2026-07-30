@@ -59,6 +59,14 @@ export interface RegistryLookup {
    * is a no-bid whatever the registry holds.
    */
   recordOutcome?(designId: string, score: number, effort?: number): Promise<void>;
+  /**
+   * The capabilities the registry already holds, best-established first (R38 AC-0).
+   *
+   * Optional: without it clustering falls back to normalising the proposed
+   * category on its own, which cannot merge names the planner never repeated —
+   * so the taxonomy grows by one entry per task and never converges.
+   */
+  knownCapabilities?(): Promise<string[]>;
 }
 
 /** Authors a fresh specialist when nothing in the registry bids. */
@@ -123,6 +131,56 @@ export function capabilityOf(category: string): string {
 }
 
 /**
+ * Significant tokens of a capability, crudely singularised.
+ *
+ * A stemmer would be a dependency earning its keep on nothing: these are short
+ * noun phrases the planner invented seconds ago, and the only inflection that
+ * matters in practice is the plural "tools" vs "tool".
+ */
+function tokensOf(capability: string): string[] {
+  return capability
+    .split(' ')
+    .map((token) => (token.length > 3 && token.endsWith('s') ? token.slice(0, -1) : token))
+    .filter((token) => token.length > 0);
+}
+
+/**
+ * Resolve a proposed category against the capabilities the registry already
+ * holds (R38 AC-0).
+ *
+ * "Clusters the approved task graph into capability categories, so a thousand
+ * tasks might need twelve designs, not a thousand."
+ *
+ * Normalising a string cannot do this. The planner invents a fresh phrase per
+ * subtask, so five requests to describe a hand tool arrived as "Hand Tool
+ * Overview", "Tool Identification & Description", "Tool Description", "Tool
+ * Identification & Instruction" and "Woodworking Tools" — five names for one
+ * capability, sharing no common first segment. Only matching against what is
+ * already known can merge them.
+ *
+ * The rule is a shared token, and it deliberately errs toward MERGING: the
+ * criterion asks for materially fewer designs, and a slightly-wrong reuse is
+ * caught downstream by the evidence bar and the clade score, whereas a taxonomy
+ * that grows by one entry per task can never accumulate evidence at all.
+ *
+ * `known` is expected in the registry's own evidence order (most observations
+ * first), so a proposal that could join two capabilities joins the
+ * better-established one — the tie-break is the system's measured history rather
+ * than alphabetical luck.
+ */
+export function resolveCapability(proposed: string, known: readonly string[]): string {
+  const capability = capabilityOf(proposed);
+  if (capability === 'uncategorised') return capability;
+
+  const proposedTokens = tokensOf(capability);
+  for (const candidate of known) {
+    const candidateTokens = tokensOf(candidate);
+    if (proposedTokens.some((token) => candidateTokens.includes(token))) return candidate;
+  }
+  return capability;
+}
+
+/**
  * The design id for a CATEGORY — the identity the reuse market trades on.
  *
  * Derived from the category alone, so every task of a kind resolves to one
@@ -137,10 +195,15 @@ export function capabilityOf(category: string): string {
  * key requires.
  */
 export function designIdFor(contract: TaskContract): string {
+  return designIdForCapability(capabilityOf(contract.category));
+}
+
+/** The same identity, computed from an already-resolved capability. */
+export function designIdForCapability(capability: string): string {
   // FNV-1a: small, stable across processes, and dependency-free. The id must be
   // identical in every worker for reuse to converge on one row.
   let hash = 0xcbf29ce4_84222325n;
-  for (const codePoint of capabilityOf(contract.category)) {
+  for (const codePoint of capability) {
     hash = BigInt.asUintN(64, (hash ^ BigInt(codePoint.charCodeAt(0))) * 0x100_0001b3n);
   }
   const hex = hash.toString(16).padStart(16, '0');
@@ -188,7 +251,14 @@ function harnessFor(contract: TaskContract): { checks: string[] } {
 export async function staff(options: StaffOptions): Promise<CapabilityManifest> {
   const { contract, registry, author } = options;
 
-  const bid = await registry.bestForCategory(contract.category);
+  // Resolve the planner's freshly-invented category against what the registry
+  // already knows (R38 AC-0), so a taxonomy converges instead of growing by one
+  // entry per task. A registry that cannot answer degrades to normalising the
+  // proposal alone — worse clustering, never a broken staffing.
+  const known = await registry.knownCapabilities?.().catch(() => []) ?? [];
+  const capability = resolveCapability(contract.category, known);
+
+  const bid = await registry.bestForCategory(capability);
   const proven = bid !== null && bid.cladeScore !== null && bid.observations >= PROVEN_OBSERVATIONS;
 
   let design;
@@ -203,7 +273,7 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
       capabilities: bid.capabilities,
     };
   } else {
-    design = { designId: designIdFor(contract), version: 1, ...(await author.design({ contract })) };
+    design = { designId: designIdForCapability(capability), version: 1, ...(await author.design({ contract })) };
 
     // Creation feeds the market it is the exception to. Without this the
     // registry never learns the design exists, so the next task of the same
@@ -215,7 +285,10 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
     // author" rather than stop it working.
     const stored = await registry.register?.({
       designId: design.designId,
-      category: contract.category,
+      // The resolved CAPABILITY, not the planner's phrasing — the registry's
+      // distinct categories are the taxonomy, so storing raw text would make
+      // `knownCapabilities` a list of one-off strings.
+      category: capability,
       roleInstructions: design.roleInstructions,
       capabilities: design.capabilities,
       validationHarness: harnessFor(contract),

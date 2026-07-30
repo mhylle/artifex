@@ -102,7 +102,12 @@ describe('R38 AC-1 — creation feeds the market it is the exception to', () => 
 
     expect(registered).toHaveLength(1);
     expect(registered[0]?.designId).toBe(manifest.designId);
-    expect(registered[0]?.category).toBe('research.sub-question');
+    // The resolved CAPABILITY, not the planner's phrasing (R38 AC-0). The
+    // registry's distinct categories ARE the taxonomy, so storing raw text
+    // would make `knownCapabilities` a list of one-off strings that can never
+    // cluster. The property this test guards is that creation feeds the market;
+    // which exact string it feeds it is the mechanism, and the mechanism moved.
+    expect(registered[0]?.category).toBe('research sub question');
   });
 
   it('a REUSED design is not re-registered — nothing was authored', async () => {
@@ -143,8 +148,29 @@ describe('R38 AC-1 — creation feeds the market it is the exception to', () => 
       author: { async design() { authored = true; return { roleInstructions: 'x', capabilities: ['text'] }; } },
     });
 
-    expect(asked).toEqual(['research.sub-question']);
+    // The property is the ORDERING — the market is consulted before anything is
+    // authored, asserted by the expectation inside `bestForCategory` above.
+    // The exact string asked for is the mechanism, and it is now the resolved
+    // capability rather than the planner's raw category.
+    expect(asked).toHaveLength(1);
     expect(authored).toBe(true);
+  });
+
+  it('bids on the RESOLVED CAPABILITY, because that is what registration stores', async () => {
+    // Found by a surviving mutant. Registration writes the capability, so a bid
+    // placed on the planner's raw phrasing can never match anything the registry
+    // holds — reuse would silently revert to always-author while every other
+    // test stayed green.
+    const asked: string[] = [];
+    const lookup: RegistryLookup = {
+      async bestForCategory(category) { asked.push(category); return null; },
+      async register() { /* noop */ },
+      async knownCapabilities() { return ['research sub question']; },
+    };
+
+    await staff({ contract: contract(), registry: lookup, author });
+
+    expect(asked).toEqual(['research sub question']);
   });
 
   it('DISTRACTOR: a registry that cannot register does not break staffing', async () => {

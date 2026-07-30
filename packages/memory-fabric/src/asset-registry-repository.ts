@@ -310,6 +310,23 @@ export class AssetRegistryRepository {
     );
   }
 
+  /**
+   * The capabilities the registry knows, best-established first (R38 AC-0).
+   *
+   * Ordered by total observations so that a proposed category which could join
+   * two capabilities joins the better-evidenced one — the tie-break is the
+   * system's own measured history rather than alphabetical luck.
+   */
+  async knownCapabilities(): Promise<string[]> {
+    const { rows } = await this.#pool.query<{ category: string }>(
+      `SELECT category
+         FROM agent_design
+        GROUP BY category
+        ORDER BY SUM(observations) DESC, MIN(created_at) ASC`,
+    );
+    return rows.map((row) => row.category);
+  }
+
   /** Every ratchet decision against a design, adopted or reverted, newest last. */
   async deltasFor(designId: string): Promise<AssetDelta[]> {
     const { rows } = await this.#pool.query<DeltaRow>(

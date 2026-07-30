@@ -30,6 +30,7 @@ export interface AssetStore {
     readonly validationHarness?: { readonly checks: string[] };
   }): Promise<{ readonly version: number }>;
   recordOutcome(designId: string, score: number, effort?: number): Promise<unknown>;
+  knownCapabilities(): Promise<string[]>;
 }
 
 export interface WorkerDependencies {
@@ -62,6 +63,9 @@ export function buildWorkerSeams(deps: WorkerDependencies, missionId: string): M
       // about which version did the work (defect `fe690036`).
       register: async (design) => ({ version: (await assets.upsert(design)).version }),
       recordOutcome: async (designId, score, effort) => void (await assets.recordOutcome(designId, score, effort)),
+      // Without this the taxonomy never converges: clustering falls back to
+      // normalising each proposal alone, and the planner never repeats a name.
+      knownCapabilities: () => assets.knownCapabilities(),
     },
   );
 }

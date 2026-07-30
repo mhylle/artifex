@@ -33,6 +33,7 @@ function dependencies() {
     recordOutcome: [] as Array<{ designId: string; score: number }>,
     replay: [] as string[],
     harnesses: [] as Array<{ checks: string[] } | null>,
+    capabilities: 0,
   };
 
   const deps: WorkerDependencies = {
@@ -49,6 +50,7 @@ function dependencies() {
       return { version: 7 };
     },
       async recordOutcome(designId: string, score: number) { calls.recordOutcome.push({ designId, score }); },
+      async knownCapabilities() { calls.capabilities += 1; return ['hand tool overview']; },
     },
     ledger: {
       async replay() { calls.replay.push(MISSION_ID); return []; },
@@ -107,6 +109,8 @@ describe('buildWorkerSeams — the wiring a missing argument would silently disa
 
     expect(typeof seams.registry.register, 'a stub has no register').toBe('function');
     expect(typeof seams.registry.recordOutcome, 'a stub has no recordOutcome').toBe('function');
+    // Without this the taxonomy cannot converge (R38 AC-0).
+    expect(typeof seams.registry.knownCapabilities, 'a stub has no knownCapabilities').toBe('function');
   });
 
   it('wires the operator control seam to the ledger, not to a permanent "run"', async () => {
