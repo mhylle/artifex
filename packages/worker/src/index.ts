@@ -13,6 +13,7 @@ export * from './constitution.js';
 export * from './tier-policy.js';
 export * from './orchestrator.js';
 export * from './planner.js';
+export * from './agent-creator.js';
 
 export const PACKAGE_NAME = '@artifex/worker';
 
