@@ -122,6 +122,44 @@
     </ul>
 
     <app-inspector [task]="selectedTask()" />
+
+    <section class="cockpit" aria-label="cockpit controls">
+      <h3>Cockpit</h3>
+      @if (selectedTaskId(); as taskId) {
+        <div class="row">
+          <button type="button" (click)="pauseTask()">Pause</button>
+          <button type="button" (click)="resumeTask()">Resume</button>
+          <button type="button" (click)="cancelTask()">Cancel</button>
+        </div>
+        <div class="row">
+          <label for="grant">Top up</label>
+          <input id="grant" type="number" min="1" [ngModel]="grantAmount()" (ngModelChange)="grantAmount.set(+$event)" name="grant" />
+          <button type="button" (click)="grantBudget()">Grant budget</button>
+        </div>
+        <div class="row">
+          <label for="note">Note</label>
+          <input id="note" [ngModel]="noteText()" (ngModelChange)="noteText.set($event)" name="note" placeholder="Context for the Learning Agent" />
+          <button type="button" (click)="annotate()">Annotate</button>
+        </div>
+      } @else {
+        <p class="empty">Select a task to pause, cancel, top up or annotate it.</p>
+      }
+
+      <div class="row">
+        <label for="dial">Autonomy dial (mission)</label>
+        <select id="dial" [ngModel]="dial()" (ngModelChange)="dial.set($event)" name="dial">
+          <option value="autonomous">autonomous</option>
+          <option value="checkpointed">checkpointed</option>
+          <option value="supervised">supervised</option>
+        </select>
+        <button type="button" (click)="turnDial()">Turn dial</button>
+        <span class="hint">applies at the next gate</span>
+      </div>
+
+      @if (cockpitError(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+    </section>
   </section>
 } @else {
   <p class="empty">Watch a mission to see its trail.</p>

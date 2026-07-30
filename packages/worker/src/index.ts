@@ -16,7 +16,7 @@ import { Worker } from 'bullmq';
 import pg from 'pg';
 
 import { runMission } from './mission-loop.js';
-import { createMissionSeams } from './runtime.js';
+import { createLedgerControl, createMissionSeams } from './runtime.js';
 
 export * from './constitution.js';
 export * from './tier-policy.js';
@@ -92,7 +92,14 @@ export async function main(): Promise<void> {
 
       const result = await runMission(
         contract,
-        createMissionSeams(generator, { worker, evaluator }),
+        // The operator's pause/cancel reaches the runtime here. Without this
+        // argument the control plane would append signals nothing ever read —
+        // the exact shape of defects 04071ce9 and b3b4e554.
+        createMissionSeams(
+          generator,
+          { worker, evaluator },
+          createLedgerControl(ledger, contract.missionId),
+        ),
         {
           now: new Date().toISOString(),
           // Streamed as they happen (defect `b3b4e554`). Appending the whole

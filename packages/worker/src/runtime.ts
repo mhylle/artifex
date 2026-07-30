@@ -17,6 +17,7 @@
  */
 import { Type } from '@sinclair/typebox';
 
+import type { ControlSignals } from './mission-loop.js';
 import { createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
 import type { MissionSeams } from './mission-loop.js';
@@ -89,9 +90,48 @@ function keepKnown<T extends { criterionId: string }>(items: readonly T[], known
   return items.filter((item) => known.has(item.criterionId));
 }
 
+/** The slice of the ledger the control seam reads. */
+export interface ControlReader {
+  replay(filter: { missionId: string }): Promise<Array<{ taskId: string | null; type: string }>>;
+}
+
+/**
+ * Operator control, derived from the ledger (R17).
+ *
+ * The same fold the control plane performs, run on the runtime side — there is
+ * no shared "is paused" state, because a second copy is a second truth. Both
+ * read the trail, so they cannot disagree.
+ *
+ * A failed read means RUN, deliberately: a database hiccup must not silently
+ * pause a mission. Failing open is the safer error here, because a wrongly
+ * paused mission looks exactly like an idle one and nobody investigates it.
+ */
+export function createLedgerControl(reader: ControlReader, missionId = ''): ControlSignals {
+  return {
+    async check(taskId: string) {
+      let events: Array<{ taskId: string | null; type: string }>;
+      try {
+        events = await reader.replay({ missionId });
+      } catch {
+        return 'run';
+      }
+
+      let state: 'run' | 'paused' | 'cancelled' = 'run';
+      for (const event of events) {
+        if (event.taskId !== null && event.taskId !== taskId) continue;
+        if (event.type === 'operator.paused') state = 'paused';
+        else if (event.type === 'operator.resumed') state = 'run';
+        else if (event.type === 'operator.cancelled') return 'cancelled';
+      }
+      return state;
+    },
+  };
+}
+
 export function createMissionSeams(
   generator: StructuredGenerator,
   models: RuntimeModels,
+  control?: ControlSignals,
 ): MissionSeams {
   const gen = (
     m: { provider: string; model: string },
@@ -100,6 +140,10 @@ export function createMissionSeams(
   ): Promise<unknown> => generator.generate({ provider: m.provider, model: m.model, probe: { schema, prompt } });
 
   return {
+    // Passed through rather than constructed here: the runtime owns the ledger
+    // connection, and this module owns the model seams.
+    ...(control === undefined ? {} : { control }),
+
     planner: createStepwisePlanner({
       generator,
       provider: models.evaluator.provider,

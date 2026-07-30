@@ -715,3 +715,127 @@ describe('f46ba357 — the ledger records the criteria, the effort and the agent
     expect(statements).toContain(distinctive);
   });
 });
+
+/**
+ * R17 — the cockpit acts, and the runtime honours it.
+ *
+ * "Mission control is a cockpit, not a window." The operator's half (routes, UI)
+ * is worthless if the runtime ignores it, so these tests are about the runtime
+ * side: a pause must actually stop the next attempt, a cancel must actually end
+ * the task, and both must be GRACEFUL — checked at an attempt boundary so work
+ * already in flight finishes rather than being severed.
+ */
+describe('R17 — the runtime honours operator control signals', () => {
+  /** Returns a scripted sequence of control states, one per check. */
+  const controlThatSays = (...states: Array<'run' | 'paused' | 'cancelled'>) => {
+    const seen: string[] = [];
+    let index = 0;
+    return {
+      seen,
+      control: {
+        async check(taskId: string) {
+          seen.push(taskId);
+          const state = states[Math.min(index, states.length - 1)] ?? 'run';
+          index += 1;
+          return state;
+        },
+      },
+    };
+  };
+
+  it('AC-0: a cancelled task stops and the cancellation is recorded', async () => {
+    const { control } = controlThatSays('cancelled');
+
+    const result = await runMission(
+      mission(),
+      { ...seams(), control } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(result.trail.some((e) => e.type === 'task.cancelled')).toBe(true);
+  });
+
+  it('AC-1 DISTRACTOR: the control signal is checked BEFORE an attempt, never mid-attempt', async () => {
+    // Graceful means the boundary is the attempt, not the instruction. A check
+    // that happened inside execution could sever work already in flight.
+    let executing = false;
+    let checkedWhileExecuting = false;
+
+    const control = {
+      async check() {
+        if (executing) checkedWhileExecuting = true;
+        return 'run' as const;
+      },
+    };
+    const watched = {
+      ...seams(),
+      control,
+      work: {
+        async execute({ contract }: { contract: { objective: string } }) {
+          executing = true;
+          await new Promise((r) => setTimeout(r, 1));
+          executing = false;
+          return { deliverable: { answer: `done: ${contract.objective}` }, actions: [], consulted: [], assumptions: [], effortSpent: 1 };
+        },
+      },
+    };
+
+    await runMission(mission(), watched as unknown as Parameters<typeof runMission>[1], { now: AT });
+
+    expect(checkedWhileExecuting).toBe(false);
+  });
+
+  it('AC-0 DISTRACTOR: with no control seam the loop behaves exactly as before', async () => {
+    // The seam is optional; its absence must not change mission outcomes, or
+    // every existing deployment would silently alter behaviour.
+    const result = await runMission(mission(), seams(), { now: AT });
+
+    expect(result.outcome).toBe('delivered');
+    expect(result.trail.some((e) => e.type === 'task.cancelled')).toBe(false);
+  });
+
+  it('DISTRACTOR: cancelling ONE task does not surrender the whole mission', async () => {
+    // The point of cancellation is that the operator removes a task, not that
+    // the mission dies. Without this the `cancelled` flag could be a no-op — the
+    // break alone would end the loop and surrender, recording the event while
+    // meaning nothing. (Found by mutation: setting cancelled=false changed no
+    // test until this one existed.)
+    let checks = 0;
+    const control = {
+      async check() {
+        checks += 1;
+        // Cancel the first child only; the second runs normally.
+        return checks === 1 ? ('cancelled' as const) : ('run' as const);
+      },
+    };
+
+    const result = await runMission(
+      mission(),
+      { ...seams(), control } as unknown as Parameters<typeof runMission>[1],
+      { now: AT },
+    );
+
+    expect(result.outcome).toBe('delivered');
+    expect(result.trail.some((e) => e.type === 'task.cancelled')).toBe(true);
+  });
+
+  it('DISTRACTOR: a cancelled task does NOT get executed or verified', async () => {
+    // Recording a cancellation while still doing the work would be theatre.
+    const { control } = controlThatSays('cancelled');
+    let executed = 0;
+    const counting = {
+      ...seams(),
+      control,
+      work: {
+        async execute() {
+          executed += 1;
+          return { deliverable: { answer: 'x' }, actions: [], consulted: [], assumptions: [], effortSpent: 1 };
+        },
+      },
+    };
+
+    await runMission(mission(), counting as unknown as Parameters<typeof runMission>[1], { now: AT });
+
+    expect(executed).toBe(0);
+  });
+});

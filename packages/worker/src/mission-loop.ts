@@ -46,6 +46,18 @@ export interface Clarifier {
   }>;
 }
 
+/**
+ * The operator's control signals, derived from the ledger (R17).
+ *
+ * Deliberately a *query* rather than a stored flag: pause and cancel are facts
+ * the operator appended to the trail, so the runtime reads them the same way the
+ * dashboard does. Nothing holds a second copy of "is this paused", which keeps
+ * invariant #1 true on the runtime side as well as the view side.
+ */
+export interface ControlSignals {
+  check(taskId: string): Promise<'run' | 'paused' | 'cancelled'>;
+}
+
 export interface MissionSeams {
   readonly planner: Planner;
   readonly coverageJudge: CoverageJudge;
@@ -56,6 +68,11 @@ export interface MissionSeams {
   readonly completionJudge: CompletionJudge;
   readonly reconciler: Reconciler;
   readonly clarifier?: Clarifier;
+  /**
+   * Optional: without it the loop runs exactly as before, which matters because
+   * every existing caller predates operator control.
+   */
+  readonly control?: ControlSignals;
 }
 
 export interface Escalation {
@@ -271,6 +288,8 @@ export async function runMission(
       let tierBump = 0;
       let delivered: unknown = null;
       let settled = false;
+      let cancelled = false;
+      let paused = false;
 
       // Bounded by the ladder AND by maxAttempts — whichever runs out first.
       const maxAttempts = Math.min(child.stoppingConditions.maxAttempts, ladder.length + 1);
@@ -278,6 +297,33 @@ export async function runMission(
       let retriesUsed = 0;
 
       for (let attempt = 0; attempt < maxAttempts && !settled; attempt += 1) {
+        // Checked HERE, at the attempt boundary, and nowhere else. That is what
+        // makes a pause graceful: work already in flight finishes its attempt,
+        // because the only place the runtime asks is before starting the next.
+        if (seams.control !== undefined) {
+          const signal = await seams.control.check(child.taskId);
+
+          if (signal === 'cancelled') {
+            // Cancellation is accounted, not vanished: a task that simply
+            // stopped appearing would be indistinguishable from one never
+            // contracted, and cancelled work still teaches.
+            record(child.taskId, 'decision', 'task.cancelled', 'human', {
+              objective: child.objective, attemptsUsed: attempt,
+            });
+            cancelled = true;
+            break;
+          }
+
+          if (signal === 'paused') {
+            record(child.taskId, 'decision', 'task.paused', 'human', { objective: child.objective });
+            // A paused task yields rather than spins: the mission stops here and
+            // a resume starts a fresh run. Blocking would hold the worker
+            // hostage to a human's lunch break.
+            paused = true;
+            break;
+          }
+        }
+
         let manifest;
         try {
           manifest = await staff({ contract: child, registry: seams.registry, author: seams.author });
@@ -432,6 +478,19 @@ export async function runMission(
         record(child.taskId, 'escalation', 'escalation.rung_climbed', 'orchestrator', {
           rung, fromTier, toTier, errorClasses: bVerdict.findings.map((f) => f.errorClass),
         });
+      }
+
+      if (cancelled) {
+        // Excluded from the assembly: folding a deliverable the operator stopped
+        // would put the cancelled work in the result anyway.
+        continue;
+      }
+
+      if (paused) {
+        return fail(
+          `task ${child.taskId} is paused by an operator`,
+          [`"${child.objective}" is paused — resume it to continue this mission`],
+        );
       }
 
       if (!settled) {

@@ -39,3 +39,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .zoom button { padding: .15rem .5rem; font-size: .8rem; }
 .zoom .level { font-size: .72rem; color: #666; min-width: 2.6rem; text-align: right; }
 .canvas { list-style: none; padding: 0; margin: 0; }
+.cockpit { margin-top: 1rem; border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
+.cockpit h3 { margin: 0 0 .6rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; }
+.cockpit .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .5rem; }
+.cockpit label { font-size: .78rem; color: #666; }
+.cockpit input, .cockpit select { padding: .3rem .5rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
+.cockpit input[type='number'] { width: 5rem; }
+.cockpit .hint { font-size: .72rem; color: #888; }

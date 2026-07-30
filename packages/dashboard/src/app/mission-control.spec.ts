@@ -9,6 +9,8 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { Cockpit } from './cockpit';
+import type { CockpitCommand } from './cockpit';
 import { Fleet } from './fleet';
 import { LedgerFeed } from './ledger-feed';
 import { MissionControl } from './mission-control';
@@ -432,5 +434,111 @@ describe('MissionControl — inspector (R16)', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('not reported');
+  });
+});
+
+/**
+ * R17 — the cockpit acts. These tests are about REACHABILITY as much as
+ * behaviour: a control an operator cannot click is the defect shape this
+ * project has already shipped (an unreachable focus() made the breadcrumb
+ * permanently empty despite passing unit tests).
+ */
+describe('MissionControl — cockpit actions (R17)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let component: MissionControl;
+  let feed: LedgerFeed;
+  let sent: CockpitCommand[];
+
+  beforeEach(async () => {
+    sent = [];
+    const stub: Pick<Cockpit, 'act'> = { async act(command) { sent.push(command); } };
+
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting(), { provide: Cockpit, useValue: stub }],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    component = fixture.componentInstance;
+    feed = TestBed.inject(LedgerFeed);
+
+    // select() calls feed.watch(), which clears the event list — so the mission
+    // is chosen FIRST and the trail set afterwards, mirroring what really
+    // happens when a watch replays a mission's history.
+    component.select(MISSION);
+    feed.events.set([
+      ev(1, 'mission.started', MISSION, { objective: 'Root' }),
+      ev(2, 'task.contracted', 't-a', {
+        objective: 'Part A', parentTaskId: MISSION, ceiling: 10,
+        acceptanceCriteria: [{ criterionId: 'ac-1', statement: 'Cites a source.' }],
+      }),
+    ]);
+    component.selectTask('t-a');
+    fixture.detectChanges();
+  });
+
+  it('AC-0: pausing the selected task sends the action with its task id', async () => {
+    await component.pauseTask();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.action).toBe('pause');
+    expect(sent[0]?.taskId).toBe('t-a');
+    expect(sent[0]?.missionId).toBe(MISSION);
+  });
+
+  it('AC-0: cancel and resume are both reachable for the selected task', async () => {
+    await component.cancelTask();
+    await component.resumeTask();
+
+    expect(sent.map((c) => c.action)).toEqual(['cancel', 'resume']);
+  });
+
+  it('AC-2: a budget grant carries the amount', async () => {
+    component.grantAmount.set(25);
+
+    await component.grantBudget();
+
+    expect(sent[0]?.action).toBe('grant_budget');
+    expect(sent[0]?.amount).toBe(25);
+  });
+
+  it('AC-3: turning the dial addresses the MISSION, not one task', async () => {
+    // The dial is a property of the mission's contract; scoping it to a task
+    // would let one leaf widen its own autonomy.
+    component.dial.set('supervised');
+
+    await component.turnDial();
+
+    expect(sent[0]?.action).toBe('turn_dial');
+    expect(sent[0]?.taskId).toBeNull();
+    expect(sent[0]?.autonomyDial).toBe('supervised');
+  });
+
+  it('an annotation carries the note', async () => {
+    component.noteText.set('Watch this one.');
+
+    await component.annotate();
+
+    expect(sent[0]?.action).toBe('annotate');
+    expect(sent[0]?.note).toBe('Watch this one.');
+  });
+
+  it('DISTRACTOR: the controls are actually RENDERED, not just callable', async () => {
+    // A method an operator cannot reach is not a feature. This is the failure
+    // that made the breadcrumb permanently empty despite green unit tests.
+    const labels = Array.from(
+      fixture.nativeElement.querySelectorAll('.cockpit button') as NodeListOf<HTMLButtonElement>,
+    ).map((b) => b.textContent?.trim().toLowerCase() ?? '');
+
+    for (const expected of ['pause', 'resume', 'cancel']) {
+      expect(labels.some((l) => l.includes(expected)), `no button for "${expected}"`).toBe(true);
+    }
+  });
+
+  it('DISTRACTOR: an empty annotation is not sent', async () => {
+    component.noteText.set('   ');
+
+    await component.annotate();
+
+    expect(sent).toHaveLength(0);
   });
 });

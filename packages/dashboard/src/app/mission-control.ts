@@ -10,6 +10,8 @@ import type { OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { CanvasNode } from './canvas-node';
+import { Cockpit } from './cockpit';
+import type { CockpitAction } from './cockpit';
 import { Fleet } from './fleet';
 import { Inspector } from './inspector';
 import { LedgerFeed } from './ledger-feed';
@@ -28,6 +30,7 @@ export class MissionControl implements OnInit {
   readonly feed = inject(LedgerFeed);
   readonly fleet = inject(Fleet);
   readonly #intake = inject(MissionIntake);
+  readonly #cockpit = inject(Cockpit);
 
   readonly missionId = signal('');
 
@@ -75,6 +78,59 @@ export class MissionControl implements OnInit {
     if (taskId === null) return null;
     return findTask(this.feed.tree()?.children ?? [], taskId);
   });
+
+  /** Cockpit inputs. The dial addresses the mission; the rest address a task. */
+  readonly grantAmount = signal(10);
+  readonly dial = signal<'autonomous' | 'checkpointed' | 'supervised'>('checkpointed');
+  readonly noteText = signal('');
+  readonly cockpitError = signal<string | null>(null);
+
+  async pauseTask(): Promise<void> { await this.#actOnTask('pause'); }
+  async resumeTask(): Promise<void> { await this.#actOnTask('resume'); }
+  async cancelTask(): Promise<void> { await this.#actOnTask('cancel'); }
+
+  async grantBudget(): Promise<void> {
+    await this.#actOnTask('grant_budget', { amount: this.grantAmount() });
+  }
+
+  async annotate(): Promise<void> {
+    const note = this.noteText().trim();
+    // An empty annotation teaches the Learning Agent nothing and clutters the
+    // trail; refuse it here rather than append it.
+    if (note.length === 0) return;
+    await this.#actOnTask('annotate', { note });
+    this.noteText.set('');
+  }
+
+  /**
+   * Turn the autonomy dial.
+   *
+   * Addressed to the MISSION (taskId null), never to a task: the dial is
+   * mission-level, fixed at intake, and a child may never widen its own autonomy.
+   */
+  async turnDial(): Promise<void> {
+    const missionId = this.missionId();
+    if (missionId.length === 0) return;
+    await this.#send({ missionId, taskId: null, action: 'turn_dial', autonomyDial: this.dial() });
+  }
+
+  async #actOnTask(action: CockpitAction, extra: Record<string, unknown> = {}): Promise<void> {
+    const missionId = this.missionId();
+    const taskId = this.selectedTaskId();
+    if (missionId.length === 0 || taskId === null) return;
+    await this.#send({ missionId, taskId, action, ...extra });
+  }
+
+  async #send(command: Parameters<Cockpit['act']>[0]): Promise<void> {
+    try {
+      await this.#cockpit.act(command);
+      this.cockpitError.set(null);
+    } catch (cause: unknown) {
+      // Surfaced: an action that silently failed would leave the operator
+      // believing they had stopped something that is still running.
+      this.cockpitError.set(messageOf(cause));
+    }
+  }
 
   selectTask(taskId: string): void {
     this.selectedTaskId.set(taskId);

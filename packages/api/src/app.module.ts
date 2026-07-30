@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import { Pool } from 'pg';
 
 import { AppController } from './app.controller';
+import { CockpitService } from './cockpit.service';
 import { AppService } from './app.service';
 import { LedgerGateway } from './ledger.gateway';
 import { LedgerLiveBridge } from './ledger-live.bridge';
@@ -56,6 +57,14 @@ function connectionString(): string {
       provide: MissionIntakeService,
       useFactory: (q, sink, clock) => new MissionIntakeService(q, sink, clock),
       inject: [MISSION_QUEUE, LEDGER_SINK, INTAKE_CLOCK],
+    },
+    {
+      // Human action is a first-class ledger write, which is why the control
+      // plane holds the sink here alongside intake — per packages/api/CLAUDE.md,
+      // the API writes gate/intake events and reads everything else.
+      provide: CockpitService,
+      useFactory: (sink, reader, clock) => new CockpitService(sink, reader, clock),
+      inject: [LEDGER_SINK, LEDGER_READER, INTAKE_CLOCK],
     },
     {
       provide: LedgerStreamService,
