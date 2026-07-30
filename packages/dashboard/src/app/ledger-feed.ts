@@ -29,7 +29,13 @@ export class LedgerFeed {
 
   #socket: Socket | undefined;
 
-  watch(missionId: string, url = 'http://localhost:3000'): void {
+  /**
+   * `127.0.0.1` rather than `localhost` deliberately. On this machine WSL's
+   * `wslrelay.exe` holds IPv6 `[::1]:3000`, and browsers resolve `localhost` to
+   * `::1` first — so a `localhost` URL reaches the relay instead of the control
+   * plane, and the socket silently never connects.
+   */
+  watch(missionId: string, url = 'http://127.0.0.1:3000'): void {
     this.#socket?.disconnect();
     this.events.set([]);
 

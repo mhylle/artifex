@@ -16,11 +16,15 @@
     "dist"
   ],
   "devDependencies": {
-    "@types/node": "^26.1.1"
+    "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0"
   },
   "dependencies": {
+    "@artifex/memory-fabric": "^0.0.0",
     "@artifex/model-router": "^0.0.0",
     "@artifex/shared-types": "^0.0.0",
-    "@sinclair/typebox": "^0.34.52"
+    "@sinclair/typebox": "^0.34.52",
+    "bullmq": "^5.81.3",
+    "pg": "^8.22.0"
   }
 }

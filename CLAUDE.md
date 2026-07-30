@@ -114,6 +114,7 @@ Do NOT dump full details into `CLAUDE-history.md` — it is an index only. Do NO
 
 ## Durable Working Preferences
 
+- **An application cannot be considered done if it has not been tested End 2 End as a user would have used the application.** Not "the logic was exercised by a test harness" — *the actual entrypoints a user or operator would run*, driven the way they would drive them. Learned the hard way on 2026-07-30: every phase was dogfooded against real Postgres, real Redis, real models, and the P13 dogfood passed 20/20 — but each dogfood script **assembled the seams itself**, so `packages/worker`'s `main()` was still the P0 placeholder. The system's logic was proven end to end; the *deployable worker process* had never been started. If the binary, the HTTP route, or the button has not been exercised, that path is untested no matter how green the suite is.
 - **Iterative delivery:** ship thin base first, commit full depth to roadmap — never cut scope, only sequence it
 - **Brainstorming method:** Socratic questioning, round-by-round, functional not technical
 - **Document options at every decision point:** options considered, choice made, where deferred options land on the roadmap

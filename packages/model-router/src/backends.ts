@@ -67,6 +67,33 @@ function languageModelFor(
     name: provider,
     baseURL: options.localBaseUrl,
     supportsStructuredOutputs: true,
+    /**
+     * Disable the model's thinking channel.
+     *
+     * Reasoning models (qwen3.5 among them) emit chain-of-thought into a
+     * separate `reasoning` field, but it shares the completion budget — so the
+     * thinking consumes the whole allowance and `content` comes back EMPTY,
+     * surfacing as "the model did not return a response". Measured on
+     * qwen3.5:2b: 3,360 reasoning tokens and no usable content; with
+     * `reasoning_effort: none`, zero reasoning tokens and the answer straight
+     * away.
+     *
+     * Injected via `fetch` rather than a provider option because it must reach
+     * the wire regardless of what the SDK chooses to forward. Structured output
+     * wants an answer, not deliberation — and the deliberation was never
+     * readable by anything downstream anyway.
+     */
+    fetch: async (
+      input: Parameters<typeof globalThis.fetch>[0],
+      init?: RequestInit,
+    ): Promise<Response> => {
+      if (init?.body === undefined || typeof init.body !== 'string') {
+        return globalThis.fetch(input, init);
+      }
+      const body = JSON.parse(init.body) as Record<string, unknown>;
+      body['reasoning_effort'] = 'none';
+      return globalThis.fetch(input, { ...init, body: JSON.stringify(body) });
+    },
   })(model);
 }
 
