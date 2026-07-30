@@ -110,7 +110,10 @@ export async function main(): Promise<void> {
           createLedgerControl(ledger, contract.missionId),
         ),
         {
-          now: new Date().toISOString(),
+          // A real clock, read per event (defect `74950cfc`). Passing a single
+          // instant made every event in a run claim the same timestamp, so the
+          // timeline lens could show no elapsed time and no stall.
+          now: () => new Date().toISOString(),
           resumeFrom: priorTrail,
           // Streamed as they happen (defect `b3b4e554`). Appending the whole
           // trail after the run left a watching dashboard blind for the entire

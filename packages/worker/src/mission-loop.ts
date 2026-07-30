@@ -218,7 +218,19 @@ export async function runMission(
   mission: TaskContract,
   seams: MissionSeams,
   options: {
-    readonly now: string;
+    /**
+     * A CLOCK, not an instant (defect `74950cfc`).
+     *
+     * `now` used to be a single timestamp captured once and stamped on every
+     * event, so a two-minute mission produced a trail in which everything
+     * happened at the same moment — and the timeline lens could show no stall,
+     * because there were no gaps to show.
+     *
+     * Determinism was the right instinct and it is preserved: a test passes
+     * `() => AT` and gets exactly the old frozen behaviour. Production passes
+     * `() => new Date().toISOString()` and gets the truth.
+     */
+    readonly now: () => string;
     /**
      * How many times to retry the SAME tier before spending an escalation rung
      * (defect `626f6596`). The ladder exists for *substantive* failure — work
@@ -255,7 +267,7 @@ export async function runMission(
     readonly resumeFrom?: readonly LedgerEventInput[];
   },
 ): Promise<MissionResult> {
-  const { now } = options;
+  const now = options.now;
   const transientRetries = options.transientRetries ?? 1;
   const trail: LedgerEventInput[] = [];
   const escalations: Escalation[] = [];
@@ -296,7 +308,9 @@ export async function runMission(
       type,
       actor: { kind: actorKind, id: actorKind, displayName: null },
       payload,
-      occurredAt: now,
+      // Read per event, which is the entire fix: the trail's timestamps now
+      // describe when things happened rather than when the run began.
+      occurredAt: now(),
     };
     trail.push(event);
 
@@ -313,7 +327,7 @@ export async function runMission(
   const verdictMeta = (n: number) => ({
     verdictId: `${mission.taskId.slice(0, 24)}${(n + 0xf00000).toString(16).padStart(12, '0')}`,
     reviewerId: mission.taskId,
-    issuedAt: now,
+    issuedAt: now(),
   });
 
   /**
@@ -592,7 +606,7 @@ export async function runMission(
           outcome = await runSpecialist({
             contract: workerView, agentId: manifest.designId, judge: seams.clarityJudge, work: seams.work,
             bundleId: `${child.taskId.slice(0, 24)}${(attempt + 0xb00000).toString(16).padStart(12, '0')}`,
-            producedAt: now,
+            producedAt: now(),
           });
         } catch (error) {
           // Retry the same tier first. Only a repeated failure is evidence of a

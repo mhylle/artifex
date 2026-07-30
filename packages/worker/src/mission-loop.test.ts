@@ -92,14 +92,14 @@ function seams(options: { gateBFailuresPerTask?: Record<number, number> } = {}):
 
 describe('R9 AC-1 — the full loop completes and leaves an ordered ledger trail', () => {
   it('delivers a verified result', async () => {
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
 
     expect(result.outcome).toBe('delivered');
     expect(result.deliverable).toEqual({ summary: 'reconciled 2 parts' });
   });
 
   it('records every stage of the loop, in order', async () => {
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
     const types = result.trail.map((e) => e.type);
 
     // The stages the design names: decompose, Gate A, staff, execute, Gate B, fold.
@@ -118,7 +118,7 @@ describe('R9 AC-1 — the full loop completes and leaves an ordered ledger trail
   });
 
   it('DISTRACTOR: Gate A runs BEFORE any execution — verifying both ends means before, too', async () => {
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
     const types = result.trail.map((e) => e.type);
 
     expect(types.indexOf('gate_a.verdict_issued')).toBeLessThan(types.indexOf('task.executed'));
@@ -130,14 +130,14 @@ describe('R9 AC-1 — the full loop completes and leaves an ordered ledger trail
       coverageJudge: { async assess() { return { coverage: [{ criterionId: 'm-1', coveredByTaskIds: [] }] }; } },
     };
 
-    const result = await runMission(mission(), uncovered, { now: AT });
+    const result = await runMission(mission(), uncovered, { now: () => AT });
 
     expect(result.outcome).toBe('surrendered');
     expect(result.trail.map((e) => e.type)).not.toContain('task.executed');
   });
 
   it('every event carries the mission id, so the trail is replayable as one unit', async () => {
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
 
     expect(result.trail.every((e) => e.missionId === MISSION_ID)).toBe(true);
   });
@@ -145,7 +145,7 @@ describe('R9 AC-1 — the full loop completes and leaves an ordered ledger trail
 
 describe('R9 AC-2 — one Gate B failure climbs exactly one rung', () => {
   it('escalates one rung and retries at a HIGHER tier', async () => {
-    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 1 } }), { now: AT });
+    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 1 } }), { now: () => AT });
 
     expect(result.outcome).toBe('delivered');
     expect(result.escalations).toHaveLength(1);
@@ -154,7 +154,7 @@ describe('R9 AC-2 — one Gate B failure climbs exactly one rung', () => {
   });
 
   it('records BOTH the failure and the escalation as ledger events', async () => {
-    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 1 } }), { now: AT });
+    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 1 } }), { now: () => AT });
     const types = result.trail.map((e) => e.type);
 
     expect(types.filter((t) => t === 'gate_b.verdict_issued').length).toBeGreaterThanOrEqual(3);
@@ -164,7 +164,7 @@ describe('R9 AC-2 — one Gate B failure climbs exactly one rung', () => {
   });
 
   it('DISTRACTOR: exactly ONE rung per failure — a single failure does not jump the ladder', async () => {
-    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 1 } }), { now: AT });
+    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 1 } }), { now: () => AT });
 
     expect(result.escalations).toHaveLength(1);
     // The ladder's second rung must NOT have been used for a single failure.
@@ -173,27 +173,27 @@ describe('R9 AC-2 — one Gate B failure climbs exactly one rung', () => {
 
   it('DISTRACTOR: two failures climb two rungs, in ladder order', async () => {
     // Proves escalation is per-failure, not a one-off flag.
-    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 2 } }), { now: AT });
+    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 2 } }), { now: () => AT });
 
     expect(result.escalations.map((e) => e.rung)).toEqual(['retry_higher_tier', 'different_agent']);
   });
 
   it('DISTRACTOR: a task that never fails climbs no rungs at all', async () => {
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
 
     expect(result.escalations).toHaveLength(0);
   });
 
   it('surrenders when the ladder is exhausted rather than looping forever', async () => {
     // stopTryingWhen / maxAttempts exist precisely so failure is bounded.
-    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 99 } }), { now: AT });
+    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 99 } }), { now: () => AT });
 
     expect(result.outcome).toBe('surrendered');
     expect(result.trail.map((e) => e.type)).toContain('mission.surrendered');
   });
 
   it('DISTRACTOR: surrender is a first-class outcome carrying what was learned, not a crash', async () => {
-    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 99 } }), { now: AT });
+    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 99 } }), { now: () => AT });
     const surrender = result.trail.find((e) => e.type === 'mission.surrendered');
 
     expect(surrender?.payload).toHaveProperty('blockers');
@@ -203,7 +203,7 @@ describe('R9 AC-2 — one Gate B failure climbs exactly one rung', () => {
 
 describe('R9 — the loop honours the tier policy per seam', () => {
   it('staffs leaves at the cheapest tier their risk permits', async () => {
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
     const staffed = result.trail.filter((e) => e.type === 'agent.staffed');
 
     expect(staffed.length).toBe(2);
@@ -213,7 +213,7 @@ describe('R9 — the loop honours the tier policy per seam', () => {
   });
 
   it('DISTRACTOR: the retry tier is higher than the original, not merely different', async () => {
-    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 1 } }), { now: AT });
+    const result = await runMission(mission(), seams({ gateBFailuresPerTask: { 0: 1 } }), { now: () => AT });
     const escalation = result.escalations[0]!;
 
     expect(escalation.toTier).toBe(escalation.fromTier + 1);
@@ -240,7 +240,7 @@ describe('R9 — a seam that THROWS is a failure, not a crash', () => {
     // transientRetries: 0 so this exercises the ESCALATION path specifically.
     // (With the default of 1 the same failure is absorbed by a retry instead —
     // that behaviour is covered by the 626f6596 tests below.)
-    const result = await runMission(mission(), flaky, { now: AT, transientRetries: 0 });
+    const result = await runMission(mission(), flaky, { now: () => AT, transientRetries: 0 });
 
     expect(result.outcome).toBe('delivered');
     expect(result.trail.map((e) => e.type)).toContain('task.failed');
@@ -253,7 +253,7 @@ describe('R9 — a seam that THROWS is a failure, not a crash', () => {
       work: { async execute() { throw new Error('backend unreachable'); } },
     };
 
-    const result = await runMission(mission(), broken, { now: AT });
+    const result = await runMission(mission(), broken, { now: () => AT });
 
     expect(result.outcome).toBe('surrendered');
     const surrender = result.trail.find((e) => e.type === 'mission.surrendered');
@@ -266,7 +266,7 @@ describe('R9 — a seam that THROWS is a failure, not a crash', () => {
       planner: { async propose() { throw new Error('planner ran away'); } },
     };
 
-    const result = await runMission(mission(), broken, { now: AT });
+    const result = await runMission(mission(), broken, { now: () => AT });
 
     expect(result.outcome).toBe('surrendered');
     const surrender = result.trail.find((e) => e.type === 'mission.surrendered');
@@ -294,7 +294,7 @@ describe('defect 626f6596 — a TRANSIENT failure is retried before a rung is sp
       },
     };
 
-    const result = await runMission(mission(), flaky, { now: AT, transientRetries: 1 });
+    const result = await runMission(mission(), flaky, { now: () => AT, transientRetries: 1 });
 
     expect(result.outcome).toBe('delivered');
     expect(result.escalations).toHaveLength(0);
@@ -307,7 +307,7 @@ describe('defect 626f6596 — a TRANSIENT failure is retried before a rung is sp
       work: { async execute() { throw new Error('backend unreachable'); } },
     };
 
-    const result = await runMission(mission(), broken, { now: AT, transientRetries: 1 });
+    const result = await runMission(mission(), broken, { now: () => AT, transientRetries: 1 });
 
     expect(result.outcome).toBe('surrendered');
     expect(result.escalations.length).toBeGreaterThan(0);
@@ -326,7 +326,7 @@ describe('defect 626f6596 — a TRANSIENT failure is retried before a rung is sp
       },
     };
 
-    const result = await runMission(mission(), flaky, { now: AT, transientRetries: 0 });
+    const result = await runMission(mission(), flaky, { now: () => AT, transientRetries: 0 });
 
     expect(result.escalations).toHaveLength(1);
   });
@@ -346,7 +346,7 @@ describe('b3b4e554 — events are emitted as they happen, not batched at the end
     const emitted: string[] = [];
 
     const result = await runMission(mission(), seams(), {
-      now: AT,
+      now: () => AT,
       onEvent: (event) => void emitted.push(event.eventId),
     });
 
@@ -360,7 +360,7 @@ describe('b3b4e554 — events are emitted as they happen, not batched at the end
     let resolved = false;
 
     const pending = runMission(mission(), seams(), {
-      now: AT,
+      now: () => AT,
       onEvent: () => { if (!resolved) emittedBeforeResolve += 1; },
     });
     await pending;
@@ -373,7 +373,7 @@ describe('b3b4e554 — events are emitted as they happen, not batched at the end
     // The ledger append can fail transiently; losing the mission because the
     // stream hiccuped would trade a cosmetic problem for a real one.
     const result = await runMission(mission(), seams(), {
-      now: AT,
+      now: () => AT,
       onEvent: () => { throw new Error('sink exploded'); },
     });
 
@@ -437,7 +437,7 @@ describe('1e3905a4 — a bounced contract is rewritten, not retried at a bigger 
           },
         },
       } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(result.outcome).toBe('delivered');
@@ -464,7 +464,7 @@ describe('1e3905a4 — a bounced contract is rewritten, not retried at a bigger 
           },
         },
       } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     const rungs = result.escalations.map((e) => e.rung);
@@ -484,7 +484,7 @@ describe('1e3905a4 — a bounced contract is rewritten, not retried at a bigger 
         ...seams(),
         clarifier: { async clarify() { clarified += 1; return { objective: 'x', acceptanceCriteria: null }; } },
       } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(clarified).toBe(0);
@@ -492,7 +492,7 @@ describe('1e3905a4 — a bounced contract is rewritten, not retried at a bigger 
 
   it('DISTRACTOR: with no clarifier seam the mission still surrenders rather than looping forever', async () => {
     // The clarifier is optional; its absence must not hang the loop.
-    const result = await runMission(mission(), vagueSeams() as unknown as Parameters<typeof runMission>[1], { now: AT });
+    const result = await runMission(mission(), vagueSeams() as unknown as Parameters<typeof runMission>[1], { now: () => AT });
 
     expect(result.outcome).toBe('surrendered');
   });
@@ -565,7 +565,7 @@ describe('a910ed8d — decomposition recurses until leaves are atomic', () => {
     const result = await runMission(
       deepMission(),
       { ...seams(), planner: grandparentSplitter } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     const contracted = contractedIds(result.trail);
@@ -580,7 +580,7 @@ describe('a910ed8d — decomposition recurses until leaves are atomic', () => {
     const result = await runMission(
       { ...mission(), acceptanceCriteria: [{ criterionId: 'ac-1', statement: 'The only thing.' }] },
       { ...seams(), planner: splittingPlanner } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     const contracted = contractedIds(result.trail);
@@ -614,7 +614,7 @@ describe('a910ed8d — decomposition recurses until leaves are atomic', () => {
     const result = await runMission(
       deepMission(),
       { ...seams(), planner: insatiable } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(['delivered', 'surrendered']).toContain(result.outcome);
@@ -625,7 +625,7 @@ describe('a910ed8d — decomposition recurses until leaves are atomic', () => {
     const result = await runMission(
       deepMission(),
       { ...seams(), planner: splittingPlanner } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     for (const event of contractedIds(result.trail)) {
@@ -648,7 +648,7 @@ describe('f46ba357 — the ledger records the criteria, the effort and the agent
     trail.filter((e) => e.type === type);
 
   it('task.contracted carries the acceptance criteria the task will be graded on', async () => {
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
 
     const contracted = eventsOfType(result.trail, 'task.contracted');
     expect(contracted.length).toBeGreaterThan(0);
@@ -665,7 +665,7 @@ describe('f46ba357 — the ledger records the criteria, the effort and the agent
   });
 
   it('task.executed carries the effort actually spent, not just a bundle id', async () => {
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
 
     const executed = eventsOfType(result.trail, 'task.executed');
     expect(executed.length).toBeGreaterThan(0);
@@ -675,7 +675,7 @@ describe('f46ba357 — the ledger records the criteria, the effort and the agent
   });
 
   it('agent.staffed carries the design VERSION, so a clade score can attribute performance', async () => {
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
 
     const staffed = eventsOfType(result.trail, 'agent.staffed');
     expect(staffed.length).toBeGreaterThan(0);
@@ -706,7 +706,7 @@ describe('f46ba357 — the ledger records the criteria, the effort and the agent
       },
     };
 
-    const result = await runMission(mission(), custom as unknown as Parameters<typeof runMission>[1], { now: AT });
+    const result = await runMission(mission(), custom as unknown as Parameters<typeof runMission>[1], { now: () => AT });
 
     const contracted = eventsOfType(result.trail, 'task.contracted');
     const statements = contracted.flatMap((e) =>
@@ -749,7 +749,7 @@ describe('R17 — the runtime honours operator control signals', () => {
     const result = await runMission(
       mission(),
       { ...seams(), control } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(result.trail.some((e) => e.type === 'task.cancelled')).toBe(true);
@@ -780,7 +780,7 @@ describe('R17 — the runtime honours operator control signals', () => {
       },
     };
 
-    await runMission(mission(), watched as unknown as Parameters<typeof runMission>[1], { now: AT });
+    await runMission(mission(), watched as unknown as Parameters<typeof runMission>[1], { now: () => AT });
 
     expect(checkedWhileExecuting).toBe(false);
   });
@@ -788,7 +788,7 @@ describe('R17 — the runtime honours operator control signals', () => {
   it('AC-0 DISTRACTOR: with no control seam the loop behaves exactly as before', async () => {
     // The seam is optional; its absence must not change mission outcomes, or
     // every existing deployment would silently alter behaviour.
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
 
     expect(result.outcome).toBe('delivered');
     expect(result.trail.some((e) => e.type === 'task.cancelled')).toBe(false);
@@ -812,7 +812,7 @@ describe('R17 — the runtime honours operator control signals', () => {
     const result = await runMission(
       mission(),
       { ...seams(), control } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(result.outcome).toBe('delivered');
@@ -834,7 +834,7 @@ describe('R17 — the runtime honours operator control signals', () => {
       },
     };
 
-    await runMission(mission(), counting as unknown as Parameters<typeof runMission>[1], { now: AT });
+    await runMission(mission(), counting as unknown as Parameters<typeof runMission>[1], { now: () => AT });
 
     expect(executed).toBe(0);
   });
@@ -879,7 +879,7 @@ describe('9fbee9d6 — the budget ceiling actually stops a task', () => {
     const result = await runMission(
       tightBudget(),
       expensiveSeams(1) as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(result.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(true);
@@ -888,7 +888,7 @@ describe('9fbee9d6 — the budget ceiling actually stops a task', () => {
   it('DISTRACTOR: a task within its ceiling is never stopped for budget', async () => {
     // Without this, "always refuse" would satisfy the test above and halt every
     // mission in the system.
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
 
     expect(result.outcome).toBe('delivered');
     expect(result.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(false);
@@ -900,12 +900,12 @@ describe('9fbee9d6 — the budget ceiling actually stops a task', () => {
     const withoutGrant = await runMission(
       tightBudget(),
       expensiveSeams(1, 0) as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
     const withGrant = await runMission(
       tightBudget(),
       expensiveSeams(1, 50) as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(withoutGrant.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(true);
@@ -916,7 +916,7 @@ describe('9fbee9d6 — the budget ceiling actually stops a task', () => {
     const result = await runMission(
       tightBudget(),
       expensiveSeams(1) as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     const event = result.trail.find((e) => e.type === 'task.budget_exhausted');
@@ -939,7 +939,7 @@ describe('9fbee9d6 — the budget ceiling actually stops a task', () => {
     const result = await runMission(
       tightBudget(),
       noControl as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(result.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(true);
@@ -968,7 +968,7 @@ describe('607a2468 — the ladder stops for a human, per the dial', () => {
   });
 
   it('records that the task awaits a human when the ladder reaches that rung', async () => {
-    const result = await runMission(missionWithHuman(), alwaysFails(), { now: AT });
+    const result = await runMission(missionWithHuman(), alwaysFails(), { now: () => AT });
 
     expect(result.trail.some((e) => e.type === 'escalation.awaiting_human')).toBe(true);
   });
@@ -976,7 +976,7 @@ describe('607a2468 — the ladder stops for a human, per the dial', () => {
   it('DISTRACTOR: it does NOT keep retrying past the human rung', async () => {
     // The bug: human_review was climbed like any other rung and the task simply
     // carried on. Waiting means stopping, or the dial governs nothing.
-    const result = await runMission(missionWithHuman(), alwaysFails(), { now: AT });
+    const result = await runMission(missionWithHuman(), alwaysFails(), { now: () => AT });
 
     const awaiting = result.trail.findIndex((e) => e.type === 'escalation.awaiting_human');
     const executedAfter = result.trail
@@ -996,7 +996,7 @@ describe('607a2468 — the ladder stops for a human, per the dial', () => {
     const result = await runMission(
       missionWithHuman(),
       { ...alwaysFails(), control } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(result.trail.some((e) => e.type === 'escalation.awaiting_human')).toBe(false);
@@ -1018,7 +1018,7 @@ describe('607a2468 — the ladder stops for a human, per the dial', () => {
     const result = await runMission(
       autonomous,
       { ...alwaysFails(), control } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(result.trail.some((e) => e.type === 'escalation.awaiting_human')).toBe(true);
@@ -1033,11 +1033,11 @@ describe('607a2468 — the ladder stops for a human, per the dial', () => {
       control: { async check() { return 'run' as const; }, async currentDial() { return 'supervised' as const; } },
     };
 
-    const plain = await runMission(missionWithHuman(), alwaysFails(), { now: AT });
+    const plain = await runMission(missionWithHuman(), alwaysFails(), { now: () => AT });
     const dialled = await runMission(
       missionWithHuman(),
       withDial as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     const verdicts = (r: typeof plain) => r.trail.filter((e) => e.type === 'gate_b.verdict_issued');
@@ -1059,7 +1059,7 @@ describe('607a2468 — the ladder stops for a human, per the dial', () => {
 describe('R41 — a mission resumes from its trail', () => {
   /** The trail a mission leaves when one child verified and the other stopped. */
   const priorTrail = async () => {
-    const first = await runMission(mission(), seams(), { now: AT });
+    const first = await runMission(mission(), seams(), { now: () => AT });
     return first.trail;
   };
 
@@ -1085,7 +1085,7 @@ describe('R41 — a mission resumes from its trail', () => {
     const resumed = await runMission(
       mission(),
       countingPlanner as unknown as Parameters<typeof runMission>[1],
-      { now: AT, resumeFrom: trail },
+      { now: () => AT, resumeFrom: trail },
     );
 
     expect(planned).toBe(0);
@@ -1113,7 +1113,7 @@ describe('R41 — a mission resumes from its trail', () => {
     // Resume from a trail where nothing was verified, so every recovered task runs.
     const unverified = trail.filter((e) => e.type !== 'gate_b.verdict_issued');
     await runMission(mission(), watching as unknown as Parameters<typeof runMission>[1], {
-      now: AT,
+      now: () => AT,
       resumeFrom: unverified,
     });
 
@@ -1134,7 +1134,7 @@ describe('R41 — a mission resumes from its trail', () => {
     };
 
     await runMission(mission(), counting as unknown as Parameters<typeof runMission>[1], {
-      now: AT,
+      now: () => AT,
       resumeFrom: trail,
     });
 
@@ -1144,7 +1144,7 @@ describe('R41 — a mission resumes from its trail', () => {
   it('AC-0: carries the verified deliverables into the fold-up', async () => {
     const trail = await priorTrail();
 
-    const resumed = await runMission(mission(), seams(), { now: AT, resumeFrom: trail });
+    const resumed = await runMission(mission(), seams(), { now: () => AT, resumeFrom: trail });
 
     expect(resumed.outcome).toBe('delivered');
     expect(resumed.deliverable).not.toBeNull();
@@ -1155,7 +1155,7 @@ describe('R41 — a mission resumes from its trail', () => {
     // every fact and make replay itself unfaithful.
     const trail = await priorTrail();
 
-    const resumed = await runMission(mission(), seams(), { now: AT, resumeFrom: trail });
+    const resumed = await runMission(mission(), seams(), { now: () => AT, resumeFrom: trail });
 
     const contracted = resumed.trail.filter((e) => e.type === 'task.contracted');
     const executed = resumed.trail.filter((e) => e.type === 'task.executed');
@@ -1166,7 +1166,7 @@ describe('R41 — a mission resumes from its trail', () => {
   it('AC-4 DISTRACTOR: a mission with no prior trail still decomposes normally', async () => {
     // Resume is an additional entry point, never a change to how a fresh
     // mission runs.
-    const fresh = await runMission(mission(), seams(), { now: AT });
+    const fresh = await runMission(mission(), seams(), { now: () => AT });
 
     expect(fresh.trail.filter((e) => e.type === 'task.contracted').length).toBeGreaterThan(0);
     expect(fresh.outcome).toBe('delivered');
@@ -1178,7 +1178,7 @@ describe('R41 — a mission resumes from its trail', () => {
     const stopped = await runMission(
       mission(),
       seams({ gateBFailuresPerTask: { 1: 99 } }) as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     let executed = 0;
@@ -1193,7 +1193,7 @@ describe('R41 — a mission resumes from its trail', () => {
     };
 
     await runMission(mission(), counting as unknown as Parameters<typeof runMission>[1], {
-      now: AT,
+      now: () => AT,
       resumeFrom: stopped.trail,
     });
 
@@ -1231,7 +1231,7 @@ describe('20878859 — every path up the ladder honours the human rung', () => {
     const result = await runMission(
       missionWithHuman(),
       alwaysBounces() as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(result.trail.some((e) => e.type === 'escalation.awaiting_human')).toBe(true);
@@ -1241,7 +1241,7 @@ describe('20878859 — every path up the ladder honours the human rung', () => {
     const result = await runMission(
       missionWithHuman(),
       alwaysBounces() as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     const awaiting = result.trail.findIndex((e) => e.type === 'escalation.awaiting_human');
@@ -1262,7 +1262,7 @@ describe('20878859 — every path up the ladder honours the human rung', () => {
     const result = await runMission(
       missionWithHuman(),
       { ...alwaysBounces(), control } as unknown as Parameters<typeof runMission>[1],
-      { now: AT },
+      { now: () => AT },
     );
 
     expect(result.trail.some((e) => e.type === 'escalation.awaiting_human')).toBe(false);
@@ -1282,8 +1282,8 @@ describe('20878859 — every path up the ladder honours the human rung', () => {
  */
 describe('5236850d — a resumed run produces event ids that do not collide', () => {
   it('shares no event id with the run it resumes', async () => {
-    const first = await runMission(mission(), seams(), { now: AT });
-    const second = await runMission(mission(), seams(), { now: AT, resumeFrom: first.trail });
+    const first = await runMission(mission(), seams(), { now: () => AT });
+    const second = await runMission(mission(), seams(), { now: () => AT, resumeFrom: first.trail });
 
     const firstIds = new Set(first.trail.map((e) => e.eventId));
     const collisions = second.trail.filter((e) => firstIds.has(e.eventId));
@@ -1294,8 +1294,8 @@ describe('5236850d — a resumed run produces event ids that do not collide', ()
   it('DISTRACTOR: two runs of the same mission also differ, not just resumed ones', async () => {
     // Any second telling needs distinct ids; resume is only the case that made
     // the collision visible.
-    const a = await runMission(mission(), seams(), { now: AT });
-    const b = await runMission(mission(), seams(), { now: AT });
+    const a = await runMission(mission(), seams(), { now: () => AT });
+    const b = await runMission(mission(), seams(), { now: () => AT });
 
     const aIds = new Set(a.trail.map((e) => e.eventId));
     expect(b.trail.filter((e) => aIds.has(e.eventId))).toEqual([]);
@@ -1304,8 +1304,8 @@ describe('5236850d — a resumed run produces event ids that do not collide', ()
   it('DISTRACTOR: TASK ids stay deterministic across runs — only event ids vary', async () => {
     // If task ids drifted, an operator's decision would stop referring to
     // anything, which is the whole reason R41 works at all.
-    const a = await runMission(mission(), seams(), { now: AT });
-    const b = await runMission(mission(), seams(), { now: AT });
+    const a = await runMission(mission(), seams(), { now: () => AT });
+    const b = await runMission(mission(), seams(), { now: () => AT });
 
     const taskIds = (r: typeof a) =>
       r.trail.filter((e) => e.type === 'task.contracted').map((e) => e.taskId).sort();
@@ -1315,9 +1315,60 @@ describe('5236850d — a resumed run produces event ids that do not collide', ()
   });
 
   it('every event id within one run is still unique', async () => {
-    const result = await runMission(mission(), seams(), { now: AT });
+    const result = await runMission(mission(), seams(), { now: () => AT });
     const ids = result.trail.map((e) => e.eventId);
 
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+/**
+ * Defect `74950cfc` — the trail recorded no elapsed time.
+ *
+ * `now` was a single INSTANT captured once per run and stamped on every event,
+ * so a two-minute mission produced a trail in which everything happened
+ * simultaneously. The R19 timeline lens rendered correct lanes with every
+ * duration 0s; the only non-zero figure in the whole view came from
+ * `operator.paused`, the one event the API timestamped itself.
+ *
+ * Determinism was the right instinct — the tests depend on it — but it was
+ * achieved by freezing time rather than by injecting a clock.
+ */
+describe('74950cfc — events carry the time they actually happened', () => {
+  /** A clock that advances a second per call, so ordering is observable. */
+  const tickingClock = () => {
+    let tick = 0;
+    return () => new Date(Date.parse('2026-07-30T09:00:00.000Z') + (tick += 1000)).toISOString();
+  };
+
+  it('stamps successive events with successive times', async () => {
+    const result = await runMission(mission(), seams(), { now: tickingClock() });
+
+    const times = result.trail.map((e) => Date.parse(e.occurredAt));
+    expect(new Set(times).size).toBeGreaterThan(1);
+    // Non-decreasing: the clock is read as work happens, so the trail's own
+    // order and its timestamps agree.
+    for (let i = 1; i < times.length; i += 1) {
+      expect(times[i]!).toBeGreaterThanOrEqual(times[i - 1]!);
+    }
+  });
+
+  it('DISTRACTOR: a task that waited shows a gap between contracted and staffed', async () => {
+    // This is the whole point — the timeline lens exposes stalls, and a stall is
+    // a gap between two events. With one timestamp per run there are no gaps.
+    const result = await runMission(mission(), seams(), { now: tickingClock() });
+
+    const contracted = result.trail.find((e) => e.type === 'task.contracted');
+    const staffed = result.trail.find((e) => e.type === 'agent.staffed' && e.taskId === contracted?.taskId);
+
+    expect(Date.parse(staffed!.occurredAt)).toBeGreaterThan(Date.parse(contracted!.occurredAt));
+  });
+
+  it('DISTRACTOR: a frozen clock still works, so tests keep their determinism', async () => {
+    // The fix must not force every caller to accept real time; a fixed function
+    // reproduces exactly the old behaviour on purpose.
+    const result = await runMission(mission(), seams(), { now: () => AT });
+
+    expect(new Set(result.trail.map((e) => e.occurredAt))).toEqual(new Set([AT]));
   });
 });
