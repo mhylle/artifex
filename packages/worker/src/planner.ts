@@ -180,47 +180,131 @@ export const SingleSubtaskSchema = Type.Object(
   { $id: 'SingleSubtask', additionalProperties: false },
 );
 
+/**
+ * The distinct sub-objectives, asked for together (defect `2e5eaece`).
+ *
+ * Asking one subtask at a time removed the runaway-generation cliff, but it also
+ * removed the model's only chance to *see* that it was repeating itself: each
+ * call was a fresh context whose sole anchor was the parent objective, so a
+ * small model reproduced the parent every time.
+ *
+ * A flat array of strings restores that visibility while keeping the shallow
+ * shape that made stepwise safe — there is no nested object for the grammar to
+ * hold open across a long generation.
+ */
+export const SubtaskOutlineSchema = Type.Object(
+  { objectives: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 8 }) },
+  { $id: 'SubtaskOutline', additionalProperties: false },
+);
+
+/**
+ * Compare objectives the way a reader would, not the way `===` does.
+ *
+ * The shipped duplicates were byte-identical, but "Explain the heat pump." and
+ * "explain  the heat pump" are the same instruction to any worker, and a split
+ * containing both is not a split.
+ */
+function normalize(objective: string): string {
+  return objective
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** How many times to ask for a replacement before accepting a smaller split. */
+const REPLACEMENT_ATTEMPTS = 2;
+
 export function createStepwisePlanner(options: ModelSeamOptions): Planner {
+  const ask = async <T>(schema: unknown, prompt: string): Promise<T> =>
+    (await options.generator.generate({
+      provider: options.provider,
+      model: options.model,
+      probe: { schema, prompt },
+    })) as T;
+
   return {
     async propose({ contract }) {
-      const { count } = (await options.generator.generate({
-        provider: options.provider,
-        model: options.model,
-        probe: {
-          schema: SubtaskCountSchema,
-          prompt: `How many INDEPENDENT subtasks fully cover this objective? Answer with a number only.\n\nOBJECTIVE: ${contract.objective}`,
-        },
-      })) as { count: number };
+      const { count } = await ask<{ count: number }>(
+        SubtaskCountSchema,
+        `How many INDEPENDENT subtasks fully cover this objective? Answer with a number only.\n\nOBJECTIVE: ${contract.objective}`,
+      );
+
+      const outlinePrompt = (exclude: readonly string[]): string =>
+        [
+          `List ${count} DISTINCT sub-objectives that together fully cover this objective.`,
+          `Each must be a different piece of the work — not a restatement of the whole.`,
+          ``,
+          `OBJECTIVE: ${contract.objective}`,
+          ...(exclude.length > 0
+            ? ['', 'These are already taken; give different ones:', ...exclude.map((o) => `  - ${o}`)]
+            : []),
+        ].join('\n');
+
+      // Accepted objectives, keyed by normalized form. The parent is seeded as
+      // already-taken: a child that restates its parent is the tree pretending
+      // to have split, and two such children are the defect that shipped.
+      const taken = new Set<string>([normalize(contract.objective)]);
+      const accepted: string[] = [];
+
+      const absorb = (candidates: readonly string[]): void => {
+        for (const objective of candidates) {
+          const key = normalize(objective);
+          if (key.length === 0 || taken.has(key)) continue;
+          taken.add(key);
+          accepted.push(objective);
+        }
+      };
+
+      absorb((await ask<{ objectives: string[] }>(SubtaskOutlineSchema, outlinePrompt([]))).objectives);
+
+      // Ask again for what the model duplicated away, naming what it may not
+      // reuse. Deduplicating without re-asking would quietly shrink every split.
+      for (let attempt = 0; accepted.length < count && attempt < REPLACEMENT_ATTEMPTS; attempt += 1) {
+        const before = accepted.length;
+        absorb(
+          (await ask<{ objectives: string[] }>(SubtaskOutlineSchema, outlinePrompt(accepted))).objectives,
+        );
+        if (accepted.length === before) break; // Nothing new arriving; stop paying for it.
+      }
+
+      // A model that only ever repeats the parent is telling us this work does
+      // not decompose. Handing back the parent as its own single child is the
+      // honest reading — and it is what the decompose-or-delegate gate (R31)
+      // will formalize. Two identical children never is.
+      if (accepted.length === 0) accepted.push(contract.objective);
 
       const subtasks = [];
-      for (let index = 0; index < count; index += 1) {
-        const one = (await options.generator.generate({
-          provider: options.provider,
-          model: options.model,
-          probe: {
-            schema: SingleSubtaskSchema,
-            prompt: [
-              `Describe subtask ${index + 1} of ${count} for this objective.`,
-              `It must be independent of the others and gradeable by a stranger.`,
-              ``,
-              `OBJECTIVE: ${contract.objective}`,
-              ...(subtasks.length > 0
-                ? ['ALREADY COVERED (do not repeat):', ...subtasks.map((s) => `  - ${s.objective}`)]
-                : []),
-            ].join('\n'),
-          },
-        })) as { objective: string; category: string; criterion: string; outOfScope: string; blastRadius: 'low' | 'medium' | 'high' };
+      for (const [index, objective] of accepted.entries()) {
+        const one = await ask<{
+          objective: string;
+          category: string;
+          criterion: string;
+          outOfScope: string;
+          blastRadius: 'low' | 'medium' | 'high';
+        }>(
+          SingleSubtaskSchema,
+          [
+            `Detail this subtask so a stranger could execute and grade it.`,
+            ``,
+            `SUBTASK: ${objective}`,
+            `PART OF: ${contract.objective}`,
+            `SIBLINGS (do not do their work): ${accepted.filter((o) => o !== objective).join('; ') || '(none)'}`,
+          ].join('\n'),
+        );
 
         subtasks.push({
-          objective: one.objective,
+          // The outline decides the objective, not the detail call — otherwise a
+          // model could reintroduce a duplicate at the last step, past the guard.
+          objective,
           category: one.category,
           acceptanceCriteria: [{ criterionId: `ac-${index + 1}`, statement: one.criterion }],
           outOfScope: [one.outOfScope],
           blastRadius: one.blastRadius,
-          // Shares are assigned here rather than asked for: a model returning
-          // shares that sum above 1 is a refusal the Orchestrator would raise,
-          // and there is nothing to gain from letting it invent them.
-          effortShare: 1 / count,
+          // Computed from what SURVIVED, not from what was asked for: shares
+          // derived from `count` would under-allocate the parent budget whenever
+          // duplicates were dropped.
+          effortShare: 1 / accepted.length,
         });
       }
 
