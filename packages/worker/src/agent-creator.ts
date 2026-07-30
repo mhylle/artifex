@@ -29,6 +29,27 @@ export interface RegisteredDesign {
 /** The slice of the Asset Registry staffing needs — structural, so the worker stays DB-free. */
 export interface RegistryLookup {
   bestForCategory(category: string): Promise<RegisteredDesign | null>;
+  /**
+   * Persist a design authored on a no-bid, so it can bid next time.
+   *
+   * Optional because a runtime without a fabric still staffs — but when it is
+   * absent, creation never feeds the market it is supposed to be the exception
+   * to, and the swarm authors a fresh agent forever.
+   */
+  register?(input: {
+    readonly designId: string;
+    readonly category: string;
+    readonly roleInstructions: string;
+    readonly capabilities: string[];
+  }): Promise<void>;
+  /**
+   * Fold one verified outcome into a design's track record.
+   *
+   * Optional for the same reason, and consequential for the same reason:
+   * without it `bestForCategory`'s evidence bar can never be met, so every bid
+   * is a no-bid whatever the registry holds.
+   */
+  recordOutcome?(designId: string, score: number): Promise<void>;
 }
 
 /** Authors a fresh specialist when nothing in the registry bids. */
@@ -59,12 +80,41 @@ export interface StaffOptions {
  */
 const PROVEN_OBSERVATIONS = 3;
 
-/** Derive a deterministic design id from the category, so a no-bid is replayable. */
-function designIdFor(contract: TaskContract): string {
-  const head = contract.taskId.slice(0, 24);
-  const tail = contract.taskId.slice(24);
-  const mixed = (BigInt(`0x${tail}`) ^ BigInt(contract.category.length + 0x9e37)).toString(16).padStart(12, '0').slice(-12);
-  return `${head}${mixed}`;
+/**
+ * The design id for a CATEGORY — the identity the reuse market trades on.
+ *
+ * Derived from the category alone, so every task of a kind resolves to one
+ * registry row that can accumulate a track record. This previously mixed in
+ * `contract.taskId`, which gave each task its own design: the registry filled
+ * with one-observation rows, none ever reached the evidence bar, and "reuse
+ * first, creation second" could not happen even in principle.
+ *
+ * A hash rather than a lookup table, because the taxonomy is open — categories
+ * are proposed by the planner at runtime, so nothing can enumerate them ahead of
+ * time. Laid out as a v4-shaped uuid because that is what the registry's primary
+ * key requires.
+ */
+export function designIdFor(contract: TaskContract): string {
+  // FNV-1a: small, stable across processes, and dependency-free. The id must be
+  // identical in every worker for reuse to converge on one row.
+  let hash = 0xcbf29ce4_84222325n;
+  for (const codePoint of contract.category) {
+    hash = BigInt.asUintN(64, (hash ^ BigInt(codePoint.charCodeAt(0))) * 0x100_0001b3n);
+  }
+  const hex = hash.toString(16).padStart(16, '0');
+  // A second pass so the low bits differ from the high ones; one 64-bit hash is
+  // not enough to fill 32 hex digits without visible repetition.
+  let mixed = BigInt.asUintN(64, hash * 0x9e37_79b9_7f4a_7c15n);
+  const hex2 = mixed.toString(16).padStart(16, '0');
+
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    // Version nibble 4 and variant bits 8..b, so the value is a well-formed uuid.
+    `4${hex.slice(13, 16)}`,
+    `8${hex2.slice(1, 4)}`,
+    hex2.slice(4, 16),
+  ].join('-');
 }
 
 /**
@@ -99,14 +149,35 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
   const bid = await registry.bestForCategory(contract.category);
   const proven = bid !== null && bid.cladeScore !== null && bid.observations >= PROVEN_OBSERVATIONS;
 
-  const design =
-    bid !== null
-      ? { designId: bid.designId, version: bid.version, roleInstructions: bid.roleInstructions, capabilities: bid.capabilities }
-      : {
-          designId: designIdFor(contract),
-          version: 1,
-          ...(await author.design({ contract })),
-        };
+  let design;
+  if (bid !== null) {
+    design = {
+      designId: bid.designId,
+      // The incumbent's own version, not a fresh 1: a clade score is keyed to
+      // the version that earned it, and resetting it would detach the track
+      // record from the thing it describes.
+      version: bid.version,
+      roleInstructions: bid.roleInstructions,
+      capabilities: bid.capabilities,
+    };
+  } else {
+    design = { designId: designIdFor(contract), version: 1, ...(await author.design({ contract })) };
+
+    // Creation feeds the market it is the exception to. Without this the
+    // registry never learns the design exists, so the next task of the same
+    // kind authors it again from scratch — which is how "reuse first" stayed
+    // theoretical while looking implemented.
+    //
+    // Failure is swallowed on purpose: the registry is a cost lever, not a
+    // dependency, and a fabric outage must degrade the swarm to "always
+    // author" rather than stop it working.
+    await registry.register?.({
+      designId: design.designId,
+      category: contract.category,
+      roleInstructions: design.roleInstructions,
+      capabilities: design.capabilities,
+    }).catch(() => undefined);
+  }
 
   const decision = computeTier({
     blastRadius: contract.blastRadius,

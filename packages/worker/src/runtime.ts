@@ -17,6 +17,7 @@
  */
 import { Type } from '@sinclair/typebox';
 
+import type { RegistryLookup } from './agent-creator.js';
 import type { ControlSignals } from './mission-loop.js';
 import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
@@ -189,6 +190,7 @@ export function createMissionSeams(
   generator: StructuredGenerator,
   models: RuntimeModels,
   control?: ControlSignals,
+  registry?: RegistryLookup,
 ): MissionSeams {
   const gen = (
     m: { provider: string; model: string },
@@ -259,7 +261,14 @@ export function createMissionSeams(
       },
     },
 
-    registry: { async bestForCategory() { return null; } },
+    /**
+     * The reuse market's read and write halves (R38).
+     *
+     * Absent, staffing degrades to "always author a fresh design" — which is
+     * exactly what the swarm did for its whole life until now, because this was
+     * hard-coded to `{ bestForCategory: () => null }` (defect `41f7555c`).
+     */
+    registry: registry ?? { async bestForCategory() { return null; } },
 
     author: {
       async design({ contract }) {

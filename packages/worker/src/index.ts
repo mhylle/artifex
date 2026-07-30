@@ -9,7 +9,12 @@
  */
 import { pathToFileURL } from 'node:url';
 
-import { LedgerRepository, ModelCatalogRepository, runMigrations } from '@artifex/memory-fabric';
+import {
+  AssetRegistryRepository,
+  LedgerRepository,
+  ModelCatalogRepository,
+  runMigrations,
+} from '@artifex/memory-fabric';
 import { ModelRouter, createBackend } from '@artifex/model-router';
 import type { TaskContract } from '@artifex/shared-types';
 import { Worker } from 'bullmq';
@@ -53,6 +58,7 @@ export async function main(): Promise<void> {
   const pool = new pg.Pool({ connectionString });
   const ledger = new LedgerRepository(pool);
   const catalog = new ModelCatalogRepository(pool);
+  const assets = new AssetRegistryRepository(pool);
   const router = new ModelRouter({
     catalog: {
       // `null` means "no admitted model for this tier"; a rejection would mean
@@ -108,6 +114,15 @@ export async function main(): Promise<void> {
           generator,
           { worker, evaluator },
           createLedgerControl(ledger, contract.missionId),
+          // The reuse market, wired to the real Asset Registry (R38). Without
+          // this argument staffing authors a fresh specialist for every task
+          // forever, and everything the registry stores is dead weight — the
+          // shape of defect `41f7555c`.
+          {
+            bestForCategory: (category) => assets.bestForCategory(category),
+            register: async (design) => void (await assets.upsert(design)),
+            recordOutcome: async (designId, score) => void (await assets.recordOutcome(designId, score)),
+          },
         ),
         {
           // A real clock, read per event (defect `74950cfc`). Passing a single

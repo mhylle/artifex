@@ -806,6 +806,21 @@ export async function runMission(
         }
         record(child.taskId, 'verification', 'gate_b.verdict_issued', 'reviewer', { ...bVerdict });
 
+        // The design's track record, folded from the verdict the reviewer just
+        // issued (R38/R28). Derived, not invented: a pass is 1 and a fail is 0,
+        // because Gate B's verdict is the only measurement of a design the
+        // system actually has.
+        //
+        // Without this the Asset Registry can never reach its evidence bar
+        // (`observations >= 3`), so every bid is a no-bid however much the
+        // registry holds — the registry was inert for exactly this reason
+        // (defect `41f7555c`). Failure is swallowed: a track record is a cost
+        // lever, not a reason to lose verified work.
+        await seams.registry.recordOutcome?.(
+          manifest.designId,
+          bVerdict.outcome === 'pass' ? 1 : 0,
+        ).catch(() => undefined);
+
         if (bVerdict.outcome === 'pass') {
           delivered = outcome.bundle.deliverable;
           settled = true;

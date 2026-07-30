@@ -98,11 +98,21 @@ describe('R6 AC-1 — a no-bid produces a manifest with a prompt and a COMPUTED 
     expect(manifest.logicalTier).toBe(1);
   });
 
-  it('DISTRACTOR: a no-bid mints a NEW design id rather than reusing one', async () => {
+  it('DISTRACTOR: a no-bid mints its OWN design id rather than borrowing an incumbent’s', async () => {
+    // Rewritten for R38. This previously asserted that two no-bids in the same
+    // category produced DIFFERENT ids — which encoded the defect rather than a
+    // requirement: a per-task id gave every task its own registry row, so no
+    // design ever accumulated a track record and reuse could not happen even in
+    // principle. Two tasks of one kind must now share an id; what the test was
+    // really guarding is that a no-bid does not silently adopt some incumbent's
+    // identity, and that is asserted directly.
+    const incumbentId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
     const a = await staff({ contract: contract(), registry: noBid, author });
     const b = await staff({ contract: contract({ taskId: '9f9f9f9f-1111-4222-8333-444444444444' }), registry: noBid, author });
 
-    expect(a.designId).not.toBe(b.designId);
+    expect(a.designId).not.toBe(incumbentId);
+    expect(a.designId, 'one category, one design identity — that is what makes reuse possible').toBe(b.designId);
   });
 });
 
