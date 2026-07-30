@@ -20,7 +20,7 @@ import { Type } from '@sinclair/typebox';
 import type { RegistryLookup } from './agent-creator.js';
 import { composeDesign } from './design-playbook.js';
 import type { ControlSignals, DecompositionGate, KnowledgeCommonsSubmitter } from './mission-loop.js';
-import type { PlanJudge } from './reviewer.js';
+import type { IntentJudge, PlanJudge } from './reviewer.js';
 import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
 import type { MissionSeams } from './mission-loop.js';
@@ -117,6 +117,15 @@ const CoverageSchema = Type.Object(
     ),
   },
   { $id: 'CoverageAssessment', additionalProperties: false },
+);
+
+const IntentSchema = Type.Object(
+  {
+    servesIntent: Type.Boolean(),
+    detail: Type.String({ minLength: 1 }),
+    redFlags: Type.Array(Type.String({ minLength: 1 })),
+  },
+  { $id: 'IntentAssessment', additionalProperties: false },
 );
 
 const CompletionSchema = Type.Object(
@@ -327,6 +336,75 @@ function describeError(error: unknown): string {
  * A throwing sample counts as "no complaint" — it produced no finding, and
  * treating an outage as a rejection would be the unsafe direction.
  */
+/**
+ * Sample the intent tier and require UNANIMITY to condemn (R34 AC-0/AC-2).
+ *
+ * The house pattern again (`d678cd8c`, `890cdea5`, R33's plan audit), and the
+ * measured need is specific. On live mission e7dddf91 the evaluative model
+ * returned red flags that were the PROMPT'S OWN EXAMPLE PHRASES echoed back
+ * verbatim - "an answer shaped like a verification rather than an answer" - on
+ * both attempts. It was completing a pattern, not inspecting a deliverable.
+ *
+ * The prompt no longer offers phrasings to copy and now demands each flag quote
+ * the deliverable, but a prompt fix alone is a hope. Unanimity makes a
+ * one-sample fluke unable to discard work on its own.
+ *
+ * Safe direction is PASSING, because a red flag now discards work that
+ * otherwise satisfied every criterion: a false flag throws away good work
+ * outright, while a missed one leaves work that already passed both other
+ * tiers. A throwing sample counts as no complaint.
+ */
+export function sampledIntent(judge: IntentJudge, samples: number): IntentJudge {
+  return {
+    async assess(input) {
+      const runs = await Promise.all(
+        Array.from({ length: samples }, async () => {
+          try {
+            return await judge.assess(input);
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      const real = runs.filter((r): r is NonNullable<typeof r> => r !== null);
+      if (real.length === 0) return { servesIntent: true, detail: 'intent tier unavailable', redFlags: [] };
+
+      const condemned = real.filter((r) => !r.servesIntent);
+      const servesIntent = condemned.length < real.length;
+
+      // A flag survives only if every sample raised it. Compared on normalised
+      // text, since two samples rarely word the same observation identically.
+      const norm = (f: string) => f.trim().toLowerCase().replace(/[^a-z0-9 ]/g, '');
+      const counts = new Map<string, { flag: string; n: number }>();
+      for (const run of real) {
+        const seen = new Set<string>();
+        for (const flag of run.redFlags) {
+          const k = norm(flag);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          const entry = counts.get(k) ?? { flag, n: 0 };
+          entry.n += 1;
+          counts.set(k, entry);
+        }
+      }
+
+      return {
+        servesIntent,
+        // A verdict's reason must match its outcome. Taking the first sample's
+        // detail unconditionally could hand a PASSING verdict the reason of the
+        // one sample that wanted to condemn — an operator reading "misses the
+        // point" on a pass has been told the opposite of what happened.
+        detail:
+          (servesIntent
+            ? real.find((r) => r.servesIntent)?.detail
+            : condemned[0]?.detail) ?? 'no detail given',
+        redFlags: [...counts.values()].filter((e) => e.n === real.length).map((e) => e.flag),
+      };
+    },
+  };
+}
+
 export function sampledPlanAudit(judge: PlanJudge, samples: number): PlanJudge {
   return {
     async audit(input) {
@@ -638,6 +716,52 @@ export function createMissionSeams(
           };
         } catch {
           return clean;
+        }
+      },
+    }, 3),
+
+    /**
+     * Gate B's semantic INTENT tier (R34 AC-0).
+     *
+     * EVALUATIVE tier, a rung above the doing: "does this serve what was
+     * actually wanted" is a judgement about the work, not part of it.
+     *
+     * Asked SEPARATELY from the completion judge rather than as extra fields on
+     * it. The two questions pull in opposite directions - one reads the letter,
+     * one reads the spirit - and a single call invites the model to reconcile
+     * them into one comfortable answer. It also keeps the worker schema narrow,
+     * which is what tier-1 models handle reliably.
+     *
+     * A failed call is treated as "serves the intent, nothing flagged". Safe
+     * direction: the criteria tier and the mechanical tier have both already
+     * run, so a model outage degrades the gate to what it can still prove
+     * rather than failing work that may be perfectly good.
+     */
+    intentJudge: sampledIntent({
+      async assess({ contract, bundle }) {
+        try {
+          const out = (await gen(models.evaluator, IntentSchema, [
+            'Judge whether this deliverable serves what was actually WANTED, not merely',
+            'whether it satisfies the wording of the criteria. A deliverable can meet every',
+            'stated criterion sentence by sentence and still miss the point.',
+            '',
+            'Also raise RED FLAGS only for STRUCTURAL suspicion about THIS deliverable:',
+            'something about its shape that suggests it was built to pass review rather',
+            'than to answer. Each flag must QUOTE the part of the deliverable that',
+            'prompted it. A flag that could be written without reading the deliverable',
+            'is not a finding.',
+            'Return an empty list if nothing about it is structurally suspicious - which',
+            'is the normal case. A red flag DISCARDS work that otherwise passed.',
+            '',
+            `OBJECTIVE: ${contract.objective}`,
+            'CRITERIA:',
+            ...contract.acceptanceCriteria.map((c) => `  - ${c.statement}`),
+            `DELIVERABLE: ${JSON.stringify(bundle.deliverable)}`,
+          ].join(NL))) as { servesIntent: boolean; detail: string; redFlags: string[] };
+
+          return out;
+        } catch {
+          return { servesIntent: true, detail: 'intent tier unavailable', redFlags: [] };
         }
       },
     }, 3),

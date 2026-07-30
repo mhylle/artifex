@@ -305,13 +305,106 @@ function findDependencyCycle(children: readonly TaskContract[]): string[] | null
  * DELETE outright. Immutability is not a property of this object — it is a
  * property of where the object goes.
  */
+/**
+ * Gate B's semantic tier (R34 AC-0) - does the output serve the parent's INTENT?
+ *
+ * Separate from the completion judge on purpose. That one asks "was each
+ * criterion met", which a deliverable can satisfy sentence by sentence while
+ * missing what was actually wanted. Acceptance criteria are structurally bad at
+ * catching that, because they are the letter and this is the spirit.
+ */
+export interface IntentJudge {
+  assess(input: {
+    readonly contract: TaskContract;
+    readonly bundle: EvidenceBundle;
+  }): Promise<{
+    readonly servesIntent: boolean;
+    readonly detail: string;
+    /** Structural suspicion: a verification-shaped answer, a too-exact fit. */
+    readonly redFlags: readonly string[];
+  }>;
+}
+
+/**
+ * Gate B's mechanical tier (R34 AC-0) - the contract's testable checks.
+ *
+ * Deterministic, and deliberately so. These are facts about the bundle and the
+ * contract, not judgements: an empty deliverable, effort past the ceiling, a
+ * task equipped with tools that took no actions. A model asked "does this meet
+ * the criteria" will sometimes answer yes to nothing at all, and the defence is
+ * not a better prompt - it is not asking.
+ */
+function mechanicalChecks(contract: TaskContract, bundle: EvidenceBundle): Finding[] {
+  const findings: Finding[] = [];
+  const criterionId = contract.acceptanceCriteria[0]?.criterionId ?? 'plan';
+
+  const empty =
+    bundle.deliverable === null ||
+    bundle.deliverable === undefined ||
+    (typeof bundle.deliverable === 'string' && bundle.deliverable.trim() === '') ||
+    (typeof bundle.deliverable === 'object' && Object.keys(bundle.deliverable as object).length === 0);
+
+  if (empty) {
+    findings.push({
+      criterionId,
+      errorClass: 'verification_failure' as const,
+      failingStep: 'Gate B mechanical tier',
+      detail: 'The deliverable is empty. Nothing was produced, whatever the completion judge reported.',
+    });
+  }
+
+  if (bundle.effortSpent > contract.budget.ceiling) {
+    findings.push({
+      criterionId,
+      errorClass: 'verification_failure' as const,
+      failingStep: 'Gate B mechanical tier',
+      detail:
+        `Spent ${bundle.effortSpent} against a ceiling of ${contract.budget.ceiling}. ` +
+        `Effort is a currency, and work that overran its budget was not the work that was contracted.`,
+    });
+  }
+
+  // "Missing work products", decided as a fact. A contract that granted tools
+  // and came back with no actions did not do the work it was equipped for,
+  // whatever the prose claims. Tasks with no tool grants are pure reasoning and
+  // are not faulted for taking no actions - most tasks are.
+  if (contract.inputs.toolEntitlements.length > 0 && bundle.actions.length === 0) {
+    findings.push({
+      criterionId,
+      errorClass: 'verification_failure' as const,
+      failingStep: 'Gate B mechanical tier',
+      detail:
+        `The contract granted ${contract.inputs.toolEntitlements.length} tool entitlement(s) and the ` +
+        `bundle records no actions - the task was equipped to do something it never did.`,
+    });
+  }
+
+  return findings;
+}
+
 export async function gateB(
   contract: TaskContract,
   bundle: EvidenceBundle,
   judge: CompletionJudge,
+  intentJudge: IntentJudge,
   meta: VerdictMeta,
 ): Promise<Verdict> {
-  const { criteria, redFlags } = await judge.assess({ contract, bundle });
+  // ---- redundant depth: verify independently, and REQUIRE agreement ---------
+  // `verificationPlan.depth` used to be copied into the verdict and otherwise
+  // ignored, so a redundant plan verified exactly once and a lucky pass WAS a
+  // pass. Runs are independent calls to the same judge; disagreement between
+  // them means the verification is not reproducible, and an unreproducible pass
+  // is indistinguishable from a coin landing well.
+  const runs = contract.verificationPlan.depth === 'redundant'
+    ? Math.max(2, contract.verificationPlan.requiredAgreement ?? 2)
+    : 1;
+
+  const assessments: Awaited<ReturnType<CompletionJudge['assess']>>[] = [];
+  for (let i = 0; i < runs; i += 1) {
+    assessments.push(await judge.assess({ contract, bundle }));
+  }
+
+  const { criteria, redFlags } = assessments[0]!;
 
   const contractCriteria = new Set(contract.acceptanceCriteria.map((c) => c.criterionId));
   const invented = criteria.filter((c) => !contractCriteria.has(c.criterionId)).map((c) => c.criterionId);
@@ -347,6 +440,58 @@ export async function gateB(
     }];
   });
 
+  // Disagreement across independent runs (R34 AC-1). Compared per criterion on
+  // the `met` verdict only: two runs may word their detail differently and still
+  // agree on the thing that matters.
+  if (runs > 1) {
+    const verdictOf = (a: (typeof assessments)[number]) =>
+      contract.acceptanceCriteria
+        .map((c) => `${c.criterionId}:${a.criteria.find((x) => x.criterionId === c.criterionId)?.met ?? 'absent'}`)
+        .join('|');
+    const first = verdictOf(assessments[0]!);
+    if (assessments.some((a) => verdictOf(a) !== first)) {
+      findings.push({
+        criterionId: contract.acceptanceCriteria[0]?.criterionId ?? 'plan',
+        errorClass: 'verification_failure' as const,
+        failingStep: 'Gate B redundant verification',
+        detail:
+          `${runs} independent verifications did not agree. A lucky pass is not a pass: ` +
+          `a result that does not reproduce is indistinguishable from a coin landing well.`,
+      });
+    }
+  }
+
+  findings.push(...mechanicalChecks(contract, bundle));
+
+  // ---- the semantic INTENT tier (R34 AC-0) ---------------------------------
+  const intent = await intentJudge.assess({ contract, bundle });
+  if (!intent.servesIntent) {
+    findings.push({
+      criterionId: contract.acceptanceCriteria[0]?.criterionId ?? 'plan',
+      errorClass: 'execution_error' as const,
+      failingStep: 'Gate B intent tier',
+      detail:
+        `The output does not serve the parent intent: ${intent.detail}. ` +
+        `Meeting the letter of every criterion is not the same as delivering what was wanted.`,
+    });
+  }
+
+  // ---- red flags DISCARD, they do not merely annotate (R34 AC-2) -----------
+  // Previously collected and copied into the verdict while the outcome ignored
+  // them, so an output flagged as verification-shaped or suspiciously exact
+  // still passed - exactly the case the criterion names.
+  const allFlags = [...redFlags, ...intent.redFlags];
+  if (allFlags.length > 0) {
+    findings.push({
+      criterionId: contract.acceptanceCriteria[0]?.criterionId ?? 'plan',
+      errorClass: 'verification_failure' as const,
+      failingStep: 'Gate B red flag',
+      detail:
+        `Discarded despite technically passing: ${allFlags.join('; ')}. ` +
+        `A structurally suspicious output is refused rather than accepted on its own account of itself.`,
+    });
+  }
+
   return {
     verdictId: meta.verdictId,
     taskId: contract.taskId,
@@ -356,7 +501,7 @@ export async function gateB(
     // The depth the contract demanded, never one the reviewer picked for itself.
     verificationDepth: contract.verificationPlan.depth,
     findings,
-    redFlags: [...redFlags],
+    redFlags: allFlags,
     issuedAt: meta.issuedAt,
   };
 }

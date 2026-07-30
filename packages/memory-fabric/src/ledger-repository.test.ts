@@ -429,3 +429,81 @@ describe('R18 — the attention queue is folded out of the ledger', () => {
     expect(items.some((i) => i.missionId === missionId)).toBe(false);
   });
 });
+
+/**
+ * R34 AC-3 — "given a verdict that has been issued, when any component attempts
+ * to amend or withdraw it, then the attempt fails — verdicts are immutable once
+ * issued, and a later correction is a new verdict, not an edit."
+ *
+ * The general append-only guarantee above is about ledger rows. This is about
+ * VERDICTS specifically, and it is a different claim: a reviewer that could
+ * revise its own past judgement would make the audit trail a record of current
+ * opinion rather than of what was actually decided, and every downstream
+ * decision that cited the old verdict would silently refer to something else.
+ *
+ * Raw SQL on purpose — the guarantee must hold against anything holding a
+ * connection, not merely against callers who go through a repository.
+ */
+describe('R34 AC-3 — an issued verdict cannot be amended or withdrawn', () => {
+  const verdict = (outcome: 'pass' | 'fail', taskId: string) =>
+    makeEvent({
+      taskId,
+      family: 'verification',
+      type: 'gate_b.verdict_issued',
+      actor: { kind: 'reviewer', id: randomUUID(), displayName: 'Reviewer' },
+      payload: { gate: 'B', outcome, findings: [], redFlags: [], verificationDepth: 'single' },
+    });
+
+  it('refuses to AMEND the outcome of an issued verdict', async () => {
+    const issued = await ledger.append(verdict('fail', randomUUID()));
+
+    await expect(
+      db.pool.query(
+        `UPDATE ledger_event SET payload = jsonb_set(payload, '{outcome}', '"pass"') WHERE seq = $1`,
+        [issued.seq],
+      ),
+    ).rejects.toThrow(/append-only/i);
+  });
+
+  it('refuses to WITHDRAW an issued verdict', async () => {
+    const issued = await ledger.append(verdict('fail', randomUUID()));
+
+    await expect(
+      db.pool.query('DELETE FROM ledger_event WHERE seq = $1', [issued.seq]),
+    ).rejects.toThrow(/append-only/i);
+  });
+
+  it('a later correction is a NEW verdict — and BOTH remain in the trail', async () => {
+    // The positive half. Immutability that made correction impossible would be
+    // a system that cannot be wrong out loud, so the trail must carry the
+    // reversal AND what it reversed.
+    const taskId = randomUUID();
+    const missionId = randomUUID();
+    await ledger.append({ ...verdict('fail', taskId), missionId });
+    await ledger.append({ ...verdict('pass', taskId), missionId });
+
+    const replayed = await ledger.replay({ missionId });
+    const verdicts = replayed.filter((e) => e.type === 'gate_b.verdict_issued');
+
+    expect(verdicts).toHaveLength(2);
+    expect(verdicts.map((v) => (v.payload as { outcome: string }).outcome)).toEqual(['fail', 'pass']);
+  });
+
+  it('DISTRACTOR: the correction does not erase the original — replay still shows the fail', async () => {
+    // If a correction quietly replaced its predecessor, time travel would
+    // reconstruct a past that never happened: a moment when the task had always
+    // passed. The whole point of an append-only trail is that the earlier
+    // judgement is still there to be found.
+    const taskId = randomUUID();
+    const missionId = randomUUID();
+    await ledger.append({ ...verdict('fail', taskId), missionId });
+    await ledger.append({ ...verdict('pass', taskId), missionId });
+
+    const replayed = await ledger.replay({ missionId });
+
+    expect(
+      replayed.some((e) => (e.payload as { outcome?: string }).outcome === 'fail'),
+      'the reversed verdict must still be in the trail',
+    ).toBe(true);
+  });
+});

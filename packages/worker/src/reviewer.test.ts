@@ -19,6 +19,18 @@ import type { CompletionJudge, CoverageJudge } from './reviewer.js';
  * silently-skipped clause never is. The clauses themselves live in
  * `gate-a-full.test.ts`.
  */
+/**
+ * R34 added a second Gate B tier. Permissive here: these tests are about the
+ * criteria tier's bookkeeping, and an explicit permissive judge is honest in a
+ * way a silently-absent tier never is. The tier itself lives in
+ * `gate-b-full.test.ts`.
+ */
+const INTENT_OK = {
+  async assess() {
+    return { servesIntent: true, detail: 'ok', redFlags: [] as string[] };
+  },
+};
+
 const PLAN_OK = {
   async audit({ children }: { children: readonly { taskId: string }[] }) {
     return {
@@ -161,7 +173,7 @@ describe('R7 AC-2 — Gate B returns a structured verdict against the contract',
       },
     };
 
-    const verdict = await gateB(leaf, bundle(), judge, META);
+    const verdict = await gateB(leaf, bundle(), judge, INTENT_OK, META);
 
     expect(verdict.gate).toBe('B');
     expect(verdict.outcome).toBe('pass');
@@ -181,7 +193,7 @@ describe('R7 AC-2 — Gate B returns a structured verdict against the contract',
       },
     };
 
-    const verdict = await gateB(leaf, bundle(), judge, META);
+    const verdict = await gateB(leaf, bundle(), judge, INTENT_OK, META);
 
     expect(verdict.outcome).toBe('fail');
     expect(verdict.findings).toHaveLength(1);
@@ -196,7 +208,7 @@ describe('R7 AC-2 — Gate B returns a structured verdict against the contract',
       async assess() { return { criteria: [{ criterionId: 'ac-1', met: true, detail: 'ok' }], redFlags: [] }; },
     };
 
-    const verdict = await gateB(leaf, bundle(), judge, META);
+    const verdict = await gateB(leaf, bundle(), judge, INTENT_OK, META);
 
     expect(verdict.outcome).toBe('fail');
     expect(verdict.findings.map((f) => f.criterionId)).toContain('ac-2');
@@ -217,7 +229,7 @@ describe('R7 AC-2 — Gate B returns a structured verdict against the contract',
       },
     };
 
-    await expect(gateB(leaf, bundle(), judge, META)).rejects.toThrow(/invented|not in the contract/i);
+    await expect(gateB(leaf, bundle(), judge, INTENT_OK, META)).rejects.toThrow(/invented|not in the contract/i);
   });
 
   it('carries red flags through to the verdict', async () => {
@@ -230,7 +242,7 @@ describe('R7 AC-2 — Gate B returns a structured verdict against the contract',
       },
     };
 
-    const verdict = await gateB(leaf, bundle(), judge, META);
+    const verdict = await gateB(leaf, bundle(), judge, INTENT_OK, META);
 
     expect(verdict.redFlags).toHaveLength(1);
   });
@@ -241,7 +253,7 @@ describe('R7 AC-2 — Gate B returns a structured verdict against the contract',
     };
 
     const deep = { ...leaf, verificationPlan: { depth: 'redundant' as const, requiredAgreement: 2 } };
-    const verdict = await gateB(deep, bundle(), judge, META);
+    const verdict = await gateB(deep, bundle(), judge, INTENT_OK, META);
 
     expect(verdict.verificationDepth).toBe('redundant');
   });
@@ -251,7 +263,7 @@ describe('R7 AC-2 — Gate B returns a structured verdict against the contract',
       async assess() { return { criteria: [{ criterionId: 'ac-1', met: true, detail: 'ok' }, { criterionId: 'ac-2', met: true, detail: 'ok' }], redFlags: [] }; },
     };
 
-    const result = validate(VerdictSchema, await gateB(leaf, bundle(), judge, META));
+    const result = validate(VerdictSchema, await gateB(leaf, bundle(), judge, INTENT_OK, META));
     expect(result.ok, JSON.stringify(result.ok ? {} : result.errors)).toBe(true);
   });
 });

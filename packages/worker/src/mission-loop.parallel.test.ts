@@ -77,6 +77,13 @@ function seams(script: Script = {}): MissionSeams {
     // properties, and an explicit permissive judge in a fixture is honest in a
     // way a silently-skipped clause in production never is. The clause itself is
     // exercised in `gate-a-full.test.ts`.
+    // R34's intent tier. Permissive here on purpose: these tests are about other
+    // properties, and an explicit permissive judge in a fixture is honest in a
+    // way a silently-absent tier in production never is. The tier itself is
+    // exercised in `gate-b-full.test.ts`.
+    intentJudge: {
+      async assess() { return { servesIntent: true, detail: 'ok', redFlags: [] }; },
+    },
     planJudge: {
       async audit({ children }: { children: readonly { taskId: string }[] }) {
         return { tasks: children.map((c) => ({ taskId: c.taskId, atomic: true, detail: 'ok' })), untestable: [], overlaps: [] };

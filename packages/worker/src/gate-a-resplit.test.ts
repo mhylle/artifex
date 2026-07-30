@@ -90,6 +90,13 @@ function seams(script: {
         };
       },
     },
+    // R34's intent tier. Permissive here on purpose: these tests are about other
+    // properties, and an explicit permissive judge in a fixture is honest in a
+    // way a silently-absent tier in production never is. The tier itself is
+    // exercised in `gate-b-full.test.ts`.
+    intentJudge: {
+      async assess() { return { servesIntent: true, detail: 'ok', redFlags: [] }; },
+    },
     planJudge: {
       async audit({ children }) {
         auditCall += 1;

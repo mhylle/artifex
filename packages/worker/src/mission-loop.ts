@@ -26,7 +26,7 @@ import type { DesignAuthor, RegistryLookup } from './agent-creator.js';
 import { decompose, foldUp } from './orchestrator.js';
 import type { Planner, Reconciler } from './orchestrator.js';
 import { gateA, gateB } from './reviewer.js';
-import type { CompletionJudge, CoverageJudge, PlanJudge } from './reviewer.js';
+import type { CompletionJudge, CoverageJudge, IntentJudge, PlanJudge } from './reviewer.js';
 import { runSpecialist } from './specialist.js';
 import type { ClarityJudge, SpecialistWork } from './specialist.js';
 
@@ -108,6 +108,14 @@ export interface MissionSeams {
    * pass, which is precisely the failure Gate A exists to prevent.
    */
   readonly planJudge: PlanJudge;
+  /**
+   * Gate B's semantic INTENT tier (R34 AC-0).
+   *
+   * REQUIRED for the same reason `planJudge` is: an optional intent judge would
+   * let a mission verify with one of Gate B's two tiers silently absent while
+   * the gate still reported a pass.
+   */
+  readonly intentJudge: IntentJudge;
   readonly registry: RegistryLookup;
   readonly author: DesignAuthor;
   readonly clarityJudge: ClarityJudge;
@@ -1021,7 +1029,7 @@ export async function runMission(
 
         let bVerdict;
         try {
-          bVerdict = await gateB(child, outcome.bundle, seams.completionJudge, verdictMeta(seq));
+          bVerdict = await gateB(child, outcome.bundle, seams.completionJudge, seams.intentJudge, verdictMeta(seq));
         } catch (error) {
           record(child.taskId, 'verification', 'gate_b.unevaluable', 'reviewer', { reason: describe(error) });
           rungIndex += 1;
