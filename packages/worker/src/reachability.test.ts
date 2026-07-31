@@ -52,8 +52,15 @@ const KNOWN_UNREACHABLE: ReadonlyArray<{ readonly name: string; readonly defect:
   {
     name: 'LearningProjection',
     defect:
-      '635b7a9f — R11. `index.ts` re-exports the module and nothing in the worker ' +
-      'or the API constructs it.',
+      'SUPERSEDED, not a gap — recorded like `createModelPlanner` rather than ' +
+      'deleted. R11 built it as the v0 boundary proof ("proves the boundary that ' +
+      'later admits the full science loop"), and R27 brought the projection the ' +
+      'system actually learns from: `LedgerEvidenceSource`, wired in `index.ts` ' +
+      'and in `buildScienceLoop`. Its report is genuinely unread — `tierBumps` ' +
+      'and `errorClasses` appear nowhere outside the class itself. R11 AC-0 is ' +
+      'proven on the LIVE path by `projection-read-only.test.ts`, which makes the ' +
+      'same behavioural argument this class pioneered: hand the component a store ' +
+      'that really can write, and assert it never does.',
   },
 ];
 
