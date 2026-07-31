@@ -305,7 +305,38 @@ export class LedgerRepository {
         ORDER BY task_id, seq DESC
       ),
       answered AS (
-        SELECT DISTINCT task_id FROM ledger_event WHERE type = 'operator.decided'
+        -- The task_id IS NOT NULL filter is load-bearing, not tidiness.
+        -- Petition decisions (R29) are operator.decided rows with a NULL
+        -- task_id, and a single NULL in this set makes the outer NOT IN
+        -- evaluate to NULL for EVERY task -- emptying the entire attention
+        -- queue. Caught by the distractor asserting ordinary task escalations
+        -- still appear alongside petitions.
+        -- (No backticks in here: this block sits inside a TS template literal.)
+        SELECT DISTINCT task_id FROM ledger_event
+         WHERE type = 'operator.decided' AND task_id IS NOT NULL
+      ),
+      -- Petitions wait here too (R29 AC-1). A petition is about the system's
+      -- RULES rather than a unit of work, so it has no task_id and the query
+      -- above cannot see it — and a petition recorded somewhere nobody looks is
+      -- not "surfaced for an out-of-band human decision", it is filed and
+      -- forgotten. Keyed on the petition's own id, and ADDITIVE: the task branch
+      -- is untouched.
+      petitions AS (
+        SELECT DISTINCT ON (payload->>'petitionId')
+          mission_id, payload, occurred_at
+        FROM ledger_event
+        WHERE type = 'escalation.awaiting_human'
+          AND task_id IS NULL
+          AND payload->>'petitionId' IS NOT NULL
+        ORDER BY payload->>'petitionId', seq DESC
+      ),
+      -- Answered per PETITION, not "any decision happened". One ratification
+      -- clearing the whole queue is how a rule change slips through attached to
+      -- an unrelated approval.
+      petitions_answered AS (
+        SELECT DISTINCT payload->>'petitionId' AS petition_id
+        FROM ledger_event
+        WHERE type = 'operator.decided' AND payload->>'petitionId' IS NOT NULL
       ),
       contracted AS (
         SELECT DISTINCT ON (task_id)
@@ -326,7 +357,19 @@ export class LedgerRepository {
       FROM waiting w
       LEFT JOIN contracted c ON c.task_id = w.task_id
       WHERE w.task_id NOT IN (SELECT task_id FROM answered)
-      ORDER BY w.occurred_at DESC
+      UNION ALL
+      SELECT
+        p.mission_id,
+        (p.payload->>'petitionId')::uuid  AS task_id,
+        p.payload->>'objective'           AS objective,
+        p.payload->>'rung'                AS rung,
+        p.payload->>'autonomyDial'        AS autonomy_dial,
+        p.payload->'findings'             AS findings,
+        NULL::jsonb                       AS acceptance_criteria,
+        p.occurred_at                     AS waiting_since
+      FROM petitions p
+      WHERE p.payload->>'petitionId' NOT IN (SELECT petition_id FROM petitions_answered)
+      ORDER BY waiting_since DESC
     `);
 
     return result.rows.map((row) => ({

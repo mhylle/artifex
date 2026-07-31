@@ -19,6 +19,8 @@ import pg from 'pg';
 import { runMission } from './mission-loop.js';
 import { LedgerEvidenceSource } from './ledger-evidence.js';
 import { rankWeakSpots } from './science-loop.js';
+import { petitionFromWeakSpots, petitionRefusal } from './petition.js';
+import { ProposalEmitter } from './proposal-emitter.js';
 import { buildWorkerSeams } from './worker-seams.js';
 
 export * from './constitution.js';
@@ -193,6 +195,58 @@ export async function main(): Promise<void> {
             payload: { ranked: weakSpots.length, top: weakSpots.slice(0, 5) },
             occurredAt: new Date().toISOString(),
           });
+        }
+        // ---- the amendment protocol's producer (R29 AC-0, defect `d08191c8`)
+        // `ProposalEmitter` has been complete, tested, and never constructed —
+        // invariant #4's only outward channel with nothing feeding it. This is
+        // the producer.
+        //
+        // A petition is filed ONLY where the learner's own authority cannot
+        // reach: it may rewrite prompts, playbooks and taxonomies freely, so a
+        // weak spot it could fix that way is not a constitutional matter. An
+        // amendment protocol that fired routinely would make the Constitution a
+        // suggestion.
+        const petition = petitionFromWeakSpots({
+          missionId: contract.missionId,
+          weakSpots,
+          // Argued from THIS mission's ledger, which is what makes it a petition
+          // rather than an opinion. Capped: the evidence is a pointer into the
+          // trail, not a copy of it.
+          evidenceEventIds: result.trail.slice(0, 20).map((e) => e.eventId),
+        });
+
+        if (petition !== null) {
+          const refusal = petitionRefusal(petition);
+          if (refusal === null) {
+            const emitter = new ProposalEmitter(
+              { append: (event) => ledger.append(event) },
+              { newId: () => randomUUID(), now: () => new Date().toISOString() },
+            );
+            const filed = await emitter.propose(petition);
+
+            // ---- and it waits for a HUMAN (R29 AC-1) ------------------------
+            // Recorded as an attention item so the petition reaches the queue an
+            // operator actually watches. It stays `proposed` until a decision is
+            // recorded against it — the emitter has no `apply`, and this event
+            // is a request for a decision, never the decision itself.
+            await ledger.append({
+              eventId: randomUUID(),
+              missionId: contract.missionId,
+              taskId: null,
+              family: 'escalation',
+              type: 'escalation.awaiting_human',
+              actor: { kind: 'learning_agent', id: 'learning_agent', displayName: 'Learning Agent' },
+              payload: {
+                rung: 'amendment_ratification',
+                petitionId: filed.eventId,
+                objective: petition.title,
+                autonomyDial: contract.autonomyDial,
+                findings: [petition.rationale],
+              },
+              occurredAt: new Date().toISOString(),
+            });
+            console.log(`  petition filed and awaiting ratification: ${petition.title}`);
+          }
         }
       } catch (cause) {
         console.error('! weak-spot mining failed:', String(cause));

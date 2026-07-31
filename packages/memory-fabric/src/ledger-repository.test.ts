@@ -507,3 +507,100 @@ describe('R34 AC-3 — an issued verdict cannot be amended or withdrawn', () => 
     ).toBe(true);
   });
 });
+
+/**
+ * R29 AC-1 — a pending petition waits in the same queue a human already watches.
+ *
+ * The queue keys on `task_id`, and a petition has no task — it is about the
+ * system's rules, not about a unit of work. So it needs its own branch, and the
+ * branch is what makes "surfaced for an out-of-band human decision" true rather
+ * than aspirational: a petition recorded somewhere nobody looks is not surfaced.
+ *
+ * Every fixture here passes `taskId: null` EXPLICITLY. `makeEvent` defaults it
+ * to a fresh uuid, so the first version of these tests produced task
+ * escalations wearing a petition payload — they failed against correct code,
+ * which is the test being wrong rather than the query.
+ */
+describe('R29 AC-1 — a petition waits in the attention queue', () => {
+  it('surfaces a pending petition, carrying what a human needs to decide', async () => {
+    const missionId = randomUUID();
+    const petitionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Root' } }));
+    await ledger.append(makeEvent({
+      missionId, taskId: null, type: 'escalation.awaiting_human',
+      payload: {
+        rung: 'amendment_ratification', petitionId,
+        objective: 'Budget enforcement blocks remedy in "summarising"',
+        autonomyDial: 'checkpointed',
+        findings: ['spent 58 of 60 budget — no remedy within the learner\'s authority reaches this'],
+      },
+    }));
+
+    const items = await ledger.listAttentionItems();
+    const item = items.find((i) => i.taskId === petitionId);
+
+    expect(item, 'a petition was filed and nobody was asked to decide').toBeDefined();
+    expect(item?.rung).toBe('amendment_ratification');
+    expect(item?.autonomyDial, 'the dial decides how it is surfaced').toBe('checkpointed');
+    expect(item?.findings.join(' ')).toMatch(/budget/i);
+  });
+
+  it('DISTRACTOR: a DECIDED petition leaves the queue', async () => {
+    // "Remains a proposal until that decision is recorded" cuts both ways: it
+    // stays until decided, and it goes once decided. A queue that never cleared
+    // would train an operator to ignore it.
+    const missionId = randomUUID();
+    const petitionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Root' } }));
+    await ledger.append(makeEvent({
+      missionId, taskId: null, type: 'escalation.awaiting_human',
+      payload: { rung: 'amendment_ratification', petitionId, objective: 'A petition', autonomyDial: 'checkpointed', findings: [] },
+    }));
+    await ledger.append(makeEvent({
+      missionId, taskId: null, type: 'operator.decided',
+      payload: { petitionId, decision: 'rejected', decidedBy: 'operator' },
+    }));
+
+    const items = await ledger.listAttentionItems();
+
+    expect(items.find((i) => i.taskId === petitionId), 'a decided petition still demands attention').toBeUndefined();
+  });
+
+  it('DISTRACTOR: a decision about ANOTHER petition does not clear this one', async () => {
+    // The join must be on the petition, not on "any decision happened". One
+    // ratification clearing the whole queue is how a rule change slips through
+    // attached to an unrelated approval.
+    const missionId = randomUUID();
+    const mine = randomUUID();
+    const other = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Root' } }));
+    await ledger.append(makeEvent({
+      missionId, taskId: null, type: 'escalation.awaiting_human',
+      payload: { rung: 'amendment_ratification', petitionId: mine, objective: 'Mine', autonomyDial: 'checkpointed', findings: [] },
+    }));
+    await ledger.append(makeEvent({
+      missionId, taskId: null, type: 'operator.decided',
+      payload: { petitionId: other, decision: 'ratified', decidedBy: 'operator' },
+    }));
+
+    const items = await ledger.listAttentionItems();
+
+    expect(items.find((i) => i.taskId === mine), 'an unrelated decision cleared this petition').toBeDefined();
+  });
+
+  it('DISTRACTOR: ordinary task escalations still appear alongside petitions', async () => {
+    // The branch must be additive. A UNION that replaced the task query would
+    // empty the queue of everything it was built for.
+    const missionId = randomUUID();
+    const taskId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Root' } }));
+    await ledger.append(makeEvent({
+      missionId, taskId, type: 'escalation.awaiting_human',
+      payload: { objective: 'A real task', rung: 'human_review', autonomyDial: 'checkpointed', findings: [] },
+    }));
+
+    const items = await ledger.listAttentionItems();
+
+    expect(items.find((i) => i.taskId === taskId)).toBeDefined();
+  });
+});
