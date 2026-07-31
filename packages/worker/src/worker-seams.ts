@@ -33,6 +33,14 @@ export interface AssetStore {
   }): Promise<{ readonly version: number }>;
   recordOutcome(designId: string, score: number, effort?: number): Promise<unknown>;
   knownCapabilities(): Promise<string[]>;
+  /**
+   * A design's ancestors, nearest first (R35 AC-2).
+   *
+   * Without this the independence check degrades to identity alone — it would
+   * catch a verifier grading itself and miss a sibling grading its own lineage,
+   * which is the half that matters now that redesigns actually have parents.
+   */
+  ancestorsOf(designId: string): Promise<string[]>;
   /** Read one design, so a hot-fix knows what it is about to replace (R26). */
   findById(designId: string): Promise<{ readonly designId: string; readonly roleInstructions: string } | null>;
   /** Apply — or revert — the fast loop's one worker-layer patch (R26). */
@@ -162,6 +170,9 @@ export function buildWorkerSeams(deps: WorkerDependencies, missionId: string): M
       // Without this the taxonomy never converges: clustering falls back to
       // normalising each proposal alone, and the planner never repeats a name.
       knownCapabilities: () => assets.knownCapabilities(),
+      // The lineage half of R35 AC-2. Absent, a sibling design could be staffed
+      // to grade its own lineage and the check would report nothing.
+      ancestorsOf: (designId: string) => assets.ancestorsOf(designId),
     },
     deps.commons,
     fastLoop,

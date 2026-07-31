@@ -254,3 +254,64 @@ describe('R26 AC-1 — the revert happens with no human action', () => {
     expect(withExploding.outcome).toBe(clean.outcome);
   });
 });
+
+/**
+ * R35 AC-2 in the loop — the verifier is really staffed.
+ *
+ * `staffVerifier` and `independenceViolation` are proven in their own files.
+ * This is the producer's test: that a running mission actually staffs a verifier
+ * and that the verdict names its design, because `reviewerId` was the MISSION ID
+ * for every verdict in a run — the same value each time, which made "who
+ * reviewed this" unanswerable and left the constitutional rule nothing to rule
+ * on.
+ */
+describe('R35 AC-2 — a running mission staffs its verifier', () => {
+  it('records verifier.staffed with a design distinct from the producer', async () => {
+    const result = await runMission(mission(), seams(true), { now: () => AT });
+
+    const staffed = result.trail.find((e) => e.type === 'verifier.staffed');
+    expect(staffed, 'Gate B judged with no staffed verifier').toBeDefined();
+    expect(staffed?.payload['designId']).not.toBe(staffed?.payload['producerDesignId']);
+  });
+
+  it('the verdict names the VERIFIER design, not the mission', async () => {
+    // The whole point. A reviewerId equal to the mission id is the same value on
+    // every verdict in the run and identifies nobody.
+    const result = await runMission(mission(), seams(true), { now: () => AT });
+
+    const staffed = result.trail.find((e) => e.type === 'verifier.staffed');
+    const verdict = result.trail.find((e) => e.type === 'gate_b.verdict_issued');
+
+    expect(verdict?.payload['reviewerId']).toBe(staffed?.payload['designId']);
+    expect(verdict?.payload['reviewerId'], 'the reviewer is still the mission').not.toBe(MISSION_ID);
+  });
+
+  it('DISTRACTOR: a registry that cannot staff a verifier does NOT block verification', async () => {
+    // Independence is a property of the REVIEW. A registry outage must degrade
+    // it to the old unattributed reviewer rather than leave work unverified —
+    // an unverified mission is a worse outcome than an unattributed verdict, and
+    // the trail says which happened.
+    // The fixture has to break the VERIFIER's staffing without breaking the
+    // producer's. A first version simply threw from `author.design`, which kills
+    // the producer first — the mission then never reaches Gate B at all, so the
+    // test passed on the wrong path and proved nothing. Fixed at the fixture:
+    // this author succeeds once (the producer) and fails after (the verifier),
+    // which is also a realistic intermittent-backend failure.
+    let designs = 0;
+    const broken = {
+      ...seams(true),
+      author: {
+        async design() {
+          designs += 1;
+          if (designs > 1) throw new Error('author unavailable');
+          return { roleInstructions: 'State it.', capabilities: ['text'] };
+        },
+      },
+    };
+
+    const result = await runMission(mission(), broken as never, { now: () => AT });
+
+    expect(result.trail.some((e) => e.type === 'verifier.unstaffed'), 'the failure went unrecorded').toBe(true);
+    expect(result.trail.some((e) => e.type === 'gate_b.verdict_issued'), 'work went unverified').toBe(true);
+  });
+});

@@ -241,6 +241,42 @@ export class AssetRegistryRepository {
   }
 
   /**
+   * A design's ancestors, nearest first (R35 AC-2).
+   *
+   * The IDs, not their aggregate. `cladeScoreFor` walks the same edges but
+   * answers "how has this lineage performed"; `independenceViolation` asks "do
+   * these two lineages overlap", which needs the members. Different question,
+   * different query — not a duplicate.
+   *
+   * The design ITSELF is excluded. `independenceViolation` treats identity as
+   * its own, differently worded rule ("that is self-review, not verification"),
+   * and including self here would make every design its own ancestor and lose
+   * which rule actually fired.
+   *
+   * `seen` guards a cycle for the same reason the clade query does: ancestry is
+   * model-adjacent data, and a cycle must degrade to a finite answer rather than
+   * spin inside a live staffing decision.
+   */
+  async ancestorsOf(designId: string): Promise<string[]> {
+    const { rows } = await this.#pool.query<{ design_id: string; depth: number }>(
+      `WITH RECURSIVE line(design_id, parent_design_id, depth, seen) AS (
+         SELECT d.design_id, d.parent_design_id, 0, ARRAY[d.design_id]
+           FROM agent_design d
+          WHERE d.design_id = $1
+         UNION ALL
+         SELECT p.design_id, p.parent_design_id, l.depth + 1, l.seen || p.design_id
+           FROM agent_design p
+           JOIN line l ON p.design_id = l.parent_design_id
+          WHERE NOT p.design_id = ANY(l.seen)
+       )
+       SELECT design_id, depth FROM line WHERE depth > 0 ORDER BY depth`,
+      [designId],
+    );
+
+    return rows.map((r) => r.design_id);
+  }
+
+  /**
    * Replace a design's role instructions in place (R26).
    *
    * The fast loop's patch, and its revert — the same call both ways, because a

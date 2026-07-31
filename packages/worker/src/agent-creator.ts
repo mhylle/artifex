@@ -13,6 +13,8 @@ import type { CapabilityManifest, TaskContract } from '@artifex/shared-types';
 
 import { computeTier } from './tier-policy.js';
 import type { TaskClass } from './tier-policy.js';
+import { ConstitutionViolation } from './constitution.js';
+import { independenceViolation } from './calibration.js';
 
 /** A registered design, as the Asset Registry returns it. */
 export interface RegisteredDesign {
@@ -29,6 +31,16 @@ export interface RegisteredDesign {
 /** The slice of the Asset Registry staffing needs — structural, so the worker stays DB-free. */
 export interface RegistryLookup {
   bestForCategory(category: string): Promise<RegisteredDesign | null>;
+  /**
+   * A design's ancestors, nearest first (R35 AC-2).
+   *
+   * Optional for the same reason `register` is: a runtime without a fabric still
+   * staffs. When it is absent the independence check degrades to identity alone
+   * — it catches a verifier grading itself and misses a sibling grading its own
+   * lineage, which is the half that matters now that redesigns have parents.
+   * Degrading is right; failing would make a registry outage stop verification.
+   */
+  ancestorsOf?(designId: string): Promise<string[]>;
   /**
    * Persist a design authored on a no-bid, so it can bid next time.
    *
@@ -365,5 +377,151 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
     logicalTier: decision.tier,
     validationHarness: harnessFor(contract),
     createdAt: contract.createdAt,
+  };
+}
+
+export interface StaffVerifierOptions {
+  readonly contract: TaskContract;
+  readonly registry: RegistryLookup;
+  readonly author: DesignAuthor;
+  /** The design that produced the work this verifier will grade. */
+  readonly producerDesignId: string;
+  /** Test seam: how a fresh verifier's id is derived. Defaults to the capability hash. */
+  readonly deriveDesignId?: (capability: string) => string;
+}
+
+export interface StaffedVerifier {
+  readonly designId: string;
+  readonly version: number;
+  readonly roleInstructions: string;
+  readonly capabilities: readonly string[];
+  /** The bid that was turned down for lineage overlap, or null if none was. */
+  readonly refusedBid: string | null;
+  readonly refusalReason: string | null;
+}
+
+/**
+ * The capability a VERIFIER of this category is staffed under.
+ *
+ * Deliberately distinct from the producer's. If both bid in the same market the
+ * registry hands the same design to each, and an independence violation becomes
+ * the normal case rather than the exception — the check would then refuse every
+ * bid and quietly turn into "never reuse a verifier".
+ */
+export function verifierCapabilityOf(category: string): string {
+  return `verification.${capabilityOf(category)}`;
+}
+
+/**
+ * Staff the verifier for a task, refusing any design that shares the producer's
+ * lineage (R35 AC-2).
+ *
+ * `independenceViolation` has decided this since P35's first pass and had
+ * nothing to decide about: Gate B's judge was a bare model call, `reviewerId`
+ * was the mission id, and no verifier had a design at all. This is the producer
+ * that gives it something to rule on.
+ *
+ * The refusal is real, not advisory. A bid that shares lineage is DISCARDED and
+ * a fresh design authored in its place — a check that logged the violation and
+ * staffed the bid anyway would be a log line, not a rule. And if even the fresh
+ * design would collide, staffing FAILS: a verifier that shares the producer's
+ * blind spots produces a verdict that means nothing, and a meaningless verdict
+ * is worse than a missing one because it looks like evidence.
+ *
+ * Ancestry is fetched here and passed to the pure decision, rather than the
+ * decision reaching for it — same split as everywhere else in this module.
+ */
+export async function staffVerifier(options: StaffVerifierOptions): Promise<StaffedVerifier> {
+  const { contract, registry, author, producerDesignId } = options;
+  const capability = verifierCapabilityOf(contract.category);
+
+  const ancestorsOf = async (designId: string): Promise<string[]> => {
+    // A registry without ancestry degrades to the identity half of the check
+    // rather than failing. That is the honest reading: no recorded ancestry
+    // means no known overlap, not an error.
+    try {
+      return (await registry.ancestorsOf?.(designId)) ?? [];
+    } catch {
+      return [];
+    }
+  };
+
+  const producerAncestry = await ancestorsOf(producerDesignId);
+
+  let refusedBid: string | null = null;
+  let refusalReason: string | null = null;
+
+  const bid = await registry.bestForCategory(capability);
+  if (bid !== null) {
+    const violation = independenceViolation({
+      producerDesignId,
+      verifierDesignId: bid.designId,
+      producerAncestry,
+      verifierAncestry: await ancestorsOf(bid.designId),
+    });
+
+    if (violation === null) {
+      return {
+        designId: bid.designId,
+        version: bid.version,
+        roleInstructions: bid.roleInstructions,
+        capabilities: bid.capabilities,
+        refusedBid: null,
+        refusalReason: null,
+      };
+    }
+
+    refusedBid = bid.designId;
+    refusalReason = violation;
+  }
+
+  const derive = options.deriveDesignId ?? designIdForCapability;
+  // A refused bid must not be re-derived. `designIdForCapability` is
+  // deterministic per capability, so the "fresh" design landed on the SAME id as
+  // the bid just refused — same design, so it violated too, so staffing threw
+  // and the task went unverified. Found on live mission `1139beb8`, where
+  // refusing the canonical verifier produced `verifier.unstaffed` rather than an
+  // independent replacement.
+  //
+  // Keyed on the PRODUCER, mirroring R28's `#redesign-of-` derivation: still
+  // deterministic, so a replay lands on the same design, but distinct from the
+  // design it replaces. Only on a refusal — an unconditional producer-specific
+  // id would give every producer its own grader and kill the reuse market that
+  // the capability hash exists to create.
+  const designId = refusedBid === null
+    ? derive(capability)
+    : derive(`${capability}#independent-of-${producerDesignId}`);
+
+  const fresh = independenceViolation({
+    producerDesignId,
+    verifierDesignId: designId,
+    producerAncestry,
+    verifierAncestry: await ancestorsOf(designId),
+  });
+  if (fresh !== null) {
+    throw new ConstitutionViolation('verifier-independence', fresh);
+  }
+
+  const authored = await author.design({ contract });
+
+  const stored = await registry.register?.({
+    designId,
+    category: capability,
+    roleInstructions: authored.roleInstructions,
+    capabilities: authored.capabilities,
+    // A verifier authored because nothing independent bid is an ORIGIN. Pointing
+    // it at the producer would record the very lineage this function exists to
+    // rule out, and the next staffing would then refuse it.
+    parentDesignId: null,
+    validationHarness: harnessFor(contract),
+  }).catch(() => undefined);
+
+  return {
+    designId,
+    version: stored?.version ?? 1,
+    roleInstructions: authored.roleInstructions,
+    capabilities: authored.capabilities,
+    refusedBid,
+    refusalReason,
   };
 }

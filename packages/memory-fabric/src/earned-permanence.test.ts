@@ -353,3 +353,53 @@ describe('R28 AC-0 — the DECISION uses the clade, not the design own column', 
     expect(await registry.bestForCategory(category), 'a retired design was bid again').toBeNull();
   });
 });
+
+/**
+ * R35 AC-2's data dependency — the ancestor IDs, not just their aggregate score.
+ *
+ * `independenceViolation` decides whether a verifier may grade a producer by
+ * comparing their LINEAGES, and it takes ancestry as a plain list so the
+ * decision stays pure. `cladeScoreFor` walks the same ancestors but returns a
+ * weighted mean, which answers a different question — so this is a genuinely new
+ * query rather than a duplicate of one that exists.
+ */
+describe('R35 AC-2 — a design ancestor list, for the independence check', () => {
+  it('returns every ancestor, nearest first', async () => {
+    const grandparent = await design({ runs: [{ score: 0.5, effort: 1 }] });
+    const parent = await design({ parentDesignId: grandparent, runs: [{ score: 0.5, effort: 1 }] });
+    const child = await design({ parentDesignId: parent, runs: [{ score: 0.5, effort: 1 }] });
+
+    expect(await registry.ancestorsOf(child)).toEqual([parent, grandparent]);
+  });
+
+  it('DISTRACTOR: the design itself is NOT in its own ancestor list', async () => {
+    // `independenceViolation` already handles identity as its own, differently
+    // worded rule ("that is self-review, not verification"). Including self here
+    // would make every design its own ancestor and collapse the two messages
+    // into one, losing which rule actually fired.
+    const solo = await design({ runs: [{ score: 0.5, effort: 1 }] });
+
+    expect(await registry.ancestorsOf(solo)).toEqual([]);
+  });
+
+  it('DISTRACTOR: a cycle terminates instead of hanging', async () => {
+    // Same argument as the clade query's: ancestry is model-adjacent data, and a
+    // cycle must degrade to a finite answer rather than spin inside a live
+    // staffing decision.
+    const a = await design({ runs: [{ score: 0.5, effort: 1 }] });
+    const b = await design({ parentDesignId: a, runs: [{ score: 0.5, effort: 1 }] });
+    await registry.reparent(a, b);
+
+    const ancestors = await registry.ancestorsOf(b);
+
+    expect(ancestors).toContain(a);
+    expect(ancestors.length).toBeLessThan(5);
+  });
+
+  it('DISTRACTOR: an unknown design has no ancestors rather than throwing', async () => {
+    // Staffing must not fail because a design id is stale. No ancestry recorded
+    // means the identity half of the check still applies and the lineage half
+    // simply finds nothing — which is the truth, not an error.
+    expect(await registry.ancestorsOf('cccccccc-dddd-4eee-8fff-ffffffffffff')).toEqual([]);
+  });
+});

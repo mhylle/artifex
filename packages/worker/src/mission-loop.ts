@@ -20,7 +20,7 @@
  */
 import type { ErrorClass, EscalationRung, LedgerEventInput, LogicalTier, TaskContract } from '@artifex/shared-types';
 
-import { capabilityOf, staff } from './agent-creator.js';
+import { capabilityOf, staff, staffVerifier } from './agent-creator.js';
 import { concurrencyFor } from './design-playbook.js';
 import type { DesignAuthor, RegistryLookup } from './agent-creator.js';
 import { decompose, foldUp } from './orchestrator.js';
@@ -530,9 +530,19 @@ export async function runMission(
     return event.eventId;
   };
 
-  const verdictMeta = (n: number) => ({
+  /**
+   * `reviewerId` names the VERIFIER'S DESIGN once one is staffed (R35 AC-2).
+   *
+   * It was the mission id — the same value for every verdict in a run, which
+   * made "who reviewed this" unanswerable and left `independenceViolation`
+   * nothing to rule on. Falls back to the mission id where no verifier was
+   * staffed (Gate A, and any caller with no ancestry-aware registry), because a
+   * missing verifier must read as "not recorded" rather than as a design id that
+   * does not exist.
+   */
+  const verdictMeta = (n: number, reviewerDesignId?: string) => ({
     verdictId: `${mission.taskId.slice(0, 24)}${(n + 0xf00000).toString(16).padStart(12, '0')}`,
-    reviewerId: mission.taskId,
+    reviewerId: reviewerDesignId ?? mission.taskId,
     issuedAt: now(),
   });
 
@@ -1405,9 +1415,44 @@ export async function runMission(
           assumptions: outcome.bundle.assumptions,
         });
 
+        // ---- the verifier is STAFFED, and lineage overlap is refused (R35 AC-2)
+        // Gate B's judge was a bare model call, so "the verifier shares no design
+        // lineage with the author" had nothing to check. Staffing one gives the
+        // constitutional rule a subject — and the refusal, when it fires, is
+        // recorded rather than silently absorbed, because a rule nobody can see
+        // working is indistinguishable from one that never fires.
+        //
+        // Failure is swallowed: independence is a property of the REVIEW, and a
+        // registry outage must degrade it to the old unattributed reviewer
+        // rather than stop a mission from being verified at all.
+        let verifierDesignId: string | undefined;
+        try {
+          const verifier = await staffVerifier({
+            contract: child,
+            registry: seams.registry,
+            author: seams.author,
+            producerDesignId: manifest.designId,
+          });
+          verifierDesignId = verifier.designId;
+          record(child.taskId, 'staffing', 'verifier.staffed', 'agent_creator', {
+            designId: verifier.designId,
+            version: verifier.version,
+            producerDesignId: manifest.designId,
+            ...(verifier.refusedBid === null
+              ? {}
+              : { refusedBid: verifier.refusedBid, refusalReason: verifier.refusalReason }),
+          });
+        } catch (error) {
+          record(child.taskId, 'staffing', 'verifier.unstaffed', 'agent_creator', {
+            producerDesignId: manifest.designId, reason: describe(error),
+          });
+        }
+
         let bVerdict;
         try {
-          bVerdict = await gateB(child, outcome.bundle, seams.completionJudge, seams.intentJudge, verdictMeta(seq));
+          bVerdict = await gateB(
+            child, outcome.bundle, seams.completionJudge, seams.intentJudge, verdictMeta(seq, verifierDesignId),
+          );
         } catch (error) {
           record(child.taskId, 'verification', 'gate_b.unevaluable', 'reviewer', { reason: describe(error) });
           rungIndex += 1;
