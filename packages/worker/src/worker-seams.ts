@@ -232,6 +232,7 @@ export function buildWorkerSeams(deps: WorkerDependencies, missionId: string): M
       // R24 AC-1's stranger search and the corroboration it enables.
       strangersFor: (question, byDesignId) => deps.commons.strangersFor(question, byDesignId),
       corroborate: (entryId, by) => deps.commons.corroborate(entryId, by),
+      publish: (entryId, ttlSeconds) => deps.commons.publish(entryId, ttlSeconds),
     },
     fastLoop,
     deps.templates,

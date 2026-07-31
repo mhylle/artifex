@@ -299,6 +299,30 @@ export interface KnowledgeCommonsSubmitter {
     readonly missionId: string;
     readonly evidence: readonly string[];
   }): Promise<unknown>;
+
+  /** Publish a corroborated entry with a finite life (R24 AC-2, ADR-0018). */
+  publish(entryId: string, ttlSeconds: number): Promise<unknown>;
+}
+
+/**
+ * How long a published entry stays current (R24 AC-2, ADR-0018).
+ *
+ * Scaled by impact, and the SHAPE is derived from the criterion's own sentence
+ * even though the magnitudes are not: "stale certainty is worse than honest
+ * absence" is a claim about COST, so where being wrong costs more, stale
+ * certainty costs more. A high-impact entry therefore expires SOONER than a
+ * low-impact one — the opposite of the intuitive reading, and the one the
+ * requirement supports, since `impact` is derived from blast radius and blast
+ * radius already says what being wrong costs.
+ *
+ * Nothing the system records can determine how long a fact stays true, so the
+ * magnitudes are an openly-made policy choice rather than a derivation. Both are
+ * one argument to `publish` and one column in the row: re-timing is a value
+ * change, not a redesign.
+ */
+export function publishedLifetimeSeconds(impact: 'low' | 'high'): number {
+  const DAY = 24 * 60 * 60;
+  return impact === 'high' ? DAY : 7 * DAY;
 }
 
 /**
@@ -1878,6 +1902,19 @@ export async function runMission(
                 impact: stranger.impact,
                 byDesignId: manifest.designId,
                 question: child.objective,
+              });
+
+              // Published now that a stranger has found it again (R24 AC-2).
+              // Corroboration is the bar for BOTH impact levels even though the
+              // store only enforces it for high: publishing a low-impact entry
+              // on submission would make quarantine a formality for most of the
+              // commons, and "guilty until proven useful" is the whole design.
+              const ttl = publishedLifetimeSeconds(stranger.impact);
+              await seams.commons?.publish(stranger.entryId, ttl);
+              record(child.taskId, 'learning', 'knowledge.published', 'worker', {
+                entryId: stranger.entryId,
+                impact: stranger.impact,
+                ttlSeconds: ttl,
               });
             }
           } catch { /* see above */ }

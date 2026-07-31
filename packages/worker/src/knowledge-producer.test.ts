@@ -23,7 +23,7 @@
 import type { TaskContract } from '@artifex/shared-types';
 import { describe, expect, it, vi } from 'vitest';
 
-import { runMission } from './mission-loop.js';
+import { publishedLifetimeSeconds, runMission } from './mission-loop.js';
 import type { MissionSeams } from './mission-loop.js';
 
 const AT = '2026-07-30T09:00:00.000Z';
@@ -268,6 +268,80 @@ describe('defect 753bc6dd — a verified task submits its finding to the commons
       submit: vi.fn(async () => ({ entryId: 'e-new' })),
       strangersFor: vi.fn(async () => { throw new Error('commons is down'); }),
       corroborate: vi.fn(),
+    };
+
+    const result = await runMission(mission(), seams({ commons } as never), { now: () => AT });
+
+    expect(result.outcome).toBe('delivered');
+  });
+
+  /**
+   * Publication on corroboration (R24 AC-2, ADR-0018).
+   *
+   * Corroboration became live in iteration 81 and nothing published, so no entry
+   * had ever expired and AC-2's decay path had never run on a real row.
+   *
+   * The lifetime is scaled by impact, and the SHAPE comes from AC-2's own
+   * sentence: "stale certainty is worse than honest absence" is a claim about
+   * cost, so where being wrong costs more, stale certainty costs more — a
+   * high-impact entry expires SOONER, not later. That is the opposite of the
+   * intuitive reading. The magnitudes are a policy choice recorded in ADR-0018.
+   */
+  const spyPublisher = (strangers: Array<{ entryId: string; impact: 'low' | 'high' }>) => ({
+    submit: vi.fn(async () => ({ entryId: 'e-new' })),
+    strangersFor: vi.fn(async () => strangers),
+    corroborate: vi.fn(async () => ({ entryId: 'e-1' })),
+    publish: vi.fn(async () => ({ entryId: 'e-1' })),
+  });
+
+  it('publishes a corroborated entry, and records it', async () => {
+    const commons = spyPublisher([{ entryId: 'e-old', impact: 'low' }]);
+
+    const result = await runMission(mission(), seams({ commons }), { now: () => AT });
+
+    expect(commons.publish, 'a corroborated entry was never published').toHaveBeenCalled();
+    expect(commons.publish.mock.calls[0]?.[0]).toBe('e-old');
+    expect(result.trail.some((e) => e.type === 'knowledge.published'),
+      'the publication happened off-ledger').toBe(true);
+  });
+
+  it('a HIGH-impact entry gets a SHORTER life than a low-impact one', () => {
+    // The asymmetry is the whole decision, so it is asserted as a property of
+    // the rule rather than left to the caller's arithmetic. Both sides, because
+    // a rule returning one constant would pass a one-sided test.
+    expect(publishedLifetimeSeconds('high')).toBeLessThan(publishedLifetimeSeconds('low'));
+  });
+
+  it('DISTRACTOR: both lifetimes are POSITIVE — the store refuses anything else', () => {
+    // `publish` throws on a non-positive ttl. A rule that returned 0 for one
+    // impact would turn every publication of that kind into a swallowed error,
+    // which reads exactly like "nothing was eligible".
+    expect(publishedLifetimeSeconds('low')).toBeGreaterThan(0);
+    expect(publishedLifetimeSeconds('high')).toBeGreaterThan(0);
+  });
+
+  it('DISTRACTOR: an UNCORROBORATED entry is never published', async () => {
+    // "Guilty until proven useful". Publishing on submission would make
+    // quarantine a formality for most of the commons, and the store only
+    // enforces the stranger bar for HIGH impact — so the caller must hold the
+    // line for low impact itself.
+    const commons = spyPublisher([]);
+
+    const result = await runMission(mission(), seams({ commons }), { now: () => AT });
+
+    expect(commons.publish).not.toHaveBeenCalled();
+    expect(result.trail.some((e) => e.type === 'knowledge.published')).toBe(false);
+  });
+
+  it('DISTRACTOR: a publish that THROWS does not cost the mission its work', async () => {
+    // Same reason submit and corroborate are swallowed: a knowledge store is a
+    // side benefit, and losing verified work to a bookkeeping failure trades the
+    // product for the receipt.
+    const commons = {
+      submit: vi.fn(async () => ({ entryId: 'e-new' })),
+      strangersFor: vi.fn(async () => [{ entryId: 'e-old', impact: 'high' as const }]),
+      corroborate: vi.fn(async () => ({ entryId: 'e-1' })),
+      publish: vi.fn(async () => { throw new Error('commons is down'); }),
     };
 
     const result = await runMission(mission(), seams({ commons } as never), { now: () => AT });
