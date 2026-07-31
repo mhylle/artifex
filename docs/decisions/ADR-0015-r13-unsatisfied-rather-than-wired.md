@@ -26,10 +26,26 @@ to make tool use impossible in the running system:
    returns a deliverable; the broker is not among its dependencies.
 
 The ledger events that look like evidence are not evidence of the running
-system. They date from 2026-07-26 and 2026-07-30, and their missions carry no
-`requestedBy` — they were produced by scripts that constructed the broker
-themselves, which is the same shape as the P13 dogfood that passed 20/20 while
-`packages/worker`'s `main()` was still a placeholder.
+system. They date from 2026-07-26 and 2026-07-30, and nothing in the deployable
+worker can produce them — links 1 to 4 above are each sufficient on their own.
+
+**Correction, 2026-07-31.** This paragraph originally argued the point a second
+way: that the missions carrying those events have no `requestedBy`, so they were
+produced by scripts. That inference was wrong. **No ledger event carries
+`requestedBy` at all** — `select distinct type from ledger_event where payload ?
+'requestedBy'` returns nothing, for real API-submitted missions as much as for
+synthetic ones. Intake takes the field and does not put it on the trail, so its
+absence distinguishes nothing and proved nothing.
+
+The decision below does not rest on it. The four missing links are facts about
+the code, independently checkable and unaffected. But the retracted argument is
+left visible rather than quietly deleted, because a plausible-looking provenance
+test that silently answers the same way for every input is exactly the kind of
+measurement this project has been bitten by twice — and the second time, it was
+this one.
+
+That `requestedBy` is accepted at intake and never recorded is itself a gap:
+find-shape (g), an event recording *what* but not *who*. Logged separately.
 
 Meanwhile six production sites read `contract.inputs.toolEntitlements`, and
 `reviewer.ts:450` fails a task that carried entitlements but produced no actions.
