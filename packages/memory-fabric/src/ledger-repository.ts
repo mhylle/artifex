@@ -114,8 +114,13 @@ export interface MissionSummary {
 interface MissionSummaryRow {
   mission_id: string;
   objective: string | null;
-  delivered: boolean;
-  surrendered: boolean;
+  /**
+   * The mission's most recent terminal event, or null while none exists.
+   *
+   * A pair of accumulated booleans cannot express "the LAST outcome", and with
+   * resume (R41) a mission legitimately surrenders and then delivers.
+   */
+  last_terminal: string | null;
   event_count: string;
   escalations: string;
   agents_staffed: string;
@@ -252,8 +257,17 @@ export class LedgerRepository {
       SELECT
         mission_id,
         (ARRAY_AGG(payload->>'objective') FILTER (WHERE type = 'mission.started'))[1] AS objective,
-        BOOL_OR(type = 'mission.folded')      AS delivered,
-        BOOL_OR(type = 'mission.surrendered') AS surrendered,
+        -- The LAST terminal event decides, and BOTH delivery events count
+        -- (defect dd2e9d18). Two accumulated booleans could express neither:
+        -- mission.folded was the only terminal marker when this was written,
+        -- and R37 AC-0 added mission.delivered precisely because a mission the
+        -- gate keeps WHOLE never folds -- so 21 live missions that had
+        -- delivered read as running forever. Both are kept rather than swapped:
+        -- 46 missions carry only mission.folded, and dropping it would flip
+        -- them back to running and make the count worse than the defect.
+        (ARRAY_AGG(type ORDER BY seq DESC) FILTER (
+          WHERE type IN ('mission.folded', 'mission.delivered', 'mission.surrendered')
+        ))[1]                                 AS last_terminal,
         COUNT(*)                              AS event_count,
         COUNT(*) FILTER (WHERE type = 'escalation.rung_climbed') AS escalations,
         COUNT(*) FILTER (WHERE type = 'agent.staffed')           AS agents_staffed,
@@ -272,10 +286,18 @@ export class LedgerRepository {
     return result.rows.map((row) => ({
       missionId: row.mission_id,
       objective: row.objective,
-      // Surrender wins a tie: a mission that folded AND surrendered has not
-      // delivered, and reporting the cheerier of two outcomes is how a dashboard
-      // starts lying.
-      status: row.surrendered ? 'surrendered' : row.delivered ? 'delivered' : 'running',
+      // The most recent outcome, not the worst one. Surrender used to win any
+      // tie, on the reasoning that reporting the cheerier of two outcomes is
+      // how a dashboard starts lying — true while a mission ran exactly once.
+      // Resume (R41) made "surrendered, answered, delivered" an ordinary
+      // history, and there the cheerier outcome is simply the current one.
+      // Reporting the older state is the same lie facing the other way.
+      status:
+        row.last_terminal === null
+          ? 'running'
+          : row.last_terminal === 'mission.surrendered'
+            ? 'surrendered'
+            : 'delivered',
       eventCount: Number(row.event_count),
       escalations: Number(row.escalations),
       agentsStaffed: Number(row.agents_staffed),

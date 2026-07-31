@@ -164,7 +164,11 @@ export function buildRequesterView(events: readonly LedgerEventView[]): Requeste
         break;
       }
 
+      // BOTH delivery events (defect `dd2e9d18`) — the third site that knew only
+      // `mission.folded`. A requester whose mission the gate kept WHOLE would
+      // have been told it was still running long after they had the answer.
       case 'mission.folded':
+      case 'mission.delivered':
         outcome = 'delivered';
         break;
 

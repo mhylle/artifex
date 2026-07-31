@@ -147,8 +147,20 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
       case 'mission.started':
         missionObjective = str(payload, 'objective') ?? '';
         break;
+      // BOTH delivery events (defect `dd2e9d18`). `mission.delivered` was added
+      // by R37 AC-0 because a mission the decompose-or-delegate gate keeps WHOLE
+      // never folds, and this projection was never taught about it — so a
+      // kept-whole mission read as running forever. Seen live as a flat
+      // contradiction: the fleet rail said DELIVERED and this header said
+      // SURRENDERED for the same mission on the same screen.
       case 'mission.folded':
+      case 'mission.delivered':
         missionStatus = 'delivered';
+        // Cleared, not merely overwritten. A mission that surrendered, was
+        // answered and then delivered (R41) has got PAST those blockers, and
+        // listing them under a delivered header would describe a problem the
+        // operator already solved.
+        blockers = [];
         break;
       case 'mission.surrendered': {
         missionStatus = 'surrendered';

@@ -52,6 +52,53 @@ describe('R10 AC-2 — the task tree renders from ledger events', () => {
     expect(buildMissionTree(TRAIL)?.status).toBe('delivered');
   });
 
+  it('shows a KEPT-WHOLE mission as delivered — it never folds (defect dd2e9d18)', () => {
+    // `mission.delivered` exists precisely because a mission the
+    // decompose-or-delegate gate keeps whole never folds (R37 AC-0). This
+    // projection only knew `mission.folded`, so a kept-whole mission read
+    // "running" forever. Seen live: the rail said DELIVERED and this header
+    // said SURRENDERED for the same mission, on the same screen.
+    const kept = [
+      ev(1, 'mission.started', MISSION, { objective: 'Kept whole' }),
+      ev(2, 'task.executed', MISSION, {}),
+      ev(3, 'mission.delivered', MISSION, {}),
+    ];
+
+    expect(buildMissionTree(kept)?.status).toBe('delivered');
+  });
+
+  it('shows a mission that surrendered and was then resumed to delivery as delivered', () => {
+    // R41 made this ordinary: block, answer, resume, deliver. The LAST outcome
+    // is the true one — and the blockers the surrender recorded are no longer
+    // blocking anything.
+    const resumed = [
+      ev(1, 'mission.started', MISSION, { objective: 'Answered' }),
+      ev(2, 'mission.surrendered', MISSION, { blockers: ['the intake dialogue has unanswered questions'] }),
+      ev(3, 'operator.decided', MISSION, { decision: 'approve' }),
+      ev(4, 'mission.delivered', MISSION, {}),
+    ];
+
+    const tree = buildMissionTree(resumed);
+    expect(tree?.status).toBe('delivered');
+    expect(tree?.blockers, 'a delivered mission still showed the blockers it got past').toEqual([]);
+  });
+
+  it('DISTRACTOR: a mission that delivered and THEN surrendered reads surrendered', () => {
+    // The other side of the discriminator. A rule that simply preferred the
+    // cheerier of two flags would report a delivery the mission took back.
+    const takenBack = [
+      ev(1, 'mission.started', MISSION, { objective: 'Both' }),
+      ev(2, 'mission.delivered', MISSION, {}),
+      ev(3, 'mission.surrendered', MISSION, { blockers: ['ran out of budget'] }),
+    ];
+
+    const tree = buildMissionTree(takenBack);
+    expect(tree?.status).toBe('surrendered');
+    expect(tree?.blockers, 'CONTROL: the surrender recorded no blockers, so the order was not tested').toEqual([
+      'ran out of budget',
+    ]);
+  });
+
   it('surfaces the CURRENT tier, so a tier bump is visible in the cockpit', () => {
     const tree = buildMissionTree(TRAIL);
 

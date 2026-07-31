@@ -186,6 +186,32 @@ describe('buildRequesterView', () => {
     expect(buildRequesterView([...trail(), ev('mission.folded', MISSION, {}, 'contract')]).outcome).toBe('delivered');
   });
 
+  it('reports a KEPT-WHOLE delivery as delivered — it never folds (defect dd2e9d18)', () => {
+    // The third site keying on `mission.folded` alone. A requester whose
+    // mission was kept whole would have been told it was still running long
+    // after they had the answer.
+    const delivered = [...trail(), ev('mission.delivered', MISSION, {}, 'contract')];
+
+    expect(buildRequesterView(delivered).outcome).toBe('delivered');
+  });
+
+  it('reports a surrendered-then-resumed mission by its LAST outcome', () => {
+    const resumed = [
+      ...trail(),
+      ev('mission.surrendered', MISSION, {}, 'contract'),
+      ev('mission.delivered', MISSION, {}, 'contract'),
+    ];
+    // ...and the other side, so this cannot pass by always preferring delivery.
+    const takenBack = [
+      ...trail(),
+      ev('mission.delivered', MISSION, {}, 'contract'),
+      ev('mission.surrendered', MISSION, {}, 'contract'),
+    ];
+
+    expect(buildRequesterView(resumed).outcome).toBe('delivered');
+    expect(buildRequesterView(takenBack).outcome).toBe('surrendered');
+  });
+
   it('DISTRACTOR: flagged assumptions are reported as UNAVAILABLE, never as "none"', () => {
     // No event in the vocabulary carries them: the evidence bundle defines an
     // `assumptions` field but `task.executed` records only `{answer}`, so

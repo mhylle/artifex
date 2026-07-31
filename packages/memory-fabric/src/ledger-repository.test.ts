@@ -266,9 +266,41 @@ describe('R21 — listMissions projects the fleet out of the ledger', () => {
     expect(found?.status).toBe('running');
   });
 
-  it('DISTRACTOR: surrender wins over fold — the cheerier outcome is not reported', async () => {
-    // A dashboard that resolves this tie the other way tells the operator a
-    // mission delivered when it did not.
+  it('reports a mission that DELIVERED without folding as delivered', async () => {
+    // `mission.delivered` exists because a mission the decompose-or-delegate
+    // gate keeps WHOLE never folds (R37 AC-0). This projection was written
+    // before that event and still keyed "delivered" on `mission.folded` alone,
+    // so every kept-whole mission read as running forever — 21 of them live
+    // (defect `dd2e9d18`).
+    const missionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Kept whole.' } }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.delivered' }));
+
+    const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
+
+    expect(found?.status).toBe('delivered');
+  });
+
+  it('reports a mission that surrendered and was then resumed to delivery as delivered', async () => {
+    // R41 made this ordinary: a mission blocks, an operator answers, it resumes
+    // and delivers. The LAST outcome is the true one. Observed live on mission
+    // 63498d62, which read "surrendered" after delivering.
+    const missionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Answered.' } }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.surrendered' }));
+    await ledger.append(makeEvent({ missionId, type: 'operator.decided' }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.delivered' }));
+
+    const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
+
+    expect(found?.status).toBe('delivered');
+  });
+
+  it('DISTRACTOR: a mission that delivered and THEN surrendered reads surrendered', async () => {
+    // The other side of the discriminator. This test used to prove "surrender
+    // always wins"; it now proves the LAST outcome wins, and it must keep
+    // failing for a rule that simply prefers the cheerier of two flags —
+    // otherwise the projection would report a delivery the mission took back.
     const missionId = randomUUID();
     await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Both.' } }));
     await ledger.append(makeEvent({ missionId, type: 'mission.folded' }));
@@ -277,6 +309,21 @@ describe('R21 — listMissions projects the fleet out of the ledger', () => {
     const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
 
     expect(found?.status).toBe('surrendered');
+  });
+
+  it('DISTRACTOR: a historical mission carrying only `mission.folded` still reads delivered', async () => {
+    // The anti-regression that stopped this being a one-word swap. 46 missions
+    // in the live ledger carry `mission.folded` and only 42 carry
+    // `mission.delivered`, 20 in both — so keying purely on the newer event
+    // would have flipped 26 historical missions back to running and made the
+    // number worse than the defect being fixed.
+    const missionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Historical.' } }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.folded' }));
+
+    const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
+
+    expect(found?.status).toBe('delivered');
   });
 
   it('DISTRACTOR: counts belong to their own mission, not the whole table', async () => {
