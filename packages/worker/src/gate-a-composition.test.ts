@@ -603,3 +603,76 @@ describe('R30 — the intake dialogue runs before anything is decomposed', () =>
     expect(result.trail.some((e) => e.type === 'task.contracted')).toBe(true);
   });
 });
+
+/**
+ * R30 AC-2 in the loop — the escalation fires at the TASK, not at delivery.
+ *
+ * Written BEFORE the wiring this time. The pure rule was RED-first in iterations
+ * 86 and 88 while the loop integration was not, so its composition tests passed
+ * on first run and proved nothing by passing. This file failed first.
+ */
+describe('R30 AC-2 — a carried assumption escalates when it starts to matter', () => {
+  /** A mission whose dial permits carrying a low-stakes ambiguity. */
+  const carried = [{ about: 'm-1', question: 'Which audience is this for?', stakes: 'low' as const }];
+
+  it('escalates at the TASK that carries the criterion, before the mission ends', async () => {
+    const result = await runMission(
+      mission(),
+      { ...seams(), interrogator: { async assess() { return { questions: carried }; } } } as never,
+      { now: () => AT },
+    );
+
+    const flagged = result.trail.findIndex((e) => e.type === 'intake.assumption_flagged');
+    const escalated = result.trail.findIndex((e) => e.type === 'assumption.became_load_bearing');
+    const delivered = result.trail.findIndex((e) => e.type === 'mission.delivered');
+
+    expect(flagged, 'the assumption was never carried').toBeGreaterThanOrEqual(0);
+    expect(escalated, 'the assumption never became load-bearing').toBeGreaterThanOrEqual(0);
+    // The clause with teeth: at that MOMENT rather than at delivery.
+    expect(escalated, 'the escalation waited for delivery').toBeLessThan(delivered);
+  });
+
+  it('names the question, and reaches the attention queue', async () => {
+    const result = await runMission(
+      mission(),
+      { ...seams(), interrogator: { async assess() { return { questions: carried }; } } } as never,
+      { now: () => AT },
+    );
+
+    const event = result.trail.find((e) => e.type === 'assumption.became_load_bearing');
+    expect(JSON.stringify(event?.payload)).toMatch(/Which audience is this for\?/);
+    expect(
+      result.trail.some((e) => e.type === 'escalation.awaiting_human'
+        && String(e.payload['rung']) === 'assumption_became_load_bearing'),
+      'nothing reached the attention queue',
+    ).toBe(true);
+  });
+
+  it('DISTRACTOR: an assumption about an UNRELATED criterion never escalates', async () => {
+    // The fixture mission has criterion m-1 only, so an assumption about m-9 can
+    // never become load-bearing. A rule that escalated everything carried would
+    // pass both tests above.
+    const result = await runMission(
+      mission(),
+      {
+        ...seams(),
+        interrogator: {
+          async assess() {
+            return { questions: [{ about: 'm-9', question: 'Unrelated?', stakes: 'low' as const }] };
+          },
+        },
+      } as never,
+      { now: () => AT },
+    );
+
+    expect(result.trail.some((e) => e.type === 'intake.assumption_flagged'), 'CONTROL: nothing was carried').toBe(true);
+    expect(result.trail.some((e) => e.type === 'assumption.became_load_bearing')).toBe(false);
+  });
+
+  it('DISTRACTOR: with nothing carried, no mission pays for the check', async () => {
+    const result = await runMission(mission(), seams(), { now: () => AT });
+
+    expect(result.trail.some((e) => e.type === 'assumption.became_load_bearing')).toBe(false);
+    expect(result.trail.some((e) => e.type === 'mission.delivered')).toBe(true);
+  });
+});

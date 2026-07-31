@@ -24,6 +24,8 @@ import { capabilityOf, proposableCapabilities, staff, staffVerifier } from './ag
 import { concurrencyFor } from './design-playbook.js';
 import { triageQuestions } from './intake-dialogue.js';
 import type { IntakeQuestion } from './intake-dialogue.js';
+import { loadBearingNow } from './load-bearing.js';
+import type { FlaggedAssumption } from './load-bearing.js';
 import type { DesignAuthor, RegistryLookup } from './agent-creator.js';
 import { decompose, foldUp } from './orchestrator.js';
 import type { Planner, Reconciler } from './orchestrator.js';
@@ -797,6 +799,18 @@ export async function runMission(
   const gateBOutcomes: GateBOutcome[] = [];
   /** Which design last worked a category, so a patch knows what to aim at. */
   const designFor = new Map<string, string>();
+
+  /**
+   * Ambiguities the dial permitted carrying into the run (R30 AC-2).
+   *
+   * Filled by the intake dialogue below and read inside `runSubtree`, which is
+   * defined above it — hence a holder rather than a parameter. Empty for every
+   * mission whose request left nothing open, which is the common case and costs
+   * nothing.
+   */
+  const carriedAssumptions: FlaggedAssumption[] = [];
+  /** `about` keys already raised, so a moment stays a moment. */
+  const assumptionsEscalated = new Set<string>();
   /** The live experiment, plus where in `gateBOutcomes` its window started. */
   let liveFix:
     | { readonly hotFixId: string; readonly plan: HotFixPlan; readonly target: HotFixTarget; readonly previousValue: string; readonly from: number }
@@ -1817,6 +1831,35 @@ export async function runMission(
           assumptions: outcome.bundle.assumptions,
         });
 
+        // ---- a carried assumption starts to matter (R30 AC-2) ---------------
+        // HERE rather than at fold-up, because the criterion says "at that
+        // moment rather than at delivery" — and a mission that surrenders never
+        // reaches delivery at all, so an escalation deferred to it can be an
+        // escalation that never happens.
+        //
+        // The trigger is the criterion this task is responsible for, not a
+        // string match against what the worker declared it assumed. See
+        // `load-bearing.ts` for the alternative that was measured and rejected.
+        for (const assumption of loadBearingNow(
+          carriedAssumptions,
+          child.acceptanceCriteria.map((c) => c.criterionId),
+          assumptionsEscalated,
+        )) {
+          assumptionsEscalated.add(assumption.about);
+          record(child.taskId, 'escalation', 'assumption.became_load_bearing', 'orchestrator', {
+            about: assumption.about,
+            question: assumption.question,
+            objective: child.objective,
+            detail: 'carried into the run as a low-stakes ambiguity; this task is graded on it',
+          });
+          record(child.taskId, 'escalation', 'escalation.awaiting_human', 'orchestrator', {
+            objective: child.objective,
+            rung: 'assumption_became_load_bearing',
+            autonomyDial: mission.autonomyDial,
+            findings: [`[${assumption.about}] ${assumption.question}`],
+          });
+        }
+
         // ---- the verifier is STAFFED, and lineage overlap is refused (R35 AC-2)
         // Gate B's judge was a bare model call, so "the verifier shares no design
         // lineage with the author" had nothing to check. Staffing one gives the
@@ -2226,6 +2269,10 @@ export async function runMission(
       record(mission.taskId, 'contract', 'intake.assumption_flagged', 'orchestrator', {
         about: question.about, question: question.question, stakes: question.stakes, blocking: false,
       });
+      // Carried into the run so it can be escalated the moment it matters
+      // (R30 AC-2). A flag nobody reads later is the "mechanism with no fuel"
+      // shape — recording it and never consulting it would satisfy AC-1 alone.
+      carriedAssumptions.push(question);
     }
 
     if (triaged.blocking.length > 0) {
