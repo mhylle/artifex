@@ -102,3 +102,80 @@ export function assertReviewIndependence(assignment: ReviewAssignment): void {
     throw new ConstitutionViolation(ruling.clause, ruling.detail);
   }
 }
+
+const REACH_CLAUSE = 'fast-loop-reach';
+
+/**
+ * What the fast loop (R26) is permitted to patch mid-mission.
+ *
+ * `layer` is the literal `'worker'` and `kind` is a closed set, so a target
+ * above the worker layer does not type-check. That is the first of the three
+ * bars AC-2's "by construction" asks for; {@link checkFastLoopReach} is the
+ * second, for data that reaches the runtime having never been type-checked, and
+ * a CHECK constraint on `hot_fix` is the third.
+ *
+ * Deliberately NARROWER than `Proposal.targets` in `proposal-emitter.ts`, which
+ * may name the constitution. A proposal argues; a hot-fix acts. The learner is
+ * allowed to argue that any rule should change, and allowed to change almost
+ * nothing.
+ */
+export interface HotFixTarget {
+  readonly layer: 'worker';
+  readonly kind: 'role_instructions' | 'knowledge';
+  readonly assetId: string;
+}
+
+/** The only layer the fast loop may act on, and the only assets within it. */
+const PERMITTED_KINDS: readonly string[] = ['role_instructions', 'knowledge'];
+
+/**
+ * May the fast loop patch this target? (R26 AC-2)
+ *
+ * An ALLOW-list, not a blocklist, and that is the whole design of the guard.
+ * "Refuse meta and core" permits every layer nobody has thought of yet — and new
+ * layers are exactly what a self-improving system grows. Anything that is not
+ * recognisably a worker-layer asset is refused, including an unknown `kind`
+ * within the worker layer: a worker's budget and its contract are not its
+ * prompt, and neither is the fast loop's to rewrite.
+ *
+ * The reviewer rubric is the case worth stating aloud. A system that can patch
+ * its own marking scheme mid-run can make any failure disappear without
+ * improving anything — invariant #4's yardstick problem in its fastest form.
+ */
+export function checkFastLoopReach(target: HotFixTarget): Ruling {
+  const { layer, kind, assetId } = target as { layer: string; kind: string; assetId: string };
+
+  if (layer !== 'worker') {
+    return {
+      permitted: false,
+      clause: REACH_CLAUSE,
+      detail:
+        `target ${assetId}: the fast loop may patch the worker layer only, not '${layer}' — ` +
+        'a mid-mission change above the worker layer alters work nobody reviewed',
+    };
+  }
+
+  if (!PERMITTED_KINDS.includes(kind)) {
+    return {
+      permitted: false,
+      clause: REACH_CLAUSE,
+      detail:
+        `target ${assetId}: '${kind}' is not a patchable worker-layer asset ` +
+        `(permitted: ${PERMITTED_KINDS.join(', ')})`,
+    };
+  }
+
+  return {
+    permitted: true,
+    clause: REACH_CLAUSE,
+    detail: `target ${assetId}: worker-layer ${kind} is within the fast loop's reach`,
+  };
+}
+
+/** {@link checkFastLoopReach}, as an assertion for call sites that cannot continue. */
+export function assertFastLoopReach(target: HotFixTarget): void {
+  const ruling = checkFastLoopReach(target);
+  if (!ruling.permitted) {
+    throw new ConstitutionViolation(ruling.clause, ruling.detail);
+  }
+}
