@@ -271,3 +271,44 @@ describe('R34 AC-2 — a red flag discards work that technically passed', () => 
     expect(verdict.redFlags).toEqual([]);
   });
 });
+
+/**
+ * `budget_exhaustion` becomes emittable (defect `e758f460`).
+ *
+ * It is the ONLY error class `escalation.ts` maps to the `agent_redesign` rung,
+ * and nothing in the running system ever assigned it — so the rung was dead, and
+ * with it `parent_design_id`, design lineage, and R28 AC-0.
+ *
+ * The mechanical tier already refuses a bundle that overran its ceiling; it
+ * simply called that `verification_failure`. Overrunning a budget IS a budget
+ * exhaustion, and no other finding in the system means that.
+ *
+ * Deliberately NOT done until `effortSpent` became a real measurement — while it
+ * was a hardcoded 1 no task could exceed any ceiling, so reclassing would have
+ * created a second route that never fires, which is how the first dead route
+ * came to exist.
+ */
+describe('R34 / e758f460 — overrunning the ceiling is a BUDGET EXHAUSTION', () => {
+  it('classes the over-ceiling finding as budget_exhaustion', async () => {
+    const verdict = await gateB(contract(), bundle({ effortSpent: 99 }), metAll(), intentOk(), META);
+
+    const overrun = verdict.findings.find((f) => /ceiling/i.test(f.detail));
+    expect(overrun?.errorClass).toBe('budget_exhaustion');
+  });
+
+  it('DISTRACTOR: the OTHER mechanical failures stay verification_failure', async () => {
+    // Only the budget finding is a budget exhaustion. Reclassing the whole tier
+    // would send an empty deliverable to `agent_redesign`, which redesigns an
+    // agent over a fault that had nothing to do with the design.
+    const verdict = await gateB(contract(), bundle({ deliverable: null }), metAll(), intentOk(), META);
+
+    const empty = verdict.findings.find((f) => /empty/i.test(f.detail));
+    expect(empty?.errorClass).toBe('verification_failure');
+  });
+
+  it('DISTRACTOR: work WITHIN its ceiling raises no budget finding at all', async () => {
+    const verdict = await gateB(contract(), bundle({ effortSpent: 2 }), metAll(), intentOk(), META);
+
+    expect(verdict.findings.some((f) => f.errorClass === 'budget_exhaustion')).toBe(false);
+  });
+});

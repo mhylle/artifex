@@ -915,6 +915,12 @@ export async function runMission(
       // The ceiling is DERIVED — the contract's, plus whatever the operator has
       // granted — which is what makes R17's top-up raise a real limit rather
       // than a decorative one.
+      // The design the LAST attempt ran, so a redesign can name what it
+      // replaces. Loop-scoped on purpose: `manifest` is declared per attempt, so
+      // reading it at staffing time read the fresh `undefined` and every
+      // redesign registered as an origin (defect `cb939996`).
+      let lastDesignId: string | null = null;
+
       const granted = seams.control?.grantedBudget === undefined
         ? 0
         : await seams.control.grantedBudget(child.taskId).catch(() => 0);
@@ -928,6 +934,46 @@ export async function runMission(
           record(child.taskId, 'economic', 'task.budget_exhausted', 'orchestrator', {
             objective: child.objective, spent, ceiling: effectiveCeiling, granted,
           });
+
+          // The ladder's budget remedy, PRODUCED though it cannot be run
+          // (ADR-0011, defect `e758f460`). `budget_exhaustion` is the only class
+          // entering at `agent_redesign`, and a bundle that overran the ceiling
+          // has by construction pushed `spent` over it too — so this guard fired
+          // before the redesign could ever be staffed, and the rung was dead.
+          //
+          // Both halves stay honest: no further attempt EXECUTES, so the ceiling
+          // still stops the spend; but the remedy the ledger says was escalated
+          // to is really authored and registered, with the design that overspent
+          // as its parent. That is where lineage is born. It arrives unproven and
+          // cannot be promoted without harness evidence (R28 AC-2) — it simply
+          // gives the next task in this category something cheaper to bid.
+          if (rungIndex >= 0 && ladder[rungIndex] === 'agent_redesign' && lastDesignId !== null) {
+            try {
+              const replacement = await staff({
+                contract: child,
+                registry: seams.registry,
+                author: seams.author,
+                redesignFrom: lastDesignId,
+                fanIn: children.filter((c) => c.dependencies.consumesTaskIds.includes(child.taskId)).length,
+                // No headroom left — that is the whole reason we are here, and
+                // the tier policy should size the replacement against it.
+                budgetHeadroom: 0,
+              });
+              record(child.taskId, 'staffing', 'agent.redesigned', 'agent_creator', {
+                designId: replacement.designId,
+                version: replacement.version,
+                replaces: lastDesignId,
+                detail:
+                  `produced but not run: the task spent ${spent} against a ceiling of ${effectiveCeiling}`,
+              });
+            } catch (error) {
+              // A remedy that could not be authored is worth recording as such —
+              // silence here would read exactly like the dead rung this fixes.
+              record(child.taskId, 'staffing', 'agent.redesign_failed', 'agent_creator', {
+                replaces: lastDesignId, detail: describe(error),
+              });
+            }
+          }
           break;
         }
 
@@ -974,7 +1020,7 @@ export async function runMission(
             // `undefined` on every other rung, so ordinary staffing keeps
             // reusing a proven incumbent and R38's reuse market is untouched.
             ...(rungIndex >= 0 && ladder[rungIndex] === 'agent_redesign'
-              ? { redesignFrom: manifest?.designId ?? null }
+              ? { redesignFrom: lastDesignId }
               : {}),
             // Both derived, and both previously supplied by nobody: the tier
             // policy has always accepted them and always received defaults.
@@ -990,6 +1036,7 @@ export async function runMission(
           escalations.push({ taskId: child.taskId, rung: ladder[rungIndex]!, fromTier: 1, toTier: 1, reason: describe(error) });
           continue;
         }
+        lastDesignId = manifest.designId;
         const tier = Math.min(manifest.logicalTier + tierBump, FRONTIER_TIER) as LogicalTier;
         record(child.taskId, 'staffing', 'agent.staffed', 'agent_creator', {
           designId: manifest.designId,

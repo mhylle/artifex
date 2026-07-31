@@ -169,3 +169,267 @@ describe('R36 — the loop enters the ladder where the error class says', () => 
     expect(result.outcome).toBe('surrendered');
   });
 });
+
+/**
+ * R28 AC-0 / defect `cb939996` — a redesign must NAME the design it replaces.
+ *
+ * The `agent_redesign` rung is reached (the tests above prove the ladder gets
+ * there) and `staff()` is told to redesign — but `redesignFrom` was read from a
+ * `let manifest;` declared INSIDE the attempt loop, so at the moment it was
+ * read it was always `undefined`, and `?? null` turned that into `null`.
+ *
+ * `null` is not harmless here. It still forces a fresh design (no reuse), so
+ * the rung looked enacted; but `parentDesignId` is `typeof redesignFrom ===
+ * 'string' ? redesignFrom : null`, so every redesign registered as an ORIGIN.
+ * `parent_design_id` stayed 0 rows across the whole live database, the clade
+ * query had a recursive walk and no ancestry to walk, and R28 AC-0's "given a
+ * design with ancestors in the registry" was unreachable.
+ *
+ * Found by driving, not by reading: the rung climbed on a real mission and the
+ * lineage count did not move.
+ */
+describe('R28 AC-0 — the redesign is registered as a CHILD of the design that failed', () => {
+  type Registration = { designId: string; parentDesignId: string | null };
+
+  async function runWithRegistry() {
+    const registered: Registration[] = [];
+    const base = seams('execution_error');
+    const result = await runMission(
+      {
+        ...mission(),
+        // A redesign only happens once the ladder gets there, so the fixture
+        // must afford the attempts. Everything else is the shared fixture.
+      },
+      {
+        ...base,
+        registry: {
+          async bestForCategory() { return null; },
+          async register(input: { designId: string; parentDesignId?: string | null }) {
+            registered.push({ designId: input.designId, parentDesignId: input.parentDesignId ?? null });
+          },
+        },
+      } as never,
+      { now: () => AT },
+    );
+    return { result, registered };
+  }
+
+  it('reaches the rung at all (the given this criterion depends on)', async () => {
+    const { result } = await runWithRegistry();
+
+    expect(rungs(result.trail)).toContain('agent_redesign');
+  });
+
+  it('names the failed design as the parent — not null', async () => {
+    const { result, registered } = await runWithRegistry();
+
+    const staffedIds = result.trail
+      .filter((e) => e.type === 'agent.staffed')
+      .map((e) => String(e.payload['designId']));
+
+    const withParent = registered.filter((r) => r.parentDesignId !== null);
+    expect(withParent.length, 'no registration carried a parent — lineage was never born').toBeGreaterThan(0);
+
+    // The parent must be a design that ACTUALLY RAN, not any non-null string. A
+    // mutant writing `parentDesignId: 'x'` would satisfy "not null" and invent
+    // an ancestor the registry never had.
+    for (const r of withParent) {
+      expect(staffedIds, 'the parent must be a design that was really staffed').toContain(r.parentDesignId);
+    }
+  });
+
+  it('DISTRACTOR: designs staffed on the OTHER rungs stay origins', async () => {
+    // Only a redesign has a parent. If every registration carried one, the
+    // clade query would aggregate invented lineage as if it were real — the
+    // exact thing the `register` doc comment warns about.
+    const { registered } = await runWithRegistry();
+
+    expect(registered.some((r) => r.parentDesignId === null), 'every design claimed an ancestor').toBe(true);
+  });
+});
+
+/**
+ * R28 AC-0 / defect `e758f460` — the ladder's budget remedy, actually produced.
+ *
+ * `budget_exhaustion` is the ONLY error class whose entry rung is
+ * `agent_redesign`, and it is unreachable in practice by any other route: a
+ * live mission's ladder gives `maxAttempts: 3`, and stepping one rung per
+ * failure reaches `agent_redesign` only as the FINAL climb, after the last
+ * attempt has already been spent. So the budget route is the route.
+ *
+ * And that route was foreclosed. Gate B's mechanical tier raises
+ * `budget_exhaustion` when ONE bundle's `effortSpent` exceeds the ceiling —
+ * which means the cumulative `spent` exceeds it too, always, by construction.
+ * The loop's pre-attempt guard therefore broke out before the redesign could
+ * ever be staffed. Proven live: a mission with `ceiling: 1` climbed to
+ * `agent_redesign` and surrendered without a single design being redesigned.
+ *
+ * The resolution (ADR-0011) keeps BOTH halves honest rather than picking one:
+ * the ceiling still stops the spend — no further attempt executes — but the
+ * remedy the ladder named is still PRODUCED and registered, because a rung the
+ * ledger records as climbed and never enacts is a claim the system does not
+ * honour. The redesign inherits no track record and cannot be promoted without
+ * harness evidence (AC-2), so it costs the registry an unproven child and gives
+ * the next task in the category something cheaper to bid.
+ */
+describe('R28 AC-0 — budget exhaustion produces the redesign it escalated to', () => {
+  function broke() {
+    return {
+      ...mission(),
+      // Child ceiling is `parent.ceiling * effortShare` = 3.6, and the work
+      // below costs 5 — so ONE execution overruns, which is the only shape that
+      // raises `budget_exhaustion` at all.
+      budget: { floor: 1, ceiling: 4, unit: 'effort-units' as const },
+    };
+  }
+
+  async function run(overrides: Record<string, unknown> = {}) {
+    const registered: { designId: string; parentDesignId: string | null }[] = [];
+    const base = seams('execution_error');
+    const result = await runMission(
+      broke(),
+      {
+        ...base,
+        // Every criterion MET — so the only thing wrong with this bundle is
+        // what it cost. Without this the verdict carries mixed classes and the
+        // test would not prove the budget route specifically.
+        completionJudge: {
+          async assess({ contract }: { contract: TaskContract }) {
+            return {
+              criteria: contract.acceptanceCriteria.map((c) => ({
+                criterionId: c.criterionId, met: true, detail: 'ok',
+              })),
+              redFlags: [],
+            };
+          },
+        },
+        registry: {
+          async bestForCategory() { return null; },
+          async register(input: { designId: string; parentDesignId?: string | null }) {
+            registered.push({ designId: input.designId, parentDesignId: input.parentDesignId ?? null });
+          },
+        },
+        ...overrides,
+      } as never,
+      { now: () => AT },
+    );
+    return { result, registered };
+  }
+
+  it('escalates to agent_redesign on the FIRST failure, via the budget class', async () => {
+    const { result } = await run();
+
+    const climb = result.trail.find((e) => e.type === 'escalation.rung_climbed');
+    expect(climb?.payload['rung']).toBe('agent_redesign');
+    expect(climb?.payload['entryClass']).toBe('budget_exhaustion');
+  });
+
+  it('produces and registers the redesign, with the overspending design as parent', async () => {
+    const { result, registered } = await run();
+
+    const overspender = result.trail
+      .filter((e) => e.type === 'agent.staffed')
+      .map((e) => String(e.payload['designId']))[0];
+
+    const child = registered.find((r) => r.parentDesignId !== null);
+    expect(child, 'the ladder climbed to agent_redesign and nothing was redesigned').toBeDefined();
+    expect(child?.parentDesignId).toBe(overspender);
+  });
+
+  it('records the redesign on the ledger, saying it was not run', async () => {
+    // A design that appears in the registry with no ledger event explaining it
+    // is anonymous, which invariant 1 and R28 both forbid.
+    const { result } = await run();
+
+    const ev = result.trail.find((e) => e.type === 'agent.redesigned');
+    expect(ev, 'the redesign happened off-ledger').toBeDefined();
+    expect(String(ev?.payload['detail'])).toMatch(/not run|budget/i);
+  });
+
+  it('DISTRACTOR: the ceiling still stops the spend — the redesign never EXECUTES', async () => {
+    // The whole risk of this change. If producing the remedy also ran it, a
+    // task would spend past a ceiling it had already blown, and invariant 7
+    // would be decorative.
+    const { result } = await run();
+
+    const executions = result.trail.filter((e) => e.type === 'task.executed');
+    expect(executions.length, 'the redesigned agent was allowed to run').toBe(1);
+    expect(result.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(true);
+    expect(result.outcome).toBe('surrendered');
+  });
+
+  it('DISTRACTOR: a task that stays WITHIN its ceiling redesigns nothing', async () => {
+    // The trigger is the overrun, not the surrender. A mission that fails for
+    // any other reason must not mint lineage — that would attribute ancestry to
+    // designs that never overspent and pollute the clade score with noise.
+    const { registered } = await run({
+      work: {
+        async execute() {
+          return { deliverable: { answer: 'x' }, actions: [], consulted: [], assumptions: [], effortSpent: 1 };
+        },
+      },
+    });
+
+    expect(registered.every((r) => r.parentDesignId === null)).toBe(true);
+  });
+});
+
+/**
+ * The gap a mutant found, not a review.
+ *
+ * Deleting the `ladder[rungIndex] === 'agent_redesign'` condition — so that ANY
+ * budget exhaustion mints a redesign — survived all 509 worker tests. Nothing
+ * asserted that the remedy is taken only where the contract GRANTED it.
+ *
+ * That matters because `entryRungFor` deliberately falls back to rung 0 when the
+ * ladder does not contain the mapped rung: "a contract that granted only cheap
+ * remedies did not silently grant the expensive ones." Minting lineage anyway
+ * would attribute ancestry on behalf of a contract that withheld the remedy, and
+ * the clade score would aggregate it as real.
+ */
+describe('R28 AC-0 — a contract that WITHHELD the redesign rung gets no redesign', () => {
+  it('exhausts its budget without minting lineage', async () => {
+    const registered: { parentDesignId: string | null }[] = [];
+    const base = seams('execution_error');
+
+    const result = await runMission(
+      {
+        ...mission(),
+        budget: { floor: 1, ceiling: 4, unit: 'effort-units' },
+        // Cheap remedies only. `budget_exhaustion` maps to `agent_redesign`,
+        // which is not here, so `entryRungFor` falls back to rung 0.
+        escalationPolicy: { ladder: ['retry_same', 'retry_higher_tier'], humanAt: null },
+      },
+      {
+        ...base,
+        completionJudge: {
+          async assess({ contract }: { contract: TaskContract }) {
+            return {
+              criteria: contract.acceptanceCriteria.map((c) => ({
+                criterionId: c.criterionId, met: true, detail: 'ok',
+              })),
+              redFlags: [],
+            };
+          },
+        },
+        registry: {
+          async bestForCategory() { return null; },
+          async register(input: { parentDesignId?: string | null }) {
+            registered.push({ parentDesignId: input.parentDesignId ?? null });
+          },
+        },
+      } as never,
+      { now: () => AT },
+    );
+
+    // The premise: it really did run out of money, so the guard really did fire.
+    expect(result.trail.some((e) => e.type === 'task.budget_exhausted')).toBe(true);
+    expect(registered.length, 'nothing was staffed at all — the premise is wrong').toBeGreaterThan(0);
+
+    expect(
+      registered.every((r) => r.parentDesignId === null),
+      'lineage was minted under a contract that never granted the redesign rung',
+    ).toBe(true);
+    expect(result.trail.some((e) => e.type === 'agent.redesigned')).toBe(false);
+  });
+});

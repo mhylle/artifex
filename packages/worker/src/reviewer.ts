@@ -356,7 +356,17 @@ function mechanicalChecks(contract: TaskContract, bundle: EvidenceBundle): Findi
   if (bundle.effortSpent > contract.budget.ceiling) {
     findings.push({
       criterionId,
-      errorClass: 'verification_failure' as const,
+      // BUDGET EXHAUSTION, not a generic verification failure (defect
+      // `e758f460`). This is the only finding in the system that means "the
+      // budget ran out", and `budget_exhaustion` is the only error class routing
+      // to the `agent_redesign` rung — so while this said `verification_failure`
+      // the rung was unreachable, and with it design lineage and R28 AC-0.
+      //
+      // Deliberately left wrong until `effortSpent` became a real measurement:
+      // while it was a hardcoded 1 no task could exceed any ceiling, so fixing
+      // the class first would have created a second route that never fires,
+      // which is exactly how the first dead route came to exist.
+      errorClass: 'budget_exhaustion' as const,
       failingStep: 'Gate B mechanical tier',
       detail:
         `Spent ${bundle.effortSpent} against a ceiling of ${contract.budget.ceiling}. ` +
