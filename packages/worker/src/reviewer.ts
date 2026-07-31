@@ -16,6 +16,8 @@
  */
 import type { EvidenceBundle, LedgerEventInput, TaskContract, Verdict } from '@artifex/shared-types';
 
+import { affirmsTestability } from './judge-consistency.js';
+
 /** One entry in a verdict's findings list. */
 type Finding = Verdict['findings'][number];
 
@@ -236,6 +238,17 @@ export async function gateA(
 
   for (const bad of plan.untestable) {
     if (inherited.has(bad.criterionId)) continue;
+    // A judge arguing against its own verdict (defect `627cd71c`). Observed live
+    // on mission `02a7d050`: flagged untestable, with a detail reading "The
+    // criterion is TESTABLE." Unanimity sampling is silent here by construction
+    // — it needs all samples to agree before rejecting, and a model that fills
+    // the boolean the same wrong way every time agrees with itself perfectly.
+    //
+    // Discarded rather than rewritten: the finding's only content is a rationale
+    // that refutes it, so there is nothing left to act on. Discarding preserves
+    // the plan, which is the direction ADR-0010 says to err in when a judge
+    // cannot be trusted.
+    if (affirmsTestability(bad.detail)) continue;
     findings.push({
       criterionId: bad.criterionId,
       errorClass: 'specification_fault' as const,

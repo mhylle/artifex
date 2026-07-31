@@ -697,11 +697,23 @@ describe('MissionControl — the five lenses (R19)', () => {
   });
 
   it('the learning observatory says plainly that nothing has been recorded', () => {
-    // Honest emptiness rather than invented content: the loops are unbuilt.
+    // Honest emptiness rather than invented content — still the right property.
+    //
+    // The assertion CHANGED because its expectation had gone stale: it required
+    // the literal words "not built yet", which the panel used to say because
+    // R26 and R27 were unbuilt. Both loops ship now and emit, so a lens still
+    // claiming they do not exist would be asserting something false about the
+    // system. The empty state is still asserted; the obsolete reason for it is
+    // not (defect: the lens read four event types nothing ever emitted).
     component.lens.set('learning');
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('not built yet');
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Learning observatory');
+    expect(text, 'this mission recorded no learning events, so the lens must say so').toMatch(
+      /No experiment is running|no experiment, adoption, petition/i,
+    );
+    expect(text, 'the stale "the loops are unbuilt" claim must be gone').not.toContain('not built yet');
   });
 
   it('AC-4 DISTRACTOR: the workforce lens and the canvas agree about this mission', () => {
