@@ -5,7 +5,7 @@
  * *task zero* — a real contract — and enqueue it. It must never start doing the
  * work, and it must never enqueue something that is not a valid contract.
  */
-import { TaskContractSchema, validate } from '@artifex/shared-types';
+import { TaskContractSchema, grantsFor, validate } from '@artifex/shared-types';
 
 import { MissionIntakeService } from './mission-intake.service';
 import type { IntakeRequest, MissionQueue } from './mission-intake.service';
@@ -253,5 +253,63 @@ describe('R37 AC-2 — a re-entered mission starts with the prior dossier', () =
     const { contract } = await service.accept(request({ priorMissionId: 'does-not-exist' }));
 
     expect(contract.inputs.pinnedDecisions).toEqual([]);
+  });
+});
+
+/**
+ * R13 AC-3 at intake — the contract grants the tools, and the blast radius
+ * decides which (ADR-0015 link 2, ADR-0020).
+ *
+ * `toolEntitlements` was hardcoded `[]` here, so the live count of contracts
+ * carrying a tool grant was zero and the Action Broker could refuse but never
+ * permit. Every other link in R13 was complete; this line is why no swarm agent
+ * had ever taken an action.
+ */
+describe('R13 AC-3 — intake grants tools by blast radius, and the request never names one', () => {
+  it('grants nothing at low, and the compute tool at medium', async () => {
+    // Both sides. Asserting only the empty case passes for a service that grants
+    // nothing at all — which is exactly the bug being fixed.
+    const { service } = harness();
+
+    const low = await service.accept(request({ blastRadius: 'low' }));
+    const medium = await service.accept(request({ blastRadius: 'medium' }));
+
+    expect(low.contract.inputs.toolEntitlements).toEqual([]);
+    expect(
+      medium.contract.inputs.toolEntitlements.map((t) => t.toolId),
+      'a medium-blast-radius mission was granted nothing, so the broker can still only refuse',
+    ).toContain('text.count');
+  });
+
+  it('agrees with the catalogue rather than listing tools of its own', async () => {
+    // The grant set IS the admissible set. A hand-written list here would drift
+    // from the broker's view the first time the catalogue changed, and a grant
+    // the broker refuses is a contract promising what the system denies.
+    const { service } = harness();
+
+    const { contract } = await service.accept(request({ blastRadius: 'high' }));
+
+    expect(contract.inputs.toolEntitlements).toEqual(grantsFor('high'));
+    expect(grantsFor('high').length, 'the catalogue is empty, so this proves nothing').toBeGreaterThan(0);
+  });
+
+  it('DISTRACTOR: the requester cannot name a tool — the contract is the authority', async () => {
+    // R13: "tools are granted per contract by the level above — the contract
+    // stays the sole authority on what a task may do." A request carrying a tool
+    // field is rejected as malformed rather than honoured, so there is no path
+    // by which a requester escalates its own grants.
+    const { service } = harness();
+
+    await expect(
+      service.accept({ ...request({ blastRadius: 'low' }), toolEntitlements: [{ toolId: 'text.count' }] } as never),
+    ).rejects.toThrow(/not well-formed/i);
+  });
+
+  it('DISTRACTOR: the granted contract still validates as a TaskContract', async () => {
+    const { service } = harness();
+
+    const { contract } = await service.accept(request({ blastRadius: 'high' }));
+
+    expect(validate(TaskContractSchema, contract).ok).toBe(true);
   });
 });

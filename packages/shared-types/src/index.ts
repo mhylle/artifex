@@ -22,4 +22,5 @@ export * from './verdict.js';
 export * from './capability-manifest.js';
 export * from './model-catalog.js';
 export * from './mission-intake.js';
+export * from './tool-catalogue.js';
 export * from './validation.js';

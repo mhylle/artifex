@@ -39,16 +39,12 @@ const REPO = fileURLToPath(new URL('../../../', import.meta.url));
  * the list is how a known gap stays visible instead of becoming a habit.
  */
 const KNOWN_UNREACHABLE: ReadonlyArray<{ readonly name: string; readonly defect: string }> = [
-  {
-    name: 'ActionBroker',
-    defect:
-      '635b7a9f — R13. Nothing constructs it, `runtime.ts` wires no tool seam, the ' +
-      'model-router has no tool-calling support, and intake hardcodes ' +
-      '`toolEntitlements: []`. Four missing links, so no mission submitted through ' +
-      'the API can invoke a tool. The `action.invoked` events in the ledger date ' +
-      'from 2026-07-26/30 and belong to missions with no `requestedBy` — they were ' +
-      'produced by scripts that constructed the broker themselves.',
-  },
+  // `ActionBroker` was listed here from ADR-0015 until 2026-07-31, when the four
+  // missing links were closed (R13 AC-0): intake grants by blast radius,
+  // `worker-seams.ts` constructs the broker, and the work seam reaches it. The
+  // anti-rot assertion below is what forced this entry out — it failed the
+  // moment the broker gained a production caller, which is the allowlist
+  // working rather than breaking.
   {
     name: 'LearningProjection',
     defect:
@@ -142,10 +138,19 @@ describe('every exported class is reachable from some other production file', ()
   });
 
   it('DISTRACTOR: a class REFERENCED only by a test still counts as unreachable', () => {
-    // The whole point. `ActionBroker` is constructed four times in
-    // `action-broker.test.ts` and nowhere else, and a scan that counted test
-    // files would call it reachable and report nothing — which is precisely how
+    // The whole point: a scan that counted test files would call a
+    // test-only class reachable and report nothing — which is precisely how
     // three requirements came to be marked satisfied.
-    expect(unreachableClasses()).toContain('ActionBroker');
+    //
+    // The example USED to be `ActionBroker`, constructed four times in
+    // `action-broker.test.ts` and nowhere else. It is wired now
+    // (`worker-seams.ts`, R13 AC-0), and this assertion is what noticed —
+    // the anti-rot check failed the moment the broker gained a production
+    // caller, which is the allowlist working rather than breaking.
+    //
+    // `LearningProjection` carries the property now. It is SUPERSEDED rather
+    // than pending (defect `a1288794`), so it will not be wired away, which
+    // makes it a stable subject for this distractor.
+    expect(unreachableClasses()).toContain('LearningProjection');
   });
 });

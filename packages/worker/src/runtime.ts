@@ -22,7 +22,7 @@ import { composeDesign } from './design-playbook.js';
 import type { ControlSignals, DecompositionGate, DecompositionTemplateSeam, FastLoopSeam, KnowledgeCommonsSubmitter } from './mission-loop.js';
 import { plantProbes } from './calibration.js';
 import type { ContextStore } from './context-broker.js';
-import type { TaskContract } from '@artifex/shared-types';
+import type { ActionRecord, TaskContract, ToolSpec, WorkerContractView } from '@artifex/shared-types';
 
 /**
  * The slice of the sealed bench the calibration seam reads (R35 AC-1).
@@ -560,6 +560,43 @@ export function createCandidateSeams(generator: StructuredGenerator, models: Run
   };
 }
 
+/**
+ * What a worker needs in order to ACT (R13).
+ *
+ * Narrower than the {@link ActionBroker} on purpose: the seam carries no ledger
+ * sink and no mission id, so the work seam cannot append an event of its own.
+ * Every action reaches the trail through the broker or not at all, which is what
+ * makes "the sole action channel" a structural claim rather than a convention.
+ */
+export interface ToolInvoker {
+  /** What this build can run — intersected with the contract's grants by the caller. */
+  readonly available: readonly ToolSpec[];
+  invoke(input: {
+    readonly agentId: string;
+    readonly contract: WorkerContractView;
+    readonly toolId: string;
+    readonly args: Record<string, unknown>;
+    readonly occurredAt: string;
+  }): Promise<ActionRecord>;
+}
+
+/**
+ * The agent's request to run a tool over its own draft.
+ *
+ * `useTool` is asked explicitly rather than inferred from a present `toolId`,
+ * so "no tool would help" is an answer the model gives rather than one it gives
+ * by omission — a missing field is indistinguishable from a model that lost
+ * track of the schema.
+ */
+const ToolRequestSchema = Type.Object(
+  {
+    useTool: Type.Boolean({ description: 'True only if running a tool would change what you submit.' }),
+    toolId: Type.Optional(Type.String({ description: 'Which tool to run; omit when useTool is false.' })),
+    text: Type.Optional(Type.String({ description: 'The text to run the tool over; defaults to your draft answer.' })),
+  },
+  { additionalProperties: false },
+);
+
 export function createMissionSeams(
   generator: StructuredGenerator,
   models: RuntimeModels,
@@ -570,6 +607,7 @@ export function createMissionSeams(
   templates?: DecompositionTemplateSeam,
   context?: ContextStore,
   bench?: SealedBenchReader,
+  tools?: ToolInvoker,
 ): MissionSeams {
   const gen = (
     m: { provider: string; model: string },
@@ -717,7 +755,7 @@ export function createMissionSeams(
     },
 
     work: {
-      async execute({ contract }) {
+      async execute({ contract, agentId, occurredAt }) {
         /**
          * Effort, MEASURED (the chain behind `e758f460` / `cb939996`).
          *
@@ -757,6 +795,80 @@ export function createMissionSeams(
           ...contract.acceptanceCriteria.map((c) => `  - ${c.statement}`),
         ].join('\n')))) as { answer: string };
 
+        // ---- the agent may now ACT on its own answer (R13 AC-0) -------------
+        // Offered only what this contract was actually granted. The broker would
+        // refuse anything else and log the denial, but showing an agent a tool it
+        // cannot use invites it to spend a call discovering that.
+        //
+        // Placed AFTER the draft on purpose: the tools this build carries check
+        // properties OF an answer, and there is nothing to check before one
+        // exists. A tool that gathered material would belong before it — the
+        // seam takes both, the roadmap decides which arrive.
+        const actionRecords: ActionRecord[] = [];
+        let revised = out.answer;
+        const offered = (tools?.available ?? []).filter((spec) =>
+          contract.inputs.toolEntitlements.some((grant) => grant.toolId === spec.toolId),
+        );
+
+        if (tools !== undefined && offered.length > 0) {
+          // Failure is swallowed at every step below. A tool is an improvement to
+          // an answer that already exists; losing the answer because the agent
+          // fumbled the optional part would trade the work for the assistance.
+          try {
+            const ask = (await spend(gen(models.worker, ToolRequestSchema, [
+              'You have drafted an answer. You may run ONE tool over it before submitting,',
+              'or submit as it stands.',
+              '',
+              'TOOLS AVAILABLE:',
+              ...offered.map((t) => `  - ${t.toolId}: ${t.description}`),
+              '',
+              'ACCEPTANCE CRITERIA (you are graded on exactly these):',
+              ...contract.acceptanceCriteria.map((c) => `  - ${c.statement}`),
+              '',
+              `YOUR DRAFT ANSWER: ${out.answer}`,
+              '',
+              'Set useTool false if no tool would change what you submit.',
+            ].join('\n')))) as { useTool?: boolean; toolId?: string; text?: string };
+
+            if (ask.useTool === true && typeof ask.toolId === 'string') {
+              // Through the broker, always. An agent that called the tool
+              // directly would produce an unlogged side effect, which is the one
+              // thing invariant #1 does not permit — and the reason this is a
+              // broker rather than a library.
+              const record = await tools.invoke({
+                agentId,
+                contract,
+                toolId: ask.toolId,
+                args: { text: ask.text ?? out.answer },
+                occurredAt,
+              });
+              actionRecords.push(record);
+
+              // The result is fed BACK. A measurement the agent never sees
+              // changes nothing about the deliverable, and an action that cannot
+              // change the deliverable is theatre — it would satisfy the ledger
+              // criterion while leaving the work exactly as it was.
+              const second = (await spend(gen(models.worker, AnswerSchema, [
+                'Revise your answer if the tool result shows a criterion is not met.',
+                'If it already holds, return your answer unchanged.',
+                '',
+                'ACCEPTANCE CRITERIA (you are graded on exactly these):',
+                ...contract.acceptanceCriteria.map((c) => `  - ${c.statement}`),
+                '',
+                `YOUR DRAFT ANSWER: ${out.answer}`,
+                `TOOL ${record.toolId} RETURNED: ${record.resultDigest}`,
+              ].join('\n')))) as { answer?: string };
+              if (typeof second.answer === 'string' && second.answer.length > 0) {
+                revised = second.answer;
+              }
+            }
+          } catch {
+            // A denial is already on the ledger, written by the broker. Nothing
+            // is recorded here, because a second record of one refusal would let
+            // the trail double-count it.
+          }
+        }
+
         // Asked AFTER the answer exists, and about that specific answer — the
         // premises are a property of the work that was done, not of the task in
         // the abstract. Named concretely on purpose: asking for "any
@@ -776,15 +888,19 @@ export function createMissionSeams(
             'assumptions to fill it.',
             '',
             `TASK: ${contract.objective}`,
-            `THE ANSWER YOU GAVE: ${out.answer}`,
+            `THE ANSWER YOU GAVE: ${revised}`,
           ].join('\n')))) as { assumptions?: string[] };
         } catch {
           declared = {};
         }
 
         return {
-          deliverable: { answer: out.answer },
-          actions: [],
+          deliverable: { answer: revised },
+          // The structured record the broker produced, not a sentence about it
+          // (R13 AC-2). This was a hardcoded `[]`, which is why `reviewer.ts:450`
+          // — which fails a task that carried entitlements and produced no
+          // actions — could only ever punish.
+          actions: actionRecords,
           consulted: [],
           assumptions: declared.assumptions ?? [],
           effortSpent: calls,

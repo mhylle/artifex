@@ -13,6 +13,11 @@
  * driver. `WorkerDependencies` names only the shapes it needs, so the real
  * repositories satisfy it without this module importing them.
  */
+import { TOOL_CATALOGUE } from '@artifex/shared-types';
+
+import { ActionBroker } from './action-broker.js';
+import { builtinTools } from './tools.js';
+import type { EventSink } from './event-sink.js';
 import type { RegisteredDesign } from './agent-creator.js';
 import type { KnowledgeCommonsSubmitter, MissionSeams } from './mission-loop.js';
 import type { StructuredGenerator } from './planner.js';
@@ -80,6 +85,18 @@ export interface WorkerDependencies {
   readonly assets: AssetStore;
   /** Read-only: the control seam DERIVES operator signals from the trail. */
   readonly ledger: ControlReader;
+  /**
+   * The append path the Action Broker writes through (R13, ADR-0015 link 3).
+   *
+   * REQUIRED, for the reason `commons` and `fastLoop` are: `new ActionBroker`
+   * appeared only in its own test file, so a complete, mutation-tested broker
+   * was unreachable from the deployable worker for the project's whole life. An
+   * optional seam here is how that happens without anyone noticing.
+   *
+   * Separate from `ledger` because that one is deliberately read-only — the
+   * control seam derives signals and must not be able to write.
+   */
+  readonly sink: EventSink;
   /**
    * The Knowledge Commons (defect `753bc6dd`).
    *
@@ -257,5 +274,25 @@ export function buildWorkerSeams(deps: WorkerDependencies, missionId: string): M
       sealedCases: async () =>
         (await deps.bench.list({ slice: 'sealed' })).filter((c) => c.retiredAt === null),
     },
+    // The Action Broker, constructed where the deployable worker can reach it
+    // (R13 AC-0, ADR-0015 link 3). Built from `builtinTools()` so a tool the
+    // control plane can GRANT and this build cannot RUN fails here, at wiring
+    // time, rather than on the first mission that needs it.
+    //
+    // The seam handed to the work seam is narrower than the broker: it carries
+    // no sink and no mission id, so the worker cannot append an action event of
+    // its own. That is what makes "the sole action channel" structural.
+    (() => {
+      const broker = new ActionBroker({ tools: builtinTools(), sink: deps.sink, missionId });
+      return {
+        available: builtinTools().map((tool) => ({
+          toolId: tool.toolId,
+          riskClass: tool.riskClass,
+          description: tool.description,
+          scope: TOOL_CATALOGUE.find((spec) => spec.toolId === tool.toolId)?.scope ?? '',
+        })),
+        invoke: (input) => broker.invoke(input),
+      };
+    })(),
   );
 }

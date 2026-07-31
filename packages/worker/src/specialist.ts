@@ -37,6 +37,16 @@ export interface SpecialistWork {
      * context store.
      */
     readonly priorKnowledge?: unknown;
+    /**
+     * Who is acting, and when — required by the Action Broker (R13).
+     *
+     * The ritual already knows both; before this they stopped here, so a work
+     * seam had no way to attribute an invocation even if it could make one. That
+     * was the fourth of ADR-0015's missing links: not a missing broker, a
+     * missing path to it.
+     */
+    readonly agentId: string;
+    readonly occurredAt: string;
   }): Promise<{
     readonly deliverable: unknown;
     readonly actions: EvidenceBundle['actions'];
@@ -84,7 +94,9 @@ export async function runSpecialist(input: {
     return { kind: 'bounced', restatement, ambiguities: [...ambiguities] };
   }
 
-  const result = await work.execute({ contract, restatement, priorKnowledge: input.priorKnowledge });
+  const result = await work.execute({
+    contract, restatement, priorKnowledge: input.priorKnowledge, agentId, occurredAt: producedAt,
+  });
 
   return {
     kind: 'delivered',

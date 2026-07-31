@@ -12,7 +12,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { BadRequestException } from '@nestjs/common';
-import { MISSION_CATEGORY, MissionIntakeRequestSchema, TaskContractSchema, assertValid, validate } from '@artifex/shared-types';
+import { MISSION_CATEGORY, MissionIntakeRequestSchema, TaskContractSchema, assertValid, grantsFor, validate } from '@artifex/shared-types';
 import type { AutonomyDial, BlastRadius, TaskContract } from '@artifex/shared-types';
 
 import type { LedgerSink } from './ledger.types';
@@ -143,7 +143,22 @@ export class MissionIntakeService {
         statement,
       })),
       boundaries: { outOfScope: [...request.outOfScope], siblingOwners: [] },
-      inputs: { entitlements: [], toolEntitlements: [], pinnedDecisions: inherited },
+      inputs: {
+        entitlements: [],
+        // Tool grants, decided by the BLAST RADIUS the requester declared (R13
+        // AC-3, ADR-0015 link 2). This was hardcoded `[]`, so the live count of
+        // contracts carrying a tool entitlement was zero and the Action Broker
+        // could refuse but never permit.
+        //
+        // Derived, not chosen: R13 says "blastRadius … must also bound WHICH
+        // tools are reachable" and "tools are granted per contract by the level
+        // above — the contract stays the sole authority". So the grant set IS
+        // the admissible set, and the request never names a tool. A requester
+        // picking tools would make the requester the authority, which is the one
+        // thing the contract is there to be.
+        toolEntitlements: grantsFor(request.blastRadius),
+        pinnedDecisions: inherited,
+      },
       dependencies: { consumesTaskIds: [], mayRequest: [] },
       stoppingConditions: {
         doneWhen: request.successCriteria.map((s) => `Demonstrably met: ${s}`),

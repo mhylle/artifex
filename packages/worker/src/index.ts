@@ -137,7 +137,26 @@ export async function main(): Promise<void> {
         // Registry stayed a null-bidding stub for the project's whole life
         // (defect `41f7555c`) with every suite green.
         buildWorkerSeams(
-          { generator, models: { worker, evaluator }, assets, ledger, commons, hotFixes, bench, templates, knowledge: commons },
+          {
+            generator, models: { worker, evaluator }, assets, ledger, commons, hotFixes, bench, templates,
+            knowledge: commons,
+            // The Action Broker's append path (R13). Routed through the SAME
+            // chain as the loop's own events rather than straight to the
+            // repository: two independent writers would interleave, and an
+            // action would land before or after the task that took it depending
+            // on timing — which would make the trail's order a lie exactly where
+            // the criterion asks it to be reproducible.
+            sink: {
+              append: (event) => {
+                appends = appends
+                  .then(() => ledger.append(event))
+                  .catch((cause: unknown) => {
+                    failed.push(`${event.type}: ${String(cause)}`);
+                  });
+                return appends;
+              },
+            },
+          },
           contract.missionId,
         ),
         {

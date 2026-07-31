@@ -17,6 +17,7 @@
  * later without redesign. Security remains deferred project-wide; the obligation
  * discharged here is only that there is exactly one door.
  */
+import { admissibleRiskClasses } from '@artifex/shared-types';
 import type {
   ActionRecord,
   AutonomyDial,
@@ -66,21 +67,14 @@ export class RatificationRequiredError extends Error {
 /**
  * Which risk classes a blast radius admits (ADR-0007).
  *
- * The rule is that **a declared blast radius must cover the tools used**. A
- * `write` action creates consequence, so performing one under a `low` declaration
- * would make the task's real blast radius exceed its declared one — invalidating
- * the verification depth and model tier that were assigned on that declaration.
+ * MOVED to `@artifex/shared-types` and re-exported here, not reimplemented.
+ * Intake now decides what a contract GRANTS from the same rule the broker uses
+ * to decide what it PERMITS, and those two must not be able to disagree — a
+ * grant the broker would refuse is a contract promising something the system
+ * denies. Two copies of one rule is the shape this project has found four times,
+ * most recently defect `6d58e8ef`.
  */
-export function admissibleRiskClasses(blastRadius: BlastRadius): ToolRiskClass[] {
-  switch (blastRadius) {
-    case 'low':
-      return ['read'];
-    case 'medium':
-      return ['read', 'compute'];
-    case 'high':
-      return ['read', 'compute', 'write'];
-  }
-}
+export { admissibleRiskClasses } from '@artifex/shared-types';
 
 /** Which risk classes need a human first, per the autonomy dial (ADR-0007). */
 export function requiresRatification(dial: AutonomyDial): ToolRiskClass[] {

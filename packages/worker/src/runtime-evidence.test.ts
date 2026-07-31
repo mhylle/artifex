@@ -25,6 +25,13 @@ import { createMissionSeams } from './runtime.js';
 import type { StructuredGenerator } from './runtime.js';
 import type { WorkerContractView } from '@artifex/shared-types';
 
+/**
+ * Who is acting and when — required by `work.execute` since the Action Broker
+ * was wired (R13). The ritual supplies both in production; these tests call the
+ * seam directly, so they supply them too.
+ */
+const ACTOR = { agentId: 'design-under-test', occurredAt: '2026-07-31T09:00:00.000Z' } as const;
+
 const MODELS = {
   worker: { provider: 'ollama', model: 'w' },
   evaluator: { provider: 'ollama', model: 'e' },
@@ -67,7 +74,7 @@ function generatorReturning(
   return {
     schemas,
     prompts,
-    async generate({ probe }) {
+    async generate({ probe }: { probe: { schema: unknown; prompt: string } }) {
       schemas.push(probe.schema);
       prompts.push(probe.prompt);
       const id = (probe.schema as { $id?: string }).$id ?? '';
@@ -91,9 +98,9 @@ describe('R40 AC-1 — the real work seam asks the worker what it assumed', () =
     const gen = generatorReturning({ [ANSWER]: { answer: 'It vibrates.' } });
     const seams = createMissionSeams(gen, MODELS);
 
-    await seams.work.execute({ contract: view(), restatement: 'Explain the ringing.' });
+    await seams.work.execute({ contract: view(), restatement: 'Explain the ringing.', ...ACTOR });
 
-    const asked = gen.schemas.find((sc) => (sc as { $id?: string }).$id === ASSUMPTIONS);
+    const asked = gen.schemas.find((sc: unknown) => (sc as { $id?: string }).$id === ASSUMPTIONS);
     expect(asked, 'the seam never asked the worker what it assumed').toBeDefined();
     expect(propsOf(asked)).toContain('assumptions');
   });
@@ -105,7 +112,7 @@ describe('R40 AC-1 — the real work seam asks the worker what it assumed', () =
     });
     const seams = createMissionSeams(gen, MODELS);
 
-    const out = await seams.work.execute({ contract: view(), restatement: 'Explain the ringing.' });
+    const out = await seams.work.execute({ contract: view(), restatement: 'Explain the ringing.', ...ACTOR });
 
     expect(out.assumptions).toEqual(['Assumed a conventional dome bell rather than an electric one.']);
   });
@@ -123,7 +130,7 @@ describe('R40 AC-1 — the real work seam asks the worker what it assumed', () =
     const gen = generatorReturning({ [ANSWER]: { answer: 'x' } });
     const seams = createMissionSeams(gen, MODELS);
 
-    await seams.work.execute({ contract: view(), restatement: 'r' });
+    await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
 
     expect(promptFor(gen, ASSUMPTIONS)).toMatch(/ASSUMPTIONS/);
     expect(promptFor(gen, ASSUMPTIONS)).toMatch(/left open .*answered/is);
@@ -135,7 +142,7 @@ describe('R40 AC-1 — the real work seam asks the worker what it assumed', () =
     const gen = generatorReturning({ [ANSWER]: { answer: 'x' }, [ASSUMPTIONS]: { assumptions: [] } });
     const seams = createMissionSeams(gen, MODELS);
 
-    const out = await seams.work.execute({ contract: view(), restatement: 'r' });
+    const out = await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
 
     expect(out.assumptions).toEqual([]);
   });
@@ -147,7 +154,7 @@ describe('R40 AC-1 — the real work seam asks the worker what it assumed', () =
     });
     const seams = createMissionSeams(gen, MODELS);
 
-    const out = await seams.work.execute({ contract: view(), restatement: 'r' });
+    const out = await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
 
     expect(out.deliverable).toEqual({ answer: 'It vibrates.' });
   });
@@ -164,9 +171,9 @@ describe('R40 AC-1 — the real work seam asks the worker what it assumed', () =
     const gen = generatorReturning({ [ANSWER]: { answer: 'x' } });
     const seams = createMissionSeams(gen, MODELS);
 
-    await seams.work.execute({ contract: view(), restatement: 'r' });
+    await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
 
-    const answerSchema = gen.schemas.find((sc) => (sc as { $id?: string }).$id === ANSWER);
+    const answerSchema = gen.schemas.find((sc: unknown) => (sc as { $id?: string }).$id === ANSWER);
     expect(propsOf(answerSchema)).toEqual(['answer']);
   });
 
@@ -176,7 +183,7 @@ describe('R40 AC-1 — the real work seam asks the worker what it assumed', () =
     const gen = generatorReturning({ [ANSWER]: { answer: 'It vibrates.' } });
     const seams = createMissionSeams(gen, MODELS);
 
-    const out = await seams.work.execute({ contract: view(), restatement: 'r' });
+    const out = await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
 
     expect(out.deliverable).toEqual({ answer: 'It vibrates.' });
     expect(out.assumptions).toEqual([]);
@@ -205,7 +212,7 @@ describe('effortSpent is measured, not assumed', () => {
     const gen = generatorReturning({ [ANSWER]: { answer: 'x' } });
     const seams = createMissionSeams(gen, MODELS);
 
-    const out = await seams.work.execute({ contract: view(), restatement: 'r' });
+    const out = await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
 
     expect(out.effortSpent).toBe(gen.schemas.length);
     expect(out.effortSpent).toBeGreaterThan(1);
@@ -218,7 +225,7 @@ describe('effortSpent is measured, not assumed', () => {
     let n = 0;
     const gen: StructuredGenerator & { schemas: unknown[]; prompts: string[] } = {
       schemas: [], prompts: [],
-      async generate({ probe }) {
+      async generate({ probe }: { probe: { schema: unknown; prompt: string } }) {
         this.schemas.push(probe.schema);
         n += 1;
         if (n === 2) throw new Error('assumptions call failed');
@@ -227,7 +234,7 @@ describe('effortSpent is measured, not assumed', () => {
     };
     const seams = createMissionSeams(gen, MODELS);
 
-    const out = await seams.work.execute({ contract: view(), restatement: 'r' });
+    const out = await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
 
     expect(out.effortSpent).toBe(2);
   });
@@ -239,8 +246,8 @@ describe('effortSpent is measured, not assumed', () => {
     const gen = generatorReturning({ [ANSWER]: { answer: 'x' } });
     const seams = createMissionSeams(gen, MODELS);
 
-    const first = await seams.work.execute({ contract: view(), restatement: 'r' });
-    const second = await seams.work.execute({ contract: view(), restatement: 'r' });
+    const first = await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
+    const second = await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
 
     expect(second.effortSpent).toBe(first.effortSpent);
   });
