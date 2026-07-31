@@ -10,13 +10,7 @@ import { randomUUID } from 'node:crypto';
  */
 import { pathToFileURL } from 'node:url';
 
-import {
-  AssetRegistryRepository,
-  KnowledgeCommonsRepository,
-  LedgerRepository,
-  ModelCatalogRepository,
-  runMigrations,
-} from '@artifex/memory-fabric';
+import { AssetRegistryRepository, HotFixRepository, KnowledgeCommonsRepository, LedgerRepository, ModelCatalogRepository, runMigrations } from '@artifex/memory-fabric';
 import { ModelRouter, createBackend } from '@artifex/model-router';
 import type { TaskContract } from '@artifex/shared-types';
 import { Worker } from 'bullmq';
@@ -67,6 +61,10 @@ export async function main(): Promise<void> {
   // The Knowledge Commons (defect `753bc6dd`). Built in R24 and reachable by
   // nothing until R40 gave a verified task an evidence bundle worth submitting.
   const commons = new KnowledgeCommonsRepository(pool);
+  // The fast loop's hot-fix log (R26, defect `188c6892`). Its three pieces —
+  // decision core, constitutional guard, store — were built and mutation-proven
+  // in one iteration and called by nothing; this line is the producer.
+  const hotFixes = new HotFixRepository(pool);
   const router = new ModelRouter({
     catalog: {
       // `null` means "no admitted model for this tier"; a rejection would mean
@@ -123,7 +121,7 @@ export async function main(): Promise<void> {
         // Registry stayed a null-bidding stub for the project's whole life
         // (defect `41f7555c`) with every suite green.
         buildWorkerSeams(
-          { generator, models: { worker, evaluator }, assets, ledger, commons },
+          { generator, models: { worker, evaluator }, assets, ledger, commons, hotFixes },
           contract.missionId,
         ),
         {

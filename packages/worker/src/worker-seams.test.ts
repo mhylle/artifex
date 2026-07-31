@@ -35,6 +35,9 @@ function dependencies() {
     replay: [] as string[],
     harnesses: [] as Array<{ checks: string[] } | null>,
     capabilities: 0,
+    roleWrites: [] as Array<{ designId: string; roleInstructions: string }>,
+    hotFixApplied: [] as Array<{ patchedValue: string }>,
+    hotFixResolved: [] as Array<{ revert: boolean }>,
   };
 
   const deps: WorkerDependencies = {
@@ -52,12 +55,20 @@ function dependencies() {
     },
       async recordOutcome(designId: string, score: number) { calls.recordOutcome.push({ designId, score }); },
       async knownCapabilities() { calls.capabilities += 1; return ['hand tool overview']; },
+      async findById(designId: string) { return { designId, roleInstructions: 'Do the work.' }; },
+      async setRoleInstructions(designId: string, roleInstructions: string) {
+        calls.roleWrites.push({ designId, roleInstructions });
+      },
     },
     ledger: {
       async replay() { calls.replay.push(MISSION_ID); return []; },
     },
     commons: {
       async submit(entry: { claim: string }) { calls.submitted.push(entry); return { entryId: 'e-1' }; },
+    },
+    hotFixes: {
+      async apply(input: { patchedValue: string }) { calls.hotFixApplied.push(input); return 'hf-1'; },
+      async resolve(input: { revert: boolean }) { calls.hotFixResolved.push(input); },
     },
   };
 
@@ -250,5 +261,100 @@ describe('buildWorkerSeams — the Knowledge Commons producer', () => {
     const { deps } = dependencies();
 
     expect(buildWorkerSeams(deps, MISSION_ID).commons).toBeDefined();
+  });
+});
+
+/**
+ * R26 — the fast loop is really constructed here (defect `188c6892`).
+ *
+ * `MissionSeams.fastLoop` is OPTIONAL, which is what let three proven,
+ * mutation-tested modules ship with no producer at all. `WorkerDependencies`
+ * makes the store required so the deployed binary cannot run without it — and
+ * this file is where "required at the composition root" stops being a comment.
+ *
+ * The same argument as the Asset Registry's, which was a null-bidding stub for
+ * the project's entire life with every suite green (defect `41f7555c`).
+ */
+describe('buildWorkerSeams — the fast loop', () => {
+  it('supplies a fastLoop seam at all', async () => {
+    const { deps } = dependencies();
+
+    expect(buildWorkerSeams(deps, MISSION_ID).fastLoop, 'the deployed worker has no fast loop').toBeDefined();
+  });
+
+  it('applying a hot-fix writes the LOG and then patches the asset', async () => {
+    // Both halves, in that order. The log first: if the asset write fails, the
+    // log holds an experiment that was never applied and the window closes on a
+    // flat rate, which reverts — harmless. The other order would patch the
+    // registry with nothing recording what it replaced.
+    const { deps, calls } = dependencies();
+    const seam = buildWorkerSeams(deps, MISSION_ID).fastLoop!;
+
+    const id = await seam.apply({
+      missionId: MISSION_ID, category: 'summarising', criterionId: 'c-1',
+      target: { layer: 'worker', kind: 'role_instructions', assetId: 'design-1' },
+      previousValue: 'Do the work.', patchedValue: 'Do the work. Check c-1.',
+      windowObservations: 4, baselineFailureRate: 0.75,
+      predictedFailureRate: 0.75, predictionBasis: 'strict_improvement',
+    });
+
+    expect(id).toBe('hf-1');
+    expect(calls.hotFixApplied).toHaveLength(1);
+    expect(calls.roleWrites).toEqual([{ designId: 'design-1', roleInstructions: 'Do the work. Check c-1.' }]);
+  });
+
+  it('a REVERT puts the previous value back', async () => {
+    // AC-1's substance at the composition root: the revert is an operation on
+    // the real registry, not a note in a log.
+    const { deps, calls } = dependencies();
+    const seam = buildWorkerSeams(deps, MISSION_ID).fastLoop!;
+
+    await seam.resolve({
+      hotFixId: 'hf-1',
+      target: { layer: 'worker', kind: 'role_instructions', assetId: 'design-1' },
+      previousValue: 'Do the work.',
+      revert: true, reason: 'no movement', observedFailureRate: 0.75,
+    });
+
+    expect(calls.roleWrites).toEqual([{ designId: 'design-1', roleInstructions: 'Do the work.' }]);
+    expect(calls.hotFixResolved).toEqual([{ hotFixId: 'hf-1', revert: true, reason: 'no movement', observedFailureRate: 0.75 }]);
+  });
+
+  it('DISTRACTOR: a KEPT hot-fix does not touch the asset again', async () => {
+    // Rewriting the patched value on a keep would be harmless today and wrong
+    // tomorrow — it would clobber any later patch, and it would make "kept" and
+    // "reverted" indistinguishable from the registry's point of view.
+    const { deps, calls } = dependencies();
+    const seam = buildWorkerSeams(deps, MISSION_ID).fastLoop!;
+
+    await seam.resolve({
+      hotFixId: 'hf-1',
+      target: { layer: 'worker', kind: 'role_instructions', assetId: 'design-1' },
+      previousValue: 'Do the work.',
+      revert: false, reason: 'rate fell', observedFailureRate: 0.1,
+    });
+
+    expect(calls.roleWrites, 'a kept hot-fix rewrote the asset').toHaveLength(0);
+    expect(calls.hotFixResolved[0]!.revert).toBe(false);
+  });
+
+  it('DISTRACTOR: a store that declines (one live fix already) does NOT patch the asset', async () => {
+    // `apply` returning null is the partial unique index talking — an ordinary
+    // bound, not an error. Patching anyway would leave the registry changed with
+    // no log entry and therefore nothing able to revert it.
+    const { deps, calls } = dependencies();
+    deps.hotFixes.apply = async () => null;
+    const seam = buildWorkerSeams(deps, MISSION_ID).fastLoop!;
+
+    const id = await seam.apply({
+      missionId: MISSION_ID, category: 'summarising', criterionId: 'c-1',
+      target: { layer: 'worker', kind: 'role_instructions', assetId: 'design-1' },
+      previousValue: 'Do the work.', patchedValue: 'patched',
+      windowObservations: 4, baselineFailureRate: 0.75,
+      predictedFailureRate: 0.75, predictionBasis: 'strict_improvement',
+    });
+
+    expect(id).toBeNull();
+    expect(calls.roleWrites, 'the asset was patched with no log entry to revert it').toHaveLength(0);
   });
 });

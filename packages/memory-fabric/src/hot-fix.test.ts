@@ -13,15 +13,18 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { HotFixRepository } from './hot-fix-repository.js';
 import { startTestDatabase, type TestDatabase } from './__fixtures__/test-db.js';
 
 let db: TestDatabase;
+let repo: HotFixRepository;
 
 let seq = 0;
 const nextId = () => `dddddddd-eeee-4fff-8aaa-${(seq += 1).toString(16).padStart(12, '0')}`;
 
 beforeAll(async () => {
   db = await startTestDatabase();
+  repo = new HotFixRepository(db.pool);
 });
 
 afterAll(async () => {
@@ -244,5 +247,113 @@ describe('R26 AC-1 — a resolution must say what happened', () => {
 
     expect(after[0]?.outcome).toBe('reverted');
     expect(after[0]?.previous_value, 'nothing to revert TO').toBe('Summarise it.');
+  });
+});
+
+describe('R26 — the repository carries rows between the pure decisions and the store', () => {
+  const plan = (over: Record<string, unknown> = {}) => ({
+    missionId: nextId(),
+    category: 'summarising',
+    criterionId: 'c-1',
+    target: { layer: 'worker', kind: 'role_instructions', assetId: 'design-1' },
+    previousValue: 'Summarise it.',
+    patchedValue: 'Summarise it. Check c-1.',
+    windowObservations: 4,
+    baselineFailureRate: 0.75,
+    predictedFailureRate: 0.75,
+    predictionBasis: 'strict_improvement',
+    ...over,
+  });
+
+  it('applies, then reads back exactly what it stored', async () => {
+    const p = plan();
+
+    const id = await repo.apply(p);
+    const live = await repo.unresolvedFor(p.missionId);
+
+    expect(id).not.toBeNull();
+    expect(live?.hotFixId).toBe(id);
+    // The revert value is the one that matters — everything else is bookkeeping.
+    expect(live?.previousValue).toBe('Summarise it.');
+    expect(live?.windowObservations).toBe(4);
+    expect(live?.baselineFailureRate).toBeCloseTo(0.75, 5);
+  });
+
+  it('returns null rather than throwing when the mission already has a live fix', async () => {
+    // "One change at a time" is a normal state of affairs, not an error. A
+    // throw here would make the mission loop treat an ordinary bound as a
+    // failure and would need a try/catch at every call site.
+    const missionId = nextId();
+    await repo.apply(plan({ missionId }));
+
+    await expect(repo.apply(plan({ missionId }))).resolves.toBeNull();
+  });
+
+  it('resolving frees the mission to hot-fix again', async () => {
+    const missionId = nextId();
+    const id = await repo.apply(plan({ missionId }));
+
+    await repo.resolve({ hotFixId: id!, revert: true, reason: 'no movement', observedFailureRate: 0.75 });
+
+    expect(await repo.unresolvedFor(missionId), 'a resolved fix still reads as live').toBeNull();
+    expect(await repo.apply(plan({ missionId })), 'the mission stayed blocked after resolution').not.toBeNull();
+  });
+
+  it('records WHICH way it went, not merely that it closed', async () => {
+    const missionId = nextId();
+    const id = await repo.apply(plan({ missionId }));
+
+    await repo.resolve({ hotFixId: id!, revert: false, reason: 'rate fell to 0.20', observedFailureRate: 0.2 });
+
+    const { rows } = await db.pool.query(
+      'SELECT outcome, outcome_reason, observed_failure_rate FROM hot_fix WHERE hot_fix_id = $1',
+      [id],
+    );
+    expect(rows[0]?.outcome).toBe('kept');
+    expect(rows[0]?.outcome_reason).toBe('rate fell to 0.20');
+    expect(Number(rows[0]?.observed_failure_rate)).toBeCloseTo(0.2, 5);
+  });
+
+  it('records a REVERT as a revert — AC-1 asks for the revert to be recorded', async () => {
+    // Found by a mutant, not by review: hard-coding `outcome = 'kept'` passed
+    // all 134 tests, because the only test reading the column resolved with
+    // `revert: false` and the revert test checked merely that the row closed.
+    // "The revert is recorded" is half of AC-1's sentence, and a log that says
+    // every experiment was kept is worse than no log — the fast loop's whole
+    // claim is that it undoes itself.
+    const missionId = nextId();
+    const id = await repo.apply(plan({ missionId }));
+
+    await repo.resolve({
+      hotFixId: id!, revert: true, reason: 'failure rate did not improve on 0.75', observedFailureRate: 0.75,
+    });
+
+    const { rows } = await db.pool.query('SELECT outcome FROM hot_fix WHERE hot_fix_id = $1', [id]);
+    expect(rows[0]?.outcome).toBe('reverted');
+  });
+
+  it('DISTRACTOR: resolving twice does not overwrite the first verdict', async () => {
+    // The window closes once. A second resolution — a late revert arriving after
+    // a keep, say — would rewrite history, which the ledger forbids and which
+    // would make the hot-fix log disagree with the events that produced it.
+    const missionId = nextId();
+    const id = await repo.apply(plan({ missionId }));
+    await repo.resolve({ hotFixId: id!, revert: false, reason: 'kept first', observedFailureRate: 0.2 });
+
+    await repo.resolve({ hotFixId: id!, revert: true, reason: 'reverted second', observedFailureRate: 0.9 });
+
+    const { rows } = await db.pool.query('SELECT outcome, outcome_reason FROM hot_fix WHERE hot_fix_id = $1', [id]);
+    expect(rows[0]?.outcome, 'the second resolution overwrote the first').toBe('kept');
+    expect(rows[0]?.outcome_reason).toBe('kept first');
+  });
+
+  it('DISTRACTOR: one mission live fix does not block a DIFFERENT mission', async () => {
+    // The bound is per mission. If it were global the fast loop would serialise
+    // across the whole swarm and effectively never fire.
+    const a = nextId();
+    const b = nextId();
+    await repo.apply(plan({ missionId: a }));
+
+    expect(await repo.apply(plan({ missionId: b }))).not.toBeNull();
   });
 });

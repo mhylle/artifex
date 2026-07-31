@@ -19,7 +19,7 @@ import { Type } from '@sinclair/typebox';
 
 import type { RegistryLookup } from './agent-creator.js';
 import { composeDesign } from './design-playbook.js';
-import type { ControlSignals, DecompositionGate, KnowledgeCommonsSubmitter } from './mission-loop.js';
+import type { ControlSignals, DecompositionGate, FastLoopSeam, KnowledgeCommonsSubmitter } from './mission-loop.js';
 import type { IntentJudge, PlanJudge } from './reviewer.js';
 import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
@@ -479,6 +479,7 @@ export function createMissionSeams(
   control?: ControlSignals,
   registry?: RegistryLookup,
   commons?: KnowledgeCommonsSubmitter,
+  fastLoop?: FastLoopSeam,
 ): MissionSeams {
   const gen = (
     m: { provider: string; model: string },
@@ -491,6 +492,7 @@ export function createMissionSeams(
     // connection, and this module owns the model seams.
     ...(control === undefined ? {} : { control }),
     ...(commons === undefined ? {} : { commons }),
+    ...(fastLoop === undefined ? {} : { fastLoop }),
 
     planner: createStepwisePlanner({
       generator,

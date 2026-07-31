@@ -32,6 +32,10 @@ import type { IssuedVerdict, Probe, ReReview } from './calibration.js';
 import { pedigreeOf, surrenderDossier } from './dossier.js';
 import { entryRungFor, isStalled, worstClass } from './escalation.js';
 import type { AttemptSignature } from './escalation.js';
+import { assertFastLoopReach } from './constitution.js';
+import type { HotFixTarget } from './constitution.js';
+import { detectHotSpot, hotFixPlan, revertDecision } from './fast-loop.js';
+import type { GateBOutcome, HotFixPlan } from './fast-loop.js';
 import { runSpecialist } from './specialist.js';
 import type { ClarityJudge, SpecialistWork } from './specialist.js';
 
@@ -154,6 +158,60 @@ export interface MissionSeams {
    * a gate would let the yardstick overrule the thing it measures.
    */
   readonly calibration?: CalibrationSeam;
+  /**
+   * The fast loop (R26) — bounded in-mission hot-fixes that auto-revert.
+   *
+   * Optional, for the same reason `commons` and `calibration` are: it is an
+   * OPTIMISER, not a gate. A mission runs identically without it and no verdict
+   * changes, so making it required would give a bookkeeping seam authority over
+   * whether verified work counts. Its failures are swallowed on the same
+   * argument — losing a delivered mission because a store write failed trades
+   * the product for the receipt.
+   *
+   * That optionality is exactly what made defect `188c6892` possible, so note
+   * where it is really supplied: `buildWorkerSeams`, which is what the deployed
+   * worker binary uses. A seam nothing constructs is a seam that does not exist.
+   */
+  readonly fastLoop?: FastLoopSeam;
+}
+
+/**
+ * What the mission loop needs to enact a hot-fix (R26).
+ *
+ * Structural rather than an import of `HotFixRepository`, matching the registry
+ * and commons seams — the worker package depends on `shared-types` and its own
+ * seams, never on the fabric.
+ *
+ * `apply` both logs the experiment and puts the patch in place; `resolve` both
+ * records the verdict and, when reverting, restores what was there. Splitting
+ * either into two calls would create a window in which the log and the asset
+ * disagree, and the log is supposed to be what the asset's state means.
+ */
+export interface FastLoopSeam {
+  /** The worker-layer asset as it stands, so a patch knows what it replaces. */
+  asset(designId: string): Promise<{ readonly designId: string; readonly roleInstructions: string } | null>;
+  /** Log and apply. Null when this mission already has a live experiment. */
+  apply(input: {
+    readonly missionId: string;
+    readonly category: string;
+    readonly criterionId: string;
+    readonly target: HotFixTarget;
+    readonly previousValue: string;
+    readonly patchedValue: string;
+    readonly windowObservations: number;
+    readonly baselineFailureRate: number;
+    readonly predictedFailureRate: number;
+    readonly predictionBasis: string;
+  }): Promise<string | null>;
+  /** Record the verdict and, when reverting, put the previous value back. */
+  resolve(input: {
+    readonly hotFixId: string;
+    readonly target: HotFixTarget;
+    readonly previousValue: string;
+    readonly revert: boolean;
+    readonly reason: string;
+    readonly observedFailureRate: number | null;
+  }): Promise<void>;
 }
 
 /**
@@ -498,6 +556,116 @@ export async function runMission(
       alreadyVerified: prior.verified.size,
     });
   }
+
+  // ---- the fast loop (R26) -------------------------------------------------
+  // Every Gate B result this mission has produced, in order, as one criterion
+  // each. The fast loop's whole input, and it is derived from work already done
+  // rather than measured separately — a second measurement of the same thing
+  // could only disagree with the first.
+  const gateBOutcomes: GateBOutcome[] = [];
+  /** Which design last worked a category, so a patch knows what to aim at. */
+  const designFor = new Map<string, string>();
+  /** The live experiment, plus where in `gateBOutcomes` its window started. */
+  let liveFix:
+    | { readonly hotFixId: string; readonly plan: HotFixPlan; readonly target: HotFixTarget; readonly previousValue: string; readonly from: number }
+    | null = null;
+
+  /**
+   * Fire, or judge, the one live experiment (R26).
+   *
+   * Called after every Gate B verdict and once more when the mission ends. The
+   * second call is not tidying: a window that closes only by filling never
+   * closes once the patched category stops appearing, so the hot-fix would
+   * outlive the mission that made it — the one outcome AC-1 exists to prevent.
+   *
+   * Failures are swallowed throughout. The fast loop is an optimiser, not a
+   * gate; letting a store write surrender a delivered mission would trade the
+   * product for the receipt.
+   */
+  const runFastLoop = async (missionEnded: boolean): Promise<void> => {
+    const seam = seams.fastLoop;
+    if (seam === undefined) return;
+
+    try {
+      if (liveFix !== null) {
+        const since = gateBOutcomes.slice(liveFix.from);
+        const decision = revertDecision(liveFix.plan, since, { missionEnded });
+        if (!decision.windowClosed) return;
+
+        await seam.resolve({
+          hotFixId: liveFix.hotFixId,
+          target: liveFix.target,
+          previousValue: liveFix.previousValue,
+          revert: decision.revert,
+          reason: decision.reason,
+          observedFailureRate: decision.observedFailureRate,
+        });
+        record(mission.taskId, 'learning', 'fast_loop.hot_fix_resolved', 'learning_agent', {
+          hotFixId: liveFix.hotFixId,
+          outcome: decision.revert ? 'reverted' : 'kept',
+          reason: decision.reason,
+          observedFailureRate: decision.observedFailureRate,
+          baselineFailureRate: liveFix.plan.predictedEffect.baselineFailureRate,
+        });
+        liveFix = null;
+        return;
+      }
+
+      // One change at a time: a mission that has just closed an experiment does
+      // not immediately open another on its way out the door.
+      if (missionEnded) return;
+
+      // "Repeatedly" is the CONTRACT's own `stallLimit` — already the system's
+      // answer to how many times is repeatedly (R36 asks it of attempts). A
+      // second number would be a second answer to one question.
+      const spot = detectHotSpot(gateBOutcomes, mission.stoppingConditions.stallLimit);
+      if (spot === null) return;
+
+      const designId = designFor.get(`${spot.category}`);
+      if (designId === undefined) return;
+      const asset = await seam.asset(designId);
+      if (asset === null) return;
+
+      const plan = hotFixPlan(spot, asset);
+      const patch = plan.patches[0]!;
+      // Bar two of three. The type already refuses a non-worker target and the
+      // store's CHECK constraint refuses one too; this is the one that catches a
+      // target assembled at runtime from data that was never type-checked.
+      assertFastLoopReach(patch.target);
+
+      const hotFixId = await seam.apply({
+        missionId: mission.missionId,
+        category: plan.category,
+        criterionId: plan.criterionId,
+        target: patch.target,
+        previousValue: asset.roleInstructions,
+        patchedValue: patch.replacement,
+        windowObservations: plan.bounds.windowObservations,
+        baselineFailureRate: plan.predictedEffect.baselineFailureRate,
+        predictedFailureRate: plan.predictedEffect.predictedFailureRate,
+        predictionBasis: plan.predictedEffect.basis,
+      });
+      if (hotFixId === null) return;
+
+      record(mission.taskId, 'learning', 'fast_loop.hot_fix_applied', 'learning_agent', {
+        hotFixId,
+        category: plan.category,
+        criterionId: plan.criterionId,
+        target: patch.target,
+        bounds: plan.bounds,
+        predictedEffect: plan.predictedEffect,
+      });
+      liveFix = {
+        hotFixId, plan, target: patch.target,
+        previousValue: asset.roleInstructions,
+        // The window starts HERE. Counting the failures that triggered the fix
+        // as evidence about the fix would guarantee it never looks better.
+        from: gateBOutcomes.length,
+      };
+    } catch {
+      // Deliberately silent — see the doc comment.
+    }
+  };
 
   /**
    * Measure the reviewer against this mission's own verdicts (R35 AC-0/AC-1).
@@ -1256,6 +1424,22 @@ export async function runMission(
         }
         const verdictEventId = record(child.taskId, 'verification', 'gate_b.verdict_issued', 'reviewer', { ...bVerdict });
 
+        // ---- the fast loop's input (R26) ---------------------------------
+        // One outcome per criterion, keyed by the CATEGORY that did the work.
+        // A criterion is failed when a finding names it; Gate B records findings
+        // only for failures, so absence is the pass.
+        const failedCriteria = new Set(bVerdict.findings.map((f) => f.criterionId));
+        designFor.set(child.category, manifest.designId);
+        for (const criterion of child.acceptanceCriteria) {
+          gateBOutcomes.push({
+            taskId: child.taskId,
+            category: child.category,
+            criterionId: criterion.criterionId,
+            passed: !failedCriteria.has(criterion.criterionId),
+          });
+        }
+        await runFastLoop(false);
+
         // The design's track record, folded from the verdict the reviewer just
         // issued (R38/R28). Derived, not invented: a pass is 1 and a fail is 0,
         // because Gate B's verdict is the only measurement of a design the
@@ -1501,6 +1685,16 @@ export async function runMission(
   };
 
   const root = await runSubtree(mission, 0);
+
+  // The fast loop's window closes with the mission, on BOTH terminal paths and
+  // BEFORE the surrender returns (R26 AC-1). Placed here rather than inside
+  // `surrender` for two reasons: the surrender path returns immediately below,
+  // so a mechanism attached only to the delivered path would silently miss half
+  // the missions — the exact shape R37's pedigree had — and it is awaited, so a
+  // mission can never finish with an experiment still patched into the registry.
+  // Nobody is coming to tidy up.
+  await runFastLoop(true);
+
   if (!root.ok) return root.result;
 
   // ---- one terminal event for EVERY delivered mission (R37 AC-0) ------------

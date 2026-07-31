@@ -240,6 +240,31 @@ export class AssetRegistryRepository {
     ]);
   }
 
+  /**
+   * Replace a design's role instructions in place (R26).
+   *
+   * The fast loop's patch, and its revert — the same call both ways, because a
+   * revert is just putting the old string back.
+   *
+   * Deliberately NOT routed through `proposeDelta`'s ratchet. That gate governs
+   * **permanence**, and a hot-fix is explicitly impermanent: it reverts by
+   * default, within one mission, and the `hot_fix` row holds what it replaced.
+   * Making the fast loop earn permanence would make it the slow loop, which is
+   * R23's job and already exists. The distinction is why R26 and R23 are
+   * separate requirements rather than one.
+   *
+   * `version` is untouched for the same reason. A version is what the ratchet
+   * advances on evidence; an experiment that may be gone in four tasks has not
+   * earned one, and bumping it would let a reverted hot-fix leave a permanent
+   * mark on a design's history.
+   */
+  async setRoleInstructions(designId: string, roleInstructions: string): Promise<void> {
+    await this.#pool.query(
+      `UPDATE agent_design SET role_instructions = $2, updated_at = now() WHERE design_id = $1`,
+      [designId, roleInstructions],
+    );
+  }
+
   async findById(designId: string): Promise<AgentDesign | null> {
     const { rows } = await this.#pool.query<DesignRow>(
       `SELECT ${RETURNED} FROM agent_design WHERE design_id = $1`,
