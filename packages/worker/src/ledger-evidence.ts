@@ -15,7 +15,7 @@
  * is still in progress. "The last N missions" would be a constant nobody
  * measured — the ledger already knows which missions are over.
  */
-import { capabilityOf } from './agent-creator.js';
+import { capabilityOf, proposableCapabilities } from './agent-creator.js';
 import type { MissionEvidence } from './science-loop.js';
 
 /** The cross-mission index — `LedgerRepository.listMissions` in practice. */
@@ -88,6 +88,29 @@ export class LedgerEvidenceSource {
    * being checked by it.
    */
   async #categoryFor(evidence: CategoryEvidence): Promise<string | undefined> {
+    const raw = await this.#recordedCategoryFor(evidence);
+    if (raw === undefined) return undefined;
+
+    // Structural roles are not capabilities (defect `a750be53`). Checked BEFORE
+    // normalisation, and that ordering is the whole subtlety: `capabilityOf`
+    // strips punctuation, so `verification.physics` becomes `verification
+    // physics` and stops matching the prefix. A filter one line lower would drop
+    // the mission role, leave every verification capability in the ranking, and
+    // look correct in any test that only checked `mission`.
+    //
+    // The rule itself is not restated here — it is the same
+    // `proposableCapabilities` that decides what `staff()` may resolve to and
+    // what the planner may be shown. A ranking of what the swarm is weak at can
+    // only contain things the swarm could be asked to do.
+    if (proposableCapabilities([raw]).length === 0) return undefined;
+
+    // ONE normalisation point, so no two rungs can disagree about the shape of
+    // a name. Rung 1's value is already normalised and this is idempotent on it.
+    return capabilityOf(raw);
+  }
+
+  /** The ladder itself: what was recorded, in order of directness. */
+  async #recordedCategoryFor(evidence: CategoryEvidence): Promise<string | undefined> {
     // Rung 1 — what staffing resolved, recorded on the event itself.
     if (evidence.capability !== undefined) return evidence.capability;
 
@@ -97,22 +120,17 @@ export class LedgerEvidenceSource {
       const known = this.#categoryOfDesign.get(evidence.designId);
       if (known === undefined) {
         const design = await this.#designs.findById(evidence.designId).catch(() => null);
-        // Normalised, because registry rows written before normalisation
-        // existed still carry the planner's capitals and slashes. Without this
-        // the same capability lands in two buckets depending on which rung
-        // reached it, which is the fragmentation the ladder exists to end.
-        const stored = design === null ? null : capabilityOf(design.category);
-        this.#categoryOfDesign.set(evidence.designId, stored);
-        if (stored !== null) return stored;
+        this.#categoryOfDesign.set(evidence.designId, design?.category ?? null);
+        if (design !== null) return design.category;
       } else if (known !== null) {
         return known;
       }
     }
 
-    // Rung 3 — normalisation, which merges case and punctuation variants and
-    // nothing else. Reached by every task whose design predates the registry's
-    // current id scheme: 140 of 220 live staffings have no row to find.
-    return evidence.raw === undefined ? undefined : capabilityOf(evidence.raw);
+    // Rung 3 — the planner's raw phrasing. Reached by every task whose design
+    // predates the registry's current id scheme: 140 of 220 live staffings have
+    // no row to find.
+    return evidence.raw;
   }
 
   /**

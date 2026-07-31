@@ -223,3 +223,116 @@ describe('ad116ead — the category is resolved down a strict-evidence ladder', 
     expect(calls).toBe(1);
   });
 });
+
+/**
+ * Structural roles are not capabilities (defect `a750be53`).
+ *
+ * Rung 2 introduced them. The mission task has no `task.contracted` event at
+ * all — zero in the live ledger — so before the design lookup existed it had no
+ * raw name and fell out of the evidence. Rung 2 finds its registry row and
+ * returns `mission`, which arrived at the head of the live ranking with 18
+ * observations and severity 57.5, six times the next entry. `verification.*`
+ * arrives the same way, from 15 registry rows.
+ *
+ * A hypothesis aimed at "mission" is aimed at nothing: it is not a kind of work
+ * that can be staffed differently or benched against, it is the aggregate of all
+ * work. `proposableCapabilities` already draws this exact line for `staff()` and
+ * for the planner's naming guidance; the ranking is a third consumer of the same
+ * rule.
+ *
+ * THE TRAP, and why the ladder has a single normalisation point: `capabilityOf`
+ * strips punctuation, so `verification.x` becomes `verification x` and the
+ * `verification.` prefix stops matching. A filter applied after normalisation
+ * fixes the mission half and leaves the verification half leaking — and every
+ * test that only checks `mission` would still pass.
+ */
+describe('a750be53 — the ranking carries capabilities, not the roles Artifex assigns itself', () => {
+  it('drops the mission role, which reaches the ladder only through the design lookup', async () => {
+    const asMission = { async findById() { return { category: 'mission' }; } };
+    const events = [
+      ev('agent.staffed', 't-0', { designId: 'd-mission' }),
+      ev('gate_b.verdict_issued', 't-0', { outcome: 'fail', findings: [] }),
+    ];
+
+    const evidence = await new LedgerEvidenceSource(
+      index as never, readerOf(events) as never, asMission as never,
+    ).evidenceFor();
+
+    expect(evidence).toHaveLength(0);
+  });
+
+  it('drops a verification capability DESPITE normalisation stripping its dot', async () => {
+    // The trap, asserted directly. `verification.scientific definitions`
+    // normalises to `verification scientific definitions`, which no longer
+    // starts with the prefix — so a filter placed after normalisation lets this
+    // through while the mission test above still passes.
+    const asVerifier = { async findById() { return { category: 'verification.scientific definitions' }; } };
+    const events = [
+      ev('agent.staffed', 't-1', { designId: 'd-verifier' }),
+      ev('gate_b.verdict_issued', 't-1', { outcome: 'fail', findings: [] }),
+    ];
+
+    const evidence = await new LedgerEvidenceSource(
+      index as never, readerOf(events) as never, asVerifier as never,
+    ).evidenceFor();
+
+    expect(evidence).toHaveLength(0);
+  });
+
+  it('drops a structural role arriving on rung 1 as well, not only rung 2', async () => {
+    // Rung 2 is where they arrive TODAY. The rule is about what the category
+    // means, not about which rung supplied it, and a filter attached to one rung
+    // is the mechanism-on-one-path shape this repo keeps finding.
+    const events = [
+      ev('task.contracted', 't-1', { category: 'raw', contract: { budget: { ceiling: 10 } } }),
+      ev('agent.staffed', 't-1', { designId: 'd-x', capability: 'verification.physics' }),
+      ev('gate_b.verdict_issued', 't-1', { outcome: 'fail', findings: [] }),
+    ];
+
+    const evidence = await new LedgerEvidenceSource(
+      index as never, readerOf(events) as never, designs as never,
+    ).evidenceFor();
+
+    expect(evidence).toHaveLength(0);
+  });
+
+  it('DISTRACTOR: a real capability alongside a structural one still ranks', async () => {
+    // A filter that emptied the evidence would pass every test above.
+    const events = [
+      ev('task.contracted', 't-1', { category: 'Scientific Definitions', contract: { budget: { ceiling: 10 } } }),
+      ev('agent.staffed', 't-1', { designId: 'd-known' }),
+      ev('gate_b.verdict_issued', 't-1', { outcome: 'fail', findings: [] }),
+      ev('agent.staffed', 't-0', { designId: 'd-mission' }),
+      ev('gate_b.verdict_issued', 't-0', { outcome: 'fail', findings: [] }),
+    ];
+    const mixed = {
+      async findById(id: string) {
+        return id === 'd-mission' ? { category: 'mission' } : { category: 'scientific terminology' };
+      },
+    };
+
+    const evidence = await new LedgerEvidenceSource(
+      index as never, readerOf(events) as never, mixed as never,
+    ).evidenceFor();
+
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]?.category).toBe('scientific terminology');
+  });
+
+  it('DISTRACTOR: a capability that merely CONTAINS the word survives', async () => {
+    // `verification of measurement data` is real work someone could be weak at.
+    // The rule is the generated prefix and the exact role name, not the words.
+    const real = { async findById() { return { category: 'verification of measurement data' }; } };
+    const events = [
+      ev('agent.staffed', 't-1', { designId: 'd-real' }),
+      ev('gate_b.verdict_issued', 't-1', { outcome: 'fail', findings: [] }),
+    ];
+
+    const evidence = await new LedgerEvidenceSource(
+      index as never, readerOf(events) as never, real as never,
+    ).evidenceFor();
+
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]?.category).toBe('verification of measurement data');
+  });
+});
