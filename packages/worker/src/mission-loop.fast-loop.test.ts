@@ -169,6 +169,49 @@ describe('R26 AC-0 — a repeatedly-failing criterion really does get patched', 
     expect(ev?.payload).toHaveProperty('bounds');
   });
 
+  it('records the PATCH ITSELF, not merely which asset was patched (defect `aa6948ee`)', async () => {
+    // Invariant 1 says the ledger is the complete record of what happened. The
+    // event named the asset, the criterion, the bounds and the prediction — and
+    // not the change. A replay could say the worker's role instructions were
+    // patched and could not say what they were patched TO, which is the single
+    // most consequential fact about a fast-loop experiment.
+    //
+    // Found while designing ADR-0017: the science loop has to read `hot_fix` for
+    // the patched value because the trail does not carry it.
+    const fast = recordingFastLoop();
+
+    const result = await runMission(
+      mission(), { ...seams(false), fastLoop: fast.seam } as never, { now: () => AT },
+    );
+
+    const ev = result.trail.find((e) => e.type === 'fast_loop.hot_fix_applied');
+    expect(ev, 'the patch happened off-ledger').toBeDefined();
+    expect(ev?.payload).toHaveProperty('patch');
+    const patch = (ev?.payload as { patch?: { previousValue?: unknown; patchedValue?: unknown } }).patch;
+    expect(patch?.previousValue, 'the trail cannot say what the instructions WERE').toBeTruthy();
+    expect(patch?.patchedValue, 'the trail cannot say what they were patched TO').toBeTruthy();
+    expect(patch?.patchedValue).not.toBe(patch?.previousValue);
+  });
+
+  it('the recorded patch MATCHES what the store was given — one truth, not two', async () => {
+    // The event and the store must agree, or a reader has to choose which to
+    // believe. This is the two-sites-keying-on-different-versions shape, and the
+    // mutant that records a placeholder instead of the real value dies here.
+    const fast = recordingFastLoop();
+
+    const result = await runMission(
+      mission(), { ...seams(false), fastLoop: fast.seam } as never, { now: () => AT },
+    );
+
+    const applied = fast.applied[0];
+    expect(applied, 'nothing was applied, so this asserts nothing').toBeDefined();
+    const patch = (result.trail.find((e) => e.type === 'fast_loop.hot_fix_applied')
+      ?.payload as { patch?: { previousValue?: unknown; patchedValue?: unknown } }).patch;
+
+    expect(patch?.patchedValue).toBe(applied!.patchedValue);
+    expect(patch?.previousValue).toBe(applied!.previousValue);
+  });
+
   it('DISTRACTOR: a mission whose criteria PASS is never patched', async () => {
     // The fast loop is triggered by a failure pattern, not by running. If it
     // fired on healthy work it would be a random-change generator.

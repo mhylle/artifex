@@ -803,6 +803,22 @@ export async function runMission(
         target: patch.target,
         bounds: plan.bounds,
         predictedEffect: plan.predictedEffect,
+        // The CHANGE ITSELF (defect `aa6948ee`). This event named the asset, the
+        // criterion, the bounds and the prediction — everything except what the
+        // instructions were patched to, which is the one fact a reader most
+        // needs. Invariant #1 says the ledger is the complete record of what
+        // happened; a replay that can say "the role instructions changed" and
+        // not what they changed to does not satisfy it.
+        //
+        // Both sides, because a patch is a DIFF: `patchedValue` alone would say
+        // where the swarm ended up and not what it moved away from, and the
+        // whole judgement of a hot-fix is whether the move helped.
+        //
+        // Verbatim rather than a digest. These are role-instruction blocks of a
+        // few hundred characters, and a hash would make the trail auditable only
+        // by someone who still had the original to compare against — which is
+        // precisely what a replay does not have.
+        patch: { previousValue: asset.roleInstructions, patchedValue: patch.replacement },
       });
       liveFix = {
         hotFixId, plan, target: patch.target,
