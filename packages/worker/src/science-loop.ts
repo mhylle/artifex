@@ -76,8 +76,6 @@ export function rankWeakSpots(history: readonly MissionEvidence[]): WeakSpot[] {
     const passes = entries.reduce((n, e) => n + e.gateBPasses, 0);
     const escalations = entries.reduce((n, e) => n + e.escalations, 0);
     const surrenders = entries.filter((e) => e.surrendered).length;
-    const spent = entries.reduce((n, e) => n + e.budgetSpent, 0);
-    const ceiling = entries.reduce((n, e) => n + e.budgetCeiling, 0);
 
     const reasons: string[] = [];
     let severity = 0;
@@ -104,10 +102,38 @@ export function rankWeakSpots(history: readonly MissionEvidence[]): WeakSpot[] {
       reasons.push(`${escalations} escalations across ${attempts} verdicts — an escalation hot spot`);
     }
 
-    if (ceiling > 0 && spent / ceiling >= NEAR_CEILING) {
-      severity += 1;
+    // Counted PER MISSION, not pooled across the category (defect `d08191c8`).
+    //
+    // Pooling summed spend and ceiling and compared the totals, which hides the
+    // pattern the criterion is about. Measured live: a mission that spent 100%
+    // of its ceiling left `technical writing` pooling to 19/152 — about 12.5% —
+    // so a category that blew its budget was invisible behind ten generous
+    // missions and the amendment petition could never fire.
+    //
+    // This cannot lose a detection the pooled rule made, and that is provable
+    // rather than hoped: the pooled ratio is a weighted average of the
+    // per-mission ratios with weights `ceiling_i / Σceiling`, and a weighted
+    // average never exceeds its largest term. So `Σspent/Σceiling >= 0.9`
+    // implies some mission was already at or over 0.9. The old rule was a
+    // strictly weaker form of this one, which is why it is replaced rather than
+    // OR-ed — an OR would add a branch that can never be the only one taken.
+    //
+    // `NEAR_CEILING` is unchanged. What changed is the population the existing
+    // bar is applied to, so no constant is invented here.
+    const overSpending = entries.filter(
+      (e) => e.budgetCeiling > 0 && e.budgetSpent / e.budgetCeiling >= NEAR_CEILING,
+    );
+    if (overSpending.length > 0) {
+      // Weighted by how many missions, matching the surrender rule above: one is
+      // an incident, five is the pattern an amendment would be argued from.
+      severity += overSpending.length;
+      const worst = overSpending.reduce((a, b) =>
+        b.budgetSpent / b.budgetCeiling > a.budgetSpent / a.budgetCeiling ? b : a,
+      );
       reasons.push(
-        `spent ${spent} of ${ceiling} budget (${Math.round((spent / ceiling) * 100)}%) — a budget-versus-value outlier`,
+        `${overSpending.length} of ${entries.length} mission(s) spent at least ` +
+          `${Math.round(NEAR_CEILING * 100)}% of budget (worst: ${worst.budgetSpent} of ` +
+          `${worst.budgetCeiling}) — a budget-versus-value outlier`,
       );
     }
 
