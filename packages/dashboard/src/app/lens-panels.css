@@ -35,3 +35,18 @@ ul, ol { list-style: none; padding: 0; margin: 0; display: grid; gap: .35rem; }
 .petitions .verdict-supported { color: #2b6b45; }
 .petitions .verdict-unsupported { color: #8c3b3b; }
 .petitions .verdict-unevaluated, .petitions .verdict-pending { color: #7a6a3d; }
+
+/* The slow ratchet: bench-tested candidates and the weak spots they aim at
+   (defect `b916a540`). Kept visually distinct from the fast-loop ratchet above
+   because the two run at different speeds against different evidence — a reader
+   who could not tell them apart would think a bench replay under replication and
+   an in-mission window of two observations carried the same weight. The outcome
+   word is always in the text, so the colour is never the only signal. */
+.decisions li, .rankings li { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; padding: .4rem .6rem; border: 1px solid #eee; border-radius: 5px; font-size: .8rem; }
+.decisions .outcome { text-transform: uppercase; font-size: .68rem; letter-spacing: .04em; font-weight: 700; }
+.decisions .outcome-adopt { color: #2b6b45; }
+.decisions .outcome-reject { color: #8c3b3b; }
+.decisions .tally, .rankings .tally { color: #555; white-space: nowrap; }
+.decisions .why { flex: 1; color: #444; }
+.rankings .spots { width: 100%; margin: .3rem 0 0 .5rem; border-left: 2px solid #e4e4e4; padding-left: .6rem; }
+.rankings .spots li { border: 0; padding: .1rem 0; font-size: .75rem; color: #444; }

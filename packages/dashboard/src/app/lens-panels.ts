@@ -11,7 +11,7 @@ import { JsonPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
-import { buildLearningView, buildLedgerView, buildTimeline, buildWorkforce } from './lenses';
+import { buildLearningView, buildLedgerView, buildTimeline, buildWorkforce, hasLearningOutput } from './lenses';
 import type { LedgerFilter, TimedEvent } from './lenses';
 
 export type LensName = 'canvas' | 'workforce' | 'timeline' | 'learning' | 'ledger';
@@ -60,8 +60,10 @@ export class LensPanels {
 
   readonly hasLearning = computed(() => {
     const view = this.learning();
-    return view.experiments.length + view.adoptions.length + view.reverts.length
-      + view.petitions.length + view.libraryGrowth.length > 0;
+    // Delegated to the projection, where it can be tested and mutated. As a
+    // component expression it was neither, and the mutant that dropped the slow
+    // loop from the count survived.
+    return hasLearningOutput(view);
   });
 
   percent(rate: number | null): string {

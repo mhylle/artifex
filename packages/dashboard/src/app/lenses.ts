@@ -243,6 +243,54 @@ export interface PetitionView {
   readonly evaluated: number;
 }
 
+/**
+ * Has the Learning Agent produced anything for this mission?
+ *
+ * Lives here rather than in the component because it is a statement about the
+ * PROJECTION, and a rule kept in a template cannot be tested or mutated. It was
+ * in the component, and the mutant that dropped the slow loop from the count
+ * survived — a mission whose only learning output was a bench-tested candidate
+ * would have rendered "nothing to show" while holding a decision.
+ */
+export function hasLearningOutput(view: LearningView): boolean {
+  return view.experiments.length + view.adoptions.length + view.reverts.length
+    + view.petitions.length + view.libraryGrowth.length
+    + view.candidateDecisions.length + view.rankings.length > 0;
+}
+
+/**
+ * The SLOW loop's half of the ratchet — one science-loop adoption decision.
+ *
+ * Rejections are carried, not filtered. `AdoptionDecision` makes the argument
+ * itself: "a rejected candidate is a MEASUREMENT, and throwing it away means the
+ * next hypothesis re-runs the same experiment." A panel showing only adoptions
+ * would also render empty today, since every live decision so far is a
+ * rejection — and "the science loop has done nothing" is exactly the false
+ * impression to avoid.
+ */
+export interface CandidateDecisionView {
+  readonly event: TimedEvent;
+  readonly candidateId: string;
+  readonly adopt: boolean;
+  readonly reason: string;
+  readonly wins: number;
+  readonly losses: number;
+  /** `null` when no sealed case was available to hold the candidate out against. */
+  readonly heldOutWon: boolean | null;
+}
+
+/** A weak-spot ranking — what every hypothesis downstream is aimed at. */
+export interface RankingView {
+  readonly event: TimedEvent;
+  readonly ranked: number;
+  readonly top: readonly {
+    readonly category: string;
+    readonly severity: number;
+    readonly observations: number;
+    readonly reasons: readonly string[];
+  }[];
+}
+
 export interface LearningView {
   readonly experiments: readonly ExperimentView[];
   readonly adoptions: readonly TimedEvent[];
@@ -251,6 +299,18 @@ export interface LearningView {
   readonly petitions: readonly PetitionView[];
   /** Templates the swarm has learned (R31 AC-2) — the library growing. */
   readonly libraryGrowth: readonly TimedEvent[];
+  /**
+   * The SLOW loop's decisions, kept SEPARATE from `adoptions`/`reverts`.
+   *
+   * The two loops run at different speeds against different evidence: a
+   * fast-loop resolution is an in-mission window of a handful of observations,
+   * a science decision is a bench replay under a fixed budget with replication
+   * and a held-out slice. Folding them together would let a reader think the two
+   * carried the same weight.
+   */
+  readonly candidateDecisions: readonly CandidateDecisionView[];
+  /** Weak-spot rankings — the Learning Agent's primary output. */
+  readonly rankings: readonly RankingView[];
 }
 
 /**
@@ -348,5 +408,41 @@ export function buildLearningView(events: readonly TimedEvent[]): LearningView {
       };
     }),
     libraryGrowth: of('decomposition.template_learned'),
+    candidateDecisions: of('learning.candidate_evaluated').map((event): CandidateDecisionView => {
+      const p = event.payload as {
+        adopt?: unknown; reason?: unknown;
+        evidence?: { candidateId?: unknown; wins?: unknown; losses?: unknown; heldOutWon?: unknown };
+      };
+      const heldOut = p.evidence?.heldOutWon;
+      return {
+        event,
+        candidateId: String(p.evidence?.candidateId ?? 'unknown'),
+        // Explicitly `=== true`, so a payload that lost the field reads as NOT
+        // adopted. Defaulting the other way would show an unrecorded decision as
+        // a change the swarm made to itself.
+        adopt: p.adopt === true,
+        reason: String(p.reason ?? ''),
+        wins: Number(p.evidence?.wins ?? 0),
+        losses: Number(p.evidence?.losses ?? 0),
+        heldOutWon: typeof heldOut === 'boolean' ? heldOut : null,
+      };
+    }),
+    rankings: of('learning.weak_spots_ranked').map((event): RankingView => {
+      const p = event.payload as { ranked?: unknown; top?: unknown };
+      const top = Array.isArray(p.top) ? p.top : [];
+      return {
+        event,
+        ranked: Number(p.ranked ?? 0),
+        top: top.map((s) => {
+          const spot = s as { category?: unknown; severity?: unknown; observations?: unknown; reasons?: unknown };
+          return {
+            category: String(spot.category ?? 'unknown'),
+            severity: Number(spot.severity ?? 0),
+            observations: Number(spot.observations ?? 0),
+            reasons: Array.isArray(spot.reasons) ? spot.reasons.map(String) : [],
+          };
+        }),
+      };
+    }),
   };
 }

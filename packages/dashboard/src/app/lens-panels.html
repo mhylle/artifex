@@ -86,6 +86,38 @@
           }
           @if (learning().petitions.length === 0) { <li class="empty">No petition is pending.</li> }
         </ul>
+        <h4>Science loop <span class="count">bench-tested candidates — the slow ratchet</span></h4>
+        <ul class="decisions">
+          @for (d of learning().candidateDecisions; track d.event.eventId) {
+            <li>
+              <span class="outcome" [class]="d.adopt ? 'outcome-adopt' : 'outcome-reject'">
+                {{ d.adopt ? 'adopted' : 'rejected' }}
+              </span>
+              <span class="tally">
+                {{ d.wins }}W / {{ d.losses }}L ·
+                held out: {{ d.heldOutWon === null ? 'not run' : (d.heldOutWon ? 'won' : 'lost') }}
+              </span>
+              <span class="why">{{ d.reason }}</span>
+            </li>
+          }
+          @if (learning().candidateDecisions.length === 0) {
+            <li class="empty">No candidate has been bench-tested yet.</li>
+          }
+        </ul>
+        <h4>Weak spots <span class="count">what the next hypothesis aims at</span></h4>
+        <ul class="rankings">
+          @for (r of learning().rankings; track r.event.eventId) {
+            <li>
+              <span class="tally">{{ r.ranked }} categor{{ r.ranked === 1 ? 'y' : 'ies' }} ranked</span>
+              <ul class="spots">
+                @for (s of r.top; track s.category) {
+                  <li>{{ s.category }} — severity {{ s.severity }}, {{ s.observations }} observation{{ s.observations === 1 ? '' : 's' }}</li>
+                }
+              </ul>
+            </li>
+          }
+          @if (learning().rankings.length === 0) { <li class="empty">Nothing has been ranked yet.</li> }
+        </ul>
         <h4>Library growth <span class="count">templates learned</span></h4>
         <ul class="library">
           @for (e of learning().libraryGrowth; track e.eventId) { <li>{{ e.payload | json }}</li> }
@@ -93,8 +125,8 @@
         </ul>
       } @else {
         <p class="empty">
-          Nothing to show. This mission recorded no experiment, adoption, petition
-          or learned template.
+          Nothing to show. This mission recorded no experiment, adoption, petition,
+          bench-tested candidate, weak-spot ranking or learned template.
         </p>
       }
     </section>

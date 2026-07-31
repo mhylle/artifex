@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { buildLedgerView, buildLearningView, buildTimeline, buildWorkforce } from './lenses';
+import { buildLedgerView, buildLearningView, buildTimeline, buildWorkforce, hasLearningOutput } from './lenses';
 import type { LedgerEventView } from './mission-tree';
 
 const MISSION = 'm-1';
@@ -348,6 +348,136 @@ describe('R19 AC-2 — learning observatory lens', () => {
     const view = buildLearningView([...trail(), evaluated('e-orphan', 'supported', 1, 1)]);
 
     expect(view.petitions).toEqual([]);
+  });
+
+  /**
+   * The SLOW loop's half of the ratchet (defect `b916a540`).
+   *
+   * R19 AC-2 says the observatory shows "adoptions and reverts on the ratchet".
+   * `buildLearningView` sourced both from `fast_loop.hot_fix_resolved` only,
+   * which was right when the fast loop was the only ratchet. Since the science
+   * loop was wired it also decides adoptions — `learning.candidate_evaluated`
+   * carries `adopt`, a reason and the evidence — and none of it reached the
+   * lens. Find-shape (c): the panel claimed to show the ratchet and showed half.
+   *
+   * The weak-spot ranking is the same shape one level up: it is the Learning
+   * Agent's primary output and the input to the petition path, and the learning
+   * lens said nothing about it.
+   */
+  const decided = (candidateId: string, adopt: boolean, over: Record<string, unknown> = {}) =>
+    ev('learning.candidate_evaluated', null, {
+      adopt, reason: adopt ? 'replicated and held out' : 'won 0 time(s)',
+      evidence: { candidateId, wins: adopt ? 2 : 0, losses: adopt ? 0 : 2, heldOutWon: adopt },
+      ...over,
+    }, 'learning', '2026-07-30T09:04:00.000Z');
+
+  const ranked = (count: number) =>
+    ev('learning.weak_spots_ranked', null, {
+      ranked: count,
+      top: [{ category: 'technical writing', severity: 9.5, observations: 3, reasons: ['compliance is 1/4'] }],
+    }, 'learning', '2026-07-30T09:05:00.000Z');
+
+  it('surfaces the science loop decisions with their evidence', () => {
+    const view = buildLearningView([...trail(), decided('hf-1', false)]);
+
+    expect(view.candidateDecisions).toHaveLength(1);
+    expect(view.candidateDecisions[0]!.candidateId).toBe('hf-1');
+    expect(view.candidateDecisions[0]!.adopt).toBe(false);
+    expect(view.candidateDecisions[0]!.wins).toBe(0);
+    expect(view.candidateDecisions[0]!.losses).toBe(2);
+    expect(view.candidateDecisions[0]!.heldOutWon).toBe(false);
+  });
+
+  it('DISTRACTOR: a REJECTED candidate is shown, not filtered out', () => {
+    // Every live decision so far is a rejection. A panel that showed only
+    // adoptions would render empty and read as "the science loop has done
+    // nothing", which is false. `AdoptionDecision`'s own comment makes the
+    // argument: a rejected candidate is a measurement, and knowing it failed the
+    // held-out slice is the most useful thing about it.
+    const view = buildLearningView([...trail(), decided('hf-rejected', false)]);
+
+    expect(view.candidateDecisions.map((d) => d.candidateId)).toContain('hf-rejected');
+  });
+
+  it('DISTRACTOR: an ADOPTED candidate reads as adopted — both sides', () => {
+    const view = buildLearningView([...trail(), decided('hf-a', true), decided('hf-b', false)]);
+
+    const a = view.candidateDecisions.find((d) => d.candidateId === 'hf-a');
+    const b = view.candidateDecisions.find((d) => d.candidateId === 'hf-b');
+    expect(a!.adopt).toBe(true);
+    expect(b!.adopt).toBe(false);
+  });
+
+  it('DISTRACTOR: a science decision is NOT folded into the fast loop ratchet', () => {
+    // The two loops run at different speeds against different evidence, and a
+    // reader who could not tell them apart would think a bench-verified adoption
+    // and an in-mission hot-fix carried the same weight.
+    const view = buildLearningView([...trail(), decided('hf-1', true)]);
+
+    expect(view.adoptions, 'a science decision leaked into the fast-loop ratchet').toHaveLength(0);
+    expect(view.reverts).toHaveLength(0);
+  });
+
+  it('surfaces the weak-spot ranking the whole loop is aimed at', () => {
+    const view = buildLearningView([...trail(), ranked(52)]);
+
+    expect(view.rankings).toHaveLength(1);
+    expect(view.rankings[0]!.ranked).toBe(52);
+    expect(view.rankings[0]!.top[0]!.category).toBe('technical writing');
+    expect(view.rankings[0]!.top[0]!.observations).toBe(3);
+  });
+
+  it('DISTRACTOR: a mission with no learning output reports empty, not invented', () => {
+    const view = buildLearningView(trail());
+
+    expect(view.candidateDecisions).toEqual([]);
+    expect(view.rankings).toEqual([]);
+  });
+
+  it('DISTRACTOR: a decision with NO adopt flag reads as NOT adopted', () => {
+    // Defaulting the other way would show an unrecorded decision as a change the
+    // swarm made to itself. Every other fixture sets `adopt` explicitly, so the
+    // mutant that flipped `=== true` to `!== false` survived until this existed.
+    const view = buildLearningView([
+      ...trail(),
+      ev('learning.candidate_evaluated', null,
+        { reason: 'payload lost the flag', evidence: { candidateId: 'hf-x', wins: 0, losses: 1 } },
+        'learning', '2026-07-30T09:04:00.000Z'),
+    ]);
+
+    expect(view.candidateDecisions[0]!.adopt).toBe(false);
+  });
+
+  it('DISTRACTOR: an ABSENT held-out result is null, not "lost"', () => {
+    // Two different findings. `heldOutWon: false` means the candidate FAILED the
+    // sealed slice; `null` means no sealed case existed to try it against. The
+    // science loop returns null in exactly that case and says so. Collapsing
+    // them would report "could not check" as "did not transfer".
+    const view = buildLearningView([
+      ...trail(),
+      ev('learning.candidate_evaluated', null,
+        { adopt: false, reason: 'no sealed case', evidence: { candidateId: 'hf-y', wins: 1, losses: 0 } },
+        'learning', '2026-07-30T09:04:00.000Z'),
+    ]);
+
+    expect(view.candidateDecisions[0]!.heldOutWon).toBeNull();
+  });
+
+  it('a mission whose ONLY learning output is a candidate decision is not "nothing to show"', () => {
+    const view = buildLearningView([
+      ...trail(),
+      ev('learning.candidate_evaluated', null,
+        { adopt: false, reason: 'r', evidence: { candidateId: 'hf-z', wins: 0, losses: 2, heldOutWon: false } },
+        'learning', '2026-07-30T09:04:00.000Z'),
+    ]);
+
+    expect(hasLearningOutput(view)).toBe(true);
+  });
+
+  it('DISTRACTOR: a mission with no learning output at all IS "nothing to show"', () => {
+    // Both sides. A predicate that always returned true would pass the test
+    // above and make the empty state unreachable.
+    expect(hasLearningOutput(buildLearningView(trail()))).toBe(false);
   });
 
   it('surfaces library growth as templates are learned', () => {
