@@ -186,7 +186,20 @@ export async function decompose(
           .filter((_, siblingIndex) => siblingIndex !== index),
       },
       inputs: {
-        entitlements: [...parent.inputs.entitlements],
+        // Inherited, PLUS the Knowledge Commons for this child's own capability
+        // (defects `488709be` / `753bc6dd`).
+        //
+        // The Context Broker was complete and unreachable for a second reason
+        // beyond nobody constructing it: every child was authored with
+        // `entitlements: []`, so a wired broker would have denied every request
+        // and invariant #6 would have been "enforced" by having nothing to
+        // enforce. An entitlement is what gives the broker something to grant.
+        //
+        // Scoped to the child's OWN capability rather than the whole commons: a
+        // task may read what its kind of work has learned, not everything the
+        // swarm knows. The contract remains the sole authority on what a task
+        // may know, exactly as it is on what a task may do.
+        entitlements: [...parent.inputs.entitlements, `commons:${subtask.category}`],
         toolEntitlements: parent.inputs.toolEntitlements.map((t) => ({ ...t })),
         // Inherited from the parent, PLUS one pinned per sibling edge (R33).
         //

@@ -37,6 +37,8 @@ import type { HotFixTarget } from './constitution.js';
 import { detectHotSpot, hotFixPlan, revertDecision } from './fast-loop.js';
 import type { GateBOutcome, HotFixPlan } from './fast-loop.js';
 import { runSpecialist } from './specialist.js';
+import { BrokeredFabric, ContextBroker } from './context-broker.js';
+import type { ContextStore } from './context-broker.js';
 import type { ClarityJudge, SpecialistWork } from './specialist.js';
 
 /**
@@ -181,6 +183,23 @@ export interface MissionSeams {
    * templates, and the deployed worker must not run without them.
    */
   readonly templates?: DecompositionTemplateSeam;
+  /**
+   * The context sources the Context Broker serves (invariant #6, defects
+   * `488709be` / `753bc6dd`).
+   *
+   * Optional at the seam and REQUIRED in `WorkerDependencies`, the pattern that
+   * has caught five dead mechanisms. Absent, a mission runs exactly as before —
+   * context is an improvement, not a gate.
+   */
+  readonly context?: ContextStore;
+  /**
+   * Extra sources to request per task, beyond the contract's entitlements.
+   *
+   * A test seam, and it exists to make the REFUSAL path reachable: every source
+   * the loop asks for by default is one the contract entitles, so without this
+   * the denial branch could never be exercised end to end.
+   */
+  readonly extraSources?: readonly string[];
 }
 
 /**
@@ -626,6 +645,66 @@ export async function runMission(
     effortSpent: probe.contract.budget.floor,
     producedAt: now(),
   });
+
+  // ---- the Context Broker (invariant #6) -----------------------------------
+  // Built once per mission because every exchange it logs is a mission event.
+  // `null` when no store is supplied, which is every caller that predates
+  // brokering — their missions run exactly as before.
+  const broker = seams.context === undefined
+    ? null
+    : new ContextBroker({
+        fabric: new BrokeredFabric(seams.context),
+        // The broker appends through the loop's own recorder, so a grant lands
+        // in the same ordered trail as the work it enabled. A second sink would
+        // be a second truth about when things happened.
+        sink: { append: async (event) => { void trail.push(event); options.onEvent?.(event); } },
+        missionId: mission.missionId,
+      });
+
+  /**
+   * Serve a task's entitled context before it executes (defects `488709be`,
+   * `753bc6dd`).
+   *
+   * Every source goes through the broker — that IS invariant #6, "agents
+   * exchange context only through the Context Broker, and every exchange is
+   * logged". A refusal is logged by the broker too, so an unentitled request is
+   * as visible as a granted one.
+   *
+   * Failures are swallowed per source. Context is an improvement, not a gate:
+   * losing verified work because a knowledge read failed would trade the product
+   * for the reference material.
+   */
+  const brokerContext = async (
+    contract: TaskContract,
+    agentId: string,
+  ): Promise<{ payload: unknown; consulted: Array<{ source: string; viaBrokerGrantId: string | null }> }> => {
+    if (broker === null) return { payload: null, consulted: [] };
+
+    const wanted = [...contract.inputs.entitlements, ...(seams.extraSources ?? [])];
+    // The GRANT id, not just the source. `viaBrokerGrantId` exists on the
+    // bundle precisely so a reader can tell brokered access from a direct
+    // read — recording the source alone would lose the thing that proves
+    // invariant #6 was honoured.
+    const consulted: Array<{ source: string; viaBrokerGrantId: string | null }> = [];
+    let payload: unknown = null;
+
+    for (const source of wanted) {
+      try {
+        const { verificationPlan: _withheld, ...workerView } = contract;
+        const grant = await broker.request({
+          agentId, contract: workerView, source, occurredAt: now(),
+        });
+        consulted.push({ source, viaBrokerGrantId: grant.grantId });
+        // The first granted source is the prior knowledge the worker sees.
+        // Concatenating several would need a merge rule nobody has decided.
+        if (payload === null) payload = grant.payload;
+      } catch {
+        // Denied or unavailable. The broker already recorded which.
+      }
+    }
+
+    return { payload, consulted };
+  };
 
   // ---- the fast loop (R26) -------------------------------------------------
   // Every Gate B result this mission has produced, in order, as one criterion
@@ -1414,10 +1493,13 @@ export async function runMission(
         const { verificationPlan: _withheld, ...workerView } = child;
         let outcome;
         try {
+          const context = await brokerContext(child, manifest.designId);
           outcome = await runSpecialist({
             contract: workerView, agentId: manifest.designId, judge: seams.clarityJudge, work: seams.work,
             bundleId: `${child.taskId.slice(0, 24)}${(attempt + 0xb00000).toString(16).padStart(12, '0')}`,
             producedAt: now(),
+            priorKnowledge: context.payload,
+            consulted: context.consulted,
           });
         } catch (error) {
           // Retry the same tier first. Only a repeated failure is evidence of a

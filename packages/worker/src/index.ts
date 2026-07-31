@@ -130,7 +130,7 @@ export async function main(): Promise<void> {
         // Registry stayed a null-bidding stub for the project's whole life
         // (defect `41f7555c`) with every suite green.
         buildWorkerSeams(
-          { generator, models: { worker, evaluator }, assets, ledger, commons, hotFixes, bench, templates },
+          { generator, models: { worker, evaluator }, assets, ledger, commons, hotFixes, bench, templates, knowledge: commons },
           contract.missionId,
         ),
         {

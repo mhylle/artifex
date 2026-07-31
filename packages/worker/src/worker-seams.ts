@@ -116,6 +116,21 @@ export interface WorkerDependencies {
    * the criterion's "given" unreachable while every test passed.
    */
   readonly templates: DecompositionTemplateStore;
+  /**
+   * Published Knowledge Commons entries, served through the Context Broker
+   * (invariant #6, defects `488709be` / `753bc6dd`).
+   *
+   * REQUIRED here, optional on the seam — the pattern that has caught five dead
+   * mechanisms. The broker was complete and tested and had NO constructor
+   * anywhere; a deployed worker without this would leave invariant #6 enforced
+   * only in its own unit tests.
+   */
+  readonly knowledge: KnowledgeReader;
+}
+
+/** The slice of the Knowledge Commons the broker serves from (R24's consumer half). */
+export interface KnowledgeReader {
+  retrieve(missionId?: string): Promise<ReadonlyArray<{ readonly claim: string; readonly label: string }>>;
 }
 
 /** The slice of the template store the worker binds to (R31 AC-2). */
@@ -215,6 +230,21 @@ export function buildWorkerSeams(deps: WorkerDependencies, missionId: string): M
     deps.commons,
     fastLoop,
     deps.templates,
+    {
+      /**
+       * Serve `commons:<capability>` from the published commons.
+       *
+       * Only PUBLISHED entries. The commons admits everything to quarantine and
+       * publishes on corroboration (R24), so serving unproven claims as context
+       * would hand a worker exactly the material the quarantine exists to hold
+       * back.
+       */
+      read: async (source: string) => {
+        if (!source.startsWith('commons:')) return null;
+        const entries = await deps.knowledge.retrieve();
+        return entries.filter((e) => e.label === 'published');
+      },
+    },
     {
       // Sealed slice only, and RETIRED cases excluded: a case that no longer
       // represents the work is not ground truth about the reviewer either.

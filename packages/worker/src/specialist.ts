@@ -25,7 +25,19 @@ export interface ClarityJudge {
 }
 
 export interface SpecialistWork {
-  execute(input: { readonly contract: WorkerContractView; readonly restatement: string }): Promise<{
+  execute(input: {
+    readonly contract: WorkerContractView;
+    readonly restatement: string;
+    /**
+     * Context the Context Broker granted for this task (invariant #6).
+     *
+     * Reaches the worker rather than only the ledger — a grant nobody reads is
+     * a log line, not a channel. `null` when nothing was granted, which is every
+     * task whose contract entitles it to nothing and every runtime with no
+     * context store.
+     */
+    readonly priorKnowledge?: unknown;
+  }): Promise<{
     readonly deliverable: unknown;
     readonly actions: EvidenceBundle['actions'];
     readonly consulted: EvidenceBundle['consulted'];
@@ -45,6 +57,10 @@ export async function runSpecialist(input: {
   readonly work: SpecialistWork;
   readonly bundleId: string;
   readonly producedAt: string;
+  /** What the broker granted, passed through to the work seam. */
+  readonly priorKnowledge?: unknown;
+  /** The sources it came from, recorded on the bundle (R40's `consulted`). */
+  readonly consulted?: EvidenceBundle['consulted'];
 }): Promise<SpecialistOutcome> {
   const { contract, agentId, judge, work, bundleId, producedAt } = input;
 
@@ -68,7 +84,7 @@ export async function runSpecialist(input: {
     return { kind: 'bounced', restatement, ambiguities: [...ambiguities] };
   }
 
-  const result = await work.execute({ contract, restatement });
+  const result = await work.execute({ contract, restatement, priorKnowledge: input.priorKnowledge });
 
   return {
     kind: 'delivered',
@@ -79,7 +95,9 @@ export async function runSpecialist(input: {
       agentId,
       deliverable: result.deliverable,
       actions: result.actions,
-      consulted: result.consulted,
+      // Brokered sources joined with whatever the work consulted itself. Both
+      // are real consultations, and recording only one understates the trail.
+      consulted: [...(input.consulted ?? []), ...result.consulted],
       assumptions: result.assumptions,
       // Reflection is P8.6; present-and-null until then, never absent.
       reflection: null,

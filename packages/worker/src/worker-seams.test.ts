@@ -40,6 +40,7 @@ function dependencies() {
     hotFixResolved: [] as Array<{ revert: boolean }>,
     templatesRemembered: [] as Array<{ capability: string; recipe: string }>,
     templateOutcomes: [] as Array<{ templateId: string; survived: boolean }>,
+    knowledgeReads: 0,
   };
 
   const deps: WorkerDependencies = {
@@ -67,6 +68,15 @@ function dependencies() {
     },
     commons: {
       async submit(entry: { claim: string }) { calls.submitted.push(entry); return { entryId: 'e-1' }; },
+    },
+    knowledge: {
+      async retrieve() {
+        calls.knowledgeReads += 1;
+        return [
+          { claim: 'water boils at 100C', label: 'published' },
+          { claim: 'an unproven rumour', label: 'unproven' },
+        ];
+      },
     },
     templates: {
       async forCapability() { return null; },
@@ -475,5 +485,45 @@ describe('buildWorkerSeams — decomposition templates', () => {
     // BOTH values of the boolean, because a recorder hard-coding `true` would
     // pass a test that only ever recorded a success.
     expect(calls.templateOutcomes).toEqual([{ templateId: 'tpl-1', survived: false }]);
+  });
+});
+
+/**
+ * Invariant #6 — the deployed worker really has a context store.
+ *
+ * `ContextBroker` was complete, tested, and had no constructor anywhere in the
+ * repo (defect `488709be`). `MissionSeams.context` is optional so every existing
+ * caller compiles; `WorkerDependencies.knowledge` is required so the binary
+ * cannot run with invariant #6 enforced only in unit tests.
+ */
+describe('buildWorkerSeams — the Context Broker has something to serve', () => {
+  it('supplies a context store at all', async () => {
+    const { deps } = dependencies();
+
+    expect(buildWorkerSeams(deps, MISSION_ID).context, 'the deployed worker brokers nothing').toBeDefined();
+  });
+
+  it('serves ONLY published commons entries', async () => {
+    // The commons admits everything to quarantine and publishes on corroboration
+    // (R24). Serving unproven claims as context would hand a worker exactly the
+    // material the quarantine exists to hold back.
+    const { deps } = dependencies();
+
+    const served = await buildWorkerSeams(deps, MISSION_ID).context!.read('commons:stating');
+
+    expect(served).toEqual([{ claim: 'water boils at 100C', label: 'published' }]);
+  });
+
+  it('DISTRACTOR: a NON-commons source is not served from the commons', async () => {
+    // The store answers for the sources it owns. Returning commons entries for
+    // "secrets:payroll" would make the source name decorative, and the broker's
+    // entitlement check is per SOURCE — a store that ignores the name would
+    // hand back the wrong payload for a legitimately granted request.
+    const { deps, calls } = dependencies();
+
+    const served = await buildWorkerSeams(deps, MISSION_ID).context!.read('secrets:payroll');
+
+    expect(served).toBeNull();
+    expect(calls.knowledgeReads, 'the commons was queried for a source it does not own').toBe(0);
   });
 });
