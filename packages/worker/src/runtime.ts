@@ -43,7 +43,6 @@ import type { IntentJudge, PlanJudge } from './reviewer.js';
 import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
 import type { MissionSeams } from './mission-loop.js';
-import type { IntakeQuestion } from './intake-dialogue.js';
 
 const AnswerSchema = Type.Object(
   { answer: Type.String({ minLength: 1 }) },
@@ -660,6 +659,38 @@ const IntakeQuestionsSchema = Type.Object(
           question: Type.String({
             description: 'The question to put to the requester, answerable in a sentence.',
           }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+/**
+ * What it would cost to guess wrong — asked SEPARATELY (defect `bf766244`).
+ *
+ * `stakes` used to ride along with the questions, and the prompt asked for
+ * things "genuinely open". Measured over eight requests, that combination raised
+ * zero questions about anything minor: the materiality judgement suppressed the
+ * very thing the stakes field existed to classify, so `low` never occurred and
+ * R30 AC-2's given was unreachable.
+ *
+ * Separating them was measured, not guessed. Asked broadly, the same model
+ * raised 14 questions on the same three trivial requests; asked for stakes alone
+ * on plainly minor questions, it answered 3 low / 0 high. The questions were
+ * always there and `low` was always reachable — one probe asking both made them
+ * compete.
+ *
+ * The same reasoning `AssumptionsSchema` already applies to the worker: a second
+ * judgement in one probe corrupts the first, and a separate call is cheap.
+ */
+const IntakeStakesSchema = Type.Object(
+  {
+    verdicts: Type.Array(
+      Type.Object(
+        {
+          about: Type.String({ description: 'The `about` value of the question being rated.' }),
           stakes: Type.Union([Type.Literal('low'), Type.Literal('high')], {
             description:
               'high if guessing wrong would change what gets built or delivered; low if the work is ' +
@@ -843,23 +874,55 @@ export function createMissionSeams(
      */
     interrogator: {
       async assess({ mission: m }) {
-        const out = (await gen(models.evaluator, IntakeQuestionsSchema, [
-          'You are about to run this mission. Before any work starts, list what you would',
-          'have to ask the requester in order to know when the mission is done.',
-          '',
-          'Ask only about things the request leaves genuinely open. A criterion you could',
-          'grade as written needs no question. Return an empty list if nothing is open —',
-          'do not invent a question to fill it.',
-          '',
+        const brief = [
           `OBJECTIVE: ${m.objective}`,
           'SUCCESS CRITERIA (these are what the work will be graded against):',
           ...m.acceptanceCriteria.map((c) => `  [${c.criterionId}] ${c.statement}`),
           `OUT OF SCOPE: ${m.boundaries.outOfScope.join('; ') || '(nothing stated)'}`,
           `EFFORT BUDGET: ${m.budget.floor}–${m.budget.ceiling} ${m.budget.unit}`,
           `AUTONOMY DIAL: ${m.autonomyDial}`,
-        ].join('\n'))) as { questions?: IntakeQuestion[] };
+        ].join('\n');
 
-        return { questions: out.questions ?? [] };
+        // Call one: what is open. Deliberately WITHOUT a materiality filter —
+        // "ask only about things genuinely open" is what suppressed every minor
+        // question and made `low` unreachable (defect `bf766244`). Deciding what
+        // matters is the next call's job.
+        const open = (await gen(models.evaluator, IntakeQuestionsSchema, [
+          'You are about to run this mission. Before any work starts, list anything a',
+          'reasonable person could read in more than one way, however small.',
+          '',
+          'Return an empty list if the request is unambiguous — do not invent a question',
+          'to fill it.',
+          '',
+          brief,
+        ].join('\n'))) as { questions?: Array<{ about: string; question: string }> };
+
+        const asked = open.questions ?? [];
+        if (asked.length === 0) return { questions: [] };
+
+        // Call two: what it costs to guess wrong. Only reached when there is
+        // something to rate, so a well-specified request — the common case —
+        // pays for one probe rather than two.
+        const rated = (await gen(models.evaluator, IntakeStakesSchema, [
+          'A mission is about to run. These details were left open. For each one, say what',
+          'it would cost to guess wrong.',
+          '',
+          brief,
+          '',
+          'OPEN DETAILS:',
+          ...asked.map((q) => `  [${q.about}] ${q.question}`),
+        ].join('\n'))) as { verdicts?: Array<{ about: string; stakes: 'low' | 'high' }> };
+
+        const verdictFor = new Map((rated.verdicts ?? []).map((v) => [v.about, v.stakes]));
+
+        // An unrated question defaults to HIGH, which is the safe direction: a
+        // question nobody classified must not be carried as a low-stakes
+        // assumption, because that is the system assuming away something it
+        // never judged — precisely what AC-1 forbids. Blocking is recoverable;
+        // silence is not.
+        return {
+          questions: asked.map((q) => ({ ...q, stakes: verdictFor.get(q.about) ?? 'high' })),
+        };
       },
     },
 
