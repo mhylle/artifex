@@ -474,6 +474,35 @@ function isAtomic(contract: TaskContract): boolean {
 }
 
 /**
+ * The capability a decomposition template may be keyed on, or null (defect
+ * `16532469`).
+ *
+ * R31 AC-2's given is "a decomposition template in the Asset Registry matching
+ * **the kind of work**". Task zero's category is always `MISSION_CATEGORY` — the
+ * structural role Artifex stamps on every mission — and the `verification.`
+ * namespace is likewise assigned rather than proposed. Neither is a kind of
+ * work, so neither may be a template key.
+ *
+ * Keying on them anyway made the template store answer every mission with one
+ * row: measured live, 26 of 26 retrievals returned a single osmosis/diffusion
+ * recipe, shown as guidance to missions about hand tools and rail travel, while
+ * the one template stored under a real capability had never been used.
+ *
+ * `proposableCapabilities` already draws exactly this line for the registry's
+ * capability list, and the filter runs on the RAW category BEFORE normalisation
+ * for the same reason it does in `ledger-evidence.ts`: `capabilityOf` rewrites
+ * punctuation, so `verification.x` normalises to `verification x` and would slip
+ * past a prefix test applied afterwards.
+ *
+ * Null rather than a fallback string: a mission genuinely has no kind of work to
+ * match before it has been split, so the honest answer is no template — not a
+ * template for some invented catch-all capability.
+ */
+export function templateKeyFor(category: string): string | null {
+  return proposableCapabilities([category]).length === 0 ? null : capabilityOf(category);
+}
+
+/**
  * Is this deliverable serialised JSON rather than an answer? (defect 08db92fd)
  *
  * Returns the SHAPE that was detected, or null when the answer is fine — the
@@ -1158,15 +1187,23 @@ export async function runMission(
       // what makes them learnable at all. Failure is swallowed: guidance is an
       // improvement, and losing a mission because a recipe lookup failed would
       // trade the work for the advice.
+      //
+      // Null for task zero and for the `verification.` namespace, which are
+      // roles rather than kinds of work (defect `16532469`). Without that guard
+      // the constant `mission` key made one stored recipe the answer for every
+      // mission the system had ever run.
+      const templateKey = templateKeyFor(parent.category);
       try {
-        template = (await seams.templates?.forCapability(capabilityOf(parent.category))) ?? null;
+        template = templateKey === null
+          ? null
+          : (await seams.templates?.forCapability(templateKey)) ?? null;
       } catch {
         template = null;
       }
-      if (template !== null) {
+      if (template !== null && templateKey !== null) {
         record(parent.taskId, 'decision', 'decomposition.template_used', 'orchestrator', {
           templateId: template.templateId,
-          capability: capabilityOf(parent.category),
+          capability: templateKey,
           recipe: template.recipe,
         });
       }
@@ -1265,8 +1302,14 @@ export async function runMission(
     // evidence a template is distilled from — otherwise the criterion's given,
     // "a decomposition template in the Asset Registry matching the kind of
     // work", would be unreachable, because nothing else creates one.
-    if (seams.templates !== undefined) {
-      const capability = capabilityOf(parent.category);
+    // The same key rule as the lookup, for the same reason (defect `16532469`).
+    // A write side that stored under the mission role while the read side
+    // refused to look it up would quietly fill the store with rows nothing can
+    // ever retrieve — and it is how the live store came to hold one recipe that
+    // answered for every mission.
+    const learnKey = templateKeyFor(parent.category);
+    if (seams.templates !== undefined && learnKey !== null) {
+      const capability = learnKey;
       const survived = aVerdict.outcome === 'pass';
       try {
         if (template !== null) {

@@ -11,7 +11,7 @@
 import type { TaskContract } from '@artifex/shared-types';
 import { describe, expect, it } from 'vitest';
 
-import { runMission } from './mission-loop.js';
+import { runMission, templateKeyFor } from './mission-loop.js';
 import type { MissionSeams } from './mission-loop.js';
 
 const AT = '2026-07-31T09:00:00.000Z';
@@ -155,16 +155,60 @@ describe('R33 AC-0 — the loop feeds Gate A the decomposition decision', () => 
  * Postgres (`decomposition-template.test.ts`). What neither can see is whether
  * the loop looks a template up, hands it to the planner, records its use, and
  * folds the outcome back — the four things the criterion actually asks for.
+ *
+ * REWRITTEN for defect `16532469`, not extended. Every test here used to drive
+ * the template through TASK ZERO, whose category is always `MISSION_CATEGORY` —
+ * the one category the criterion's given excludes. AC-2 asks for "a
+ * decomposition template in the Asset Registry matching THE KIND OF WORK", and
+ * `mission` is the structural role Artifex stamps on every mission, not a kind
+ * of work. Measured live before the fix: 26 of 26 retrievals returned the single
+ * row stored under `mission` — one osmosis/diffusion recipe, handed to missions
+ * about hand tools, kitchen utensils and rail travel alike, while the one
+ * template keyed on a real capability had never been used at all.
+ *
+ * So the fixture nests. The mission carries THREE criteria, which makes
+ * `depthBound` 3 and lets the depth-0 split hand a two-criterion child down;
+ * that child is non-atomic, so the loop recurses and decomposes a task whose
+ * category is a REAL capability. That is the criterion's given, and it is the
+ * only place the template may now fire.
  */
+describe('defect 16532469 — which categories may key a decomposition template', () => {
+  it('refuses the structural roles and accepts a real capability', () => {
+    // Both sides, because a rule that answered null to everything would satisfy
+    // the first assertion alone and switch templates off entirely.
+    expect(templateKeyFor('mission'), 'the mission ROLE was accepted as a kind of work').toBeNull();
+    expect(templateKeyFor('tool description')).toBe('tool description');
+  });
+
+  it('DISTRACTOR: filters the RAW category, before capabilityOf rewrites it', () => {
+    // `capabilityOf` replaces punctuation with spaces, so `verification.x`
+    // normalises to `verification x` and a prefix test applied AFTERWARDS would
+    // let it through. The order is the rule; asserting it here makes the
+    // ordering a property rather than a comment.
+    expect(templateKeyFor('verification.tool description')).toBeNull();
+    // ...and the normalisation still happens for a category that passes.
+    expect(templateKeyFor('Tool Description / Kitchenware')).toBe('tool description');
+  });
+});
+
 describe('R31 AC-2 — a template guides the split and accumulates evidence', () => {
+  /** The kind of work the depth-1 node carries — a capability, not a role. */
+  const CAPABILITY = 'tool description';
+
+  /** Records WHICH capability was asked for, not merely that something was. */
   function templateStore(existing: { templateId: string; recipe: string } | null) {
+    const askedFor: string[] = [];
     const remembered: Array<{ capability: string; recipe: string }> = [];
     const outcomes: Array<{ templateId: string; survived: boolean }> = [];
     return {
+      askedFor,
       remembered,
       outcomes,
       seam: {
-        async forCapability() { return existing; },
+        async forCapability(capability: string) {
+          askedFor.push(capability);
+          return existing;
+        },
         async remember(input: { capability: string; recipe: string }) {
           remembered.push(input);
           return { templateId: 'tpl-new' };
@@ -176,7 +220,64 @@ describe('R31 AC-2 — a template guides the split and accumulates evidence', ()
     };
   }
 
-  /** Captures what the planner was actually told. */
+  /** Three criteria, so `depthBound` is 3 and a depth-1 decomposition happens. */
+  function nestedMission(): TaskContract {
+    return {
+      ...mission(),
+      acceptanceCriteria: [
+        { criterionId: 'm-1', statement: 'The first fact is stated.' },
+        { criterionId: 'm-2', statement: 'The second fact is stated.' },
+        { criterionId: 'm-3', statement: 'The third fact is stated.' },
+      ],
+    };
+  }
+
+  /**
+   * A planner that splits three criteria into an atomic child and a
+   * two-criterion child, then splits that child once more.
+   *
+   * Keyed on the criteria it is handed rather than on `depth`, so the fixture
+   * makes no assumption about a field the loop populates. Two children at the
+   * top on purpose: a one-child split decided by the GATE is faulted by R33's
+   * sixth clause, and the survival test below needs the top level to pass so
+   * the depth-1 split is the one being judged.
+   */
+  function nestingSeams(gate?: MissionSeams['decompositionGate']): MissionSeams {
+    const base = seams(gate);
+    return {
+      ...base,
+      planner: {
+        async propose({ contract }: { contract: TaskContract }) {
+          const criteria = contract.acceptanceCriteria;
+          if (criteria.length > 2) {
+            return {
+              subtasks: [
+                {
+                  objective: 'State the first fact.', category: CAPABILITY,
+                  acceptanceCriteria: [criteria[0]!],
+                  outOfScope: ['Else.'], blastRadius: 'low' as const, effortShare: 0.45,
+                },
+                {
+                  objective: 'State the remaining facts.', category: CAPABILITY,
+                  acceptanceCriteria: criteria.slice(1),
+                  outOfScope: ['Else.'], blastRadius: 'low' as const, effortShare: 0.45,
+                },
+              ],
+            };
+          }
+          return {
+            subtasks: [{
+              objective: 'State one fact.', category: CAPABILITY,
+              acceptanceCriteria: [criteria[0]!],
+              outOfScope: ['Else.'], blastRadius: 'low' as const, effortShare: 0.9,
+            }],
+          };
+        },
+      },
+    } as MissionSeams;
+  }
+
+  /** Captures what the planner was actually told, per call. */
   function recordingPlanner(base: MissionSeams) {
     const seen: Array<{ templateRecipe?: string }> = [];
     return {
@@ -193,24 +294,49 @@ describe('R31 AC-2 — a template guides the split and accumulates evidence', ()
     };
   }
 
-  it('hands the template recipe to the PLANNER, not merely to the ledger', async () => {
+  it('looks the template up for the KIND OF WORK, never for the mission role', async () => {
+    // Defect `16532469`. The lookup key used to be `capabilityOf(parent.category)`
+    // unconditionally, and task zero's category is the constant `mission` — so
+    // every mission ever run shared one template whatever its subject.
+    const store = templateStore({ templateId: 'tpl-1', recipe: 'One subtask per item.' });
+
+    await runMission(nestedMission(), { ...nestingSeams(), templates: store.seam } as never, { now: () => AT });
+
+    // Both sides of the discriminator: it asked for the capability, and it did
+    // not ask for the role. Asserting only the second passes trivially if the
+    // store is never consulted at all.
+    expect(store.askedFor, 'the template store was never consulted').toContain(CAPABILITY);
+    expect(store.askedFor, 'the mission ROLE was used as a capability key').not.toContain('mission');
+  });
+
+  it('hands the template recipe to the PLANNER, at the node whose capability matched', async () => {
     // The difference between guiding a split and logging that one could have
     // been guided.
     const store = templateStore({ templateId: 'tpl-1', recipe: 'One subtask per item.' });
-    const planner = recordingPlanner(seams());
+    const planner = recordingPlanner(nestingSeams());
 
-    await runMission(mission(), { ...planner.seams, templates: store.seam } as never, { now: () => AT });
+    await runMission(nestedMission(), { ...planner.seams, templates: store.seam } as never, { now: () => AT });
 
-    expect(planner.seen[0]?.templateRecipe, 'the template was looked up and never used').toBe('One subtask per item.');
+    // The mission's own split gets NO recipe, because a mission has no kind of
+    // work to match; the capability-carrying node below it does. Both halves,
+    // so a rule that simply always passed the recipe would fail here.
+    expect(planner.seen[0]?.templateRecipe, 'task zero was guided by a template').toBeUndefined();
+    expect(
+      planner.seen.slice(1).map((call) => call.templateRecipe),
+      'the template was looked up and never used',
+    ).toContain('One subtask per item.');
   });
 
-  it('records the template use on the ledger', async () => {
+  it('records the template use on the ledger, carrying the capability it matched', async () => {
     const store = templateStore({ templateId: 'tpl-1', recipe: 'One subtask per item.' });
 
-    const result = await runMission(mission(), { ...seams(), templates: store.seam } as never, { now: () => AT });
+    const result = await runMission(
+      nestedMission(), { ...nestingSeams(), templates: store.seam } as never, { now: () => AT },
+    );
 
     const used = result.trail.find((e) => e.type === 'decomposition.template_used');
     expect(used?.payload['templateId']).toBe('tpl-1');
+    expect(used?.payload['capability'], 'the event named the role rather than the work').toBe(CAPABILITY);
   });
 
   it('folds the Gate A outcome back into the template record', async () => {
@@ -218,22 +344,23 @@ describe('R31 AC-2 — a template guides the split and accumulates evidence', ()
     // that makes them learnable rather than merely reusable.
     const store = templateStore({ templateId: 'tpl-1', recipe: 'One subtask per item.' });
 
-    await runMission(mission(), { ...seams(), templates: store.seam } as never, { now: () => AT });
+    await runMission(nestedMission(), { ...nestingSeams(), templates: store.seam } as never, { now: () => AT });
 
     expect(store.outcomes).toHaveLength(1);
     expect(store.outcomes[0]?.templateId).toBe('tpl-1');
   });
 
   it('scores the template on whether the split SURVIVED Gate A', async () => {
-    // This fixture's plan is a one-child GATE split, which the sixth clause
-    // faults — so the guided split did NOT survive, and the template must be
-    // scored down. A recorder hard-coding `true` passes every other test here.
+    // With the gate deciding, the depth-1 plan is a one-child GATE split, which
+    // R33's sixth clause faults — so the guided split did NOT survive and the
+    // template must be scored down. A recorder hard-coding `true` passes every
+    // other test in this file.
     const store = templateStore({ templateId: 'tpl-1', recipe: 'One subtask per item.' });
 
     await runMission(
-      mission(),
+      nestedMission(),
       {
-        ...seams({ async assess() { return { keepWhole: false, rationale: 'divisible' }; } }),
+        ...nestingSeams({ async assess() { return { keepWhole: false, rationale: 'divisible' }; } }),
         templates: store.seam,
       } as never,
       { now: () => AT },
@@ -242,16 +369,23 @@ describe('R31 AC-2 — a template guides the split and accumulates evidence', ()
     expect(store.outcomes[0]?.survived, 'a rejected split was recorded as a success').toBe(false);
   });
 
-  it('LEARNS a template from a split that survived with no template guiding it', async () => {
+  it('LEARNS a template from a split that survived, keyed on the capability', async () => {
     // Without this the criterion's "given" is unreachable: nothing else creates
     // a template, so the store would stay empty forever and every lookup would
     // return null.
+    //
+    // The KEY is asserted, not just the count. Storing under the mission role is
+    // how the live store came to hold a single osmosis recipe that answered for
+    // every mission — the write side of the same defect.
     const store = templateStore(null);
 
-    const result = await runMission(mission(), { ...seams(), templates: store.seam } as never, { now: () => AT });
+    const result = await runMission(
+      nestedMission(), { ...nestingSeams(), templates: store.seam } as never, { now: () => AT },
+    );
 
     expect(store.remembered, 'a surviving split taught the system nothing').toHaveLength(1);
-    expect(store.remembered[0]?.recipe).toMatch(/State it\./);
+    expect(store.remembered[0]?.capability, 'a template was stored under the mission ROLE').toBe(CAPABILITY);
+    expect(store.remembered[0]?.recipe).toMatch(/State one fact\./);
     expect(result.trail.some((e) => e.type === 'decomposition.template_learned')).toBe(true);
   });
 
@@ -261,9 +395,9 @@ describe('R31 AC-2 — a template guides the split and accumulates evidence', ()
     const store = templateStore(null);
 
     await runMission(
-      mission(),
+      nestedMission(),
       {
-        ...seams({ async assess() { return { keepWhole: false, rationale: 'divisible' }; } }),
+        ...nestingSeams({ async assess() { return { keepWhole: false, rationale: 'divisible' }; } }),
         templates: store.seam,
       } as never,
       { now: () => AT },
@@ -274,9 +408,9 @@ describe('R31 AC-2 — a template guides the split and accumulates evidence', ()
 
   it('DISTRACTOR: a mission with NO template store runs exactly as before', async () => {
     const withStore = await runMission(
-      mission(), { ...seams(), templates: templateStore(null).seam } as never, { now: () => AT },
+      nestedMission(), { ...nestingSeams(), templates: templateStore(null).seam } as never, { now: () => AT },
     );
-    const without = await runMission(mission(), seams(), { now: () => AT });
+    const without = await runMission(nestedMission(), nestingSeams(), { now: () => AT });
 
     expect(without.outcome).toBe(withStore.outcome);
     expect(without.trail.some((e) => e.type === 'decomposition.template_used')).toBe(false);
