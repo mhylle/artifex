@@ -1,0 +1,148 @@
+/**
+ * R33 AC-0's sixth clause, in the loop — the producer's test.
+ *
+ * `gateA` audits the decompose-or-delegate decision, and `gate-a-full.test.ts`
+ * proves the audit. This file proves the loop actually FEEDS it: two mutants
+ * survived all 589 tests without it — one that stopped passing the decision to
+ * Gate A entirely, and one that reported a gate which had THROWN as having
+ * decided. Both are the shape this project has found twelve times, and neither
+ * was visible from the pure function's own tests.
+ */
+import type { TaskContract } from '@artifex/shared-types';
+import { describe, expect, it } from 'vitest';
+
+import { runMission } from './mission-loop.js';
+import type { MissionSeams } from './mission-loop.js';
+
+const AT = '2026-07-31T09:00:00.000Z';
+const MISSION_ID = '5c9e1d73-2a48-4b06-9f31-7e2a4c8b5d60';
+
+function mission(): TaskContract {
+  return {
+    taskId: MISSION_ID, missionId: MISSION_ID, parentTaskId: null,
+    category: 'mission', depth: 0,
+    objective: 'State one fact.',
+    acceptanceCriteria: [{ criterionId: 'm-1', statement: 'The fact is stated.' }],
+    boundaries: { outOfScope: ['Everything else.'], siblingOwners: [] },
+    inputs: { entitlements: [], toolEntitlements: [], pinnedDecisions: [] },
+    dependencies: { consumesTaskIds: [], mayRequest: [] },
+    stoppingConditions: {
+      doneWhen: ['Stated.'], stopTryingWhen: ['No source.'], maxAttempts: 3, stallLimit: 2,
+    },
+    budget: { floor: 1, ceiling: 40, unit: 'effort-units' },
+    escalationPolicy: { ladder: ['retry_higher_tier'], humanAt: null },
+    verificationPlan: { depth: 'single', requiredAgreement: null },
+    blastRadius: 'low', autonomyDial: 'autonomous', createdAt: AT,
+  };
+}
+
+/** A planner that proposes exactly ONE subtask — the incoherent shape. */
+function seams(gate?: MissionSeams['decompositionGate']): MissionSeams {
+  return {
+    planner: {
+      async propose() {
+        return {
+          subtasks: [{
+            objective: 'State it.', category: 'stating',
+            acceptanceCriteria: [{ criterionId: 'm-1', statement: 'The fact is stated.' }],
+            outOfScope: ['Else.'], blastRadius: 'low' as const, effortShare: 0.9,
+          }],
+        };
+      },
+    },
+    coverageJudge: {
+      async assess({ parent, children }) {
+        return {
+          coverage: parent.acceptanceCriteria.map((c) => ({
+            criterionId: c.criterionId, coveredByTaskIds: children.map((k) => k.taskId),
+          })),
+        };
+      },
+    },
+    planJudge: {
+      async audit({ children }) {
+        return {
+          tasks: children.map((c) => ({ taskId: c.taskId, atomic: true, detail: 'ok' })),
+          untestable: [], overlaps: [],
+        };
+      },
+    },
+    intentJudge: { async assess() { return { servesIntent: true, detail: 'ok', redFlags: [] }; } },
+    registry: { async bestForCategory() { return null; } },
+    author: { async design() { return { roleInstructions: 'State it.', capabilities: ['text'] }; } },
+    clarityJudge: { async assess() { return { restatement: 'Do it.', ambiguities: [] }; } },
+    work: {
+      async execute() {
+        return { deliverable: { answer: 'x' }, actions: [], consulted: [], assumptions: [], effortSpent: 2 };
+      },
+    },
+    completionJudge: {
+      async assess({ contract }) {
+        return {
+          criteria: contract.acceptanceCriteria.map((c) => ({ criterionId: c.criterionId, met: true, detail: 'ok' })),
+          redFlags: [],
+        };
+      },
+    },
+    reconciler: { async reconcile({ children }) { return { deliverable: { n: children.length }, conflicts: [] }; } },
+    ...(gate === undefined ? {} : { decompositionGate: gate }),
+  };
+}
+
+const gateAVerdict = (trail: readonly { type: string; payload: Record<string, unknown> }[]) =>
+  trail.find((e) => e.type === 'gate_a.verdict_issued');
+
+describe('R33 AC-0 — the loop feeds Gate A the decomposition decision', () => {
+  it('records WHO decided, not just what was decided', async () => {
+    // `decision: split` was recorded on both paths from the start; `decidedBy`
+    // is what makes the two distinguishable by a field rather than by matching
+    // rationale prose.
+    const result = await runMission(
+      mission(),
+      seams({ async assess() { return { keepWhole: false, rationale: 'genuinely divisible' }; } }),
+      { now: () => AT },
+    );
+
+    const decided = result.trail.find((e) => e.type === 'decomposition.decided');
+    expect(decided?.payload['decidedBy']).toBe('gate');
+  });
+
+  it('a GATE split producing one child is faulted by Gate A', async () => {
+    // The clause reaching production. Without the loop passing the decision
+    // through, this mission passes Gate A and the clause is decoration.
+    const result = await runMission(
+      mission(),
+      seams({ async assess() { return { keepWhole: false, rationale: 'genuinely divisible' }; } }),
+      { now: () => AT },
+    );
+
+    const verdict = gateAVerdict(result.trail);
+    expect(verdict?.payload['outcome'], 'Gate A never saw the gate decision').toBe('fail');
+    expect(JSON.stringify(verdict?.payload)).toMatch(/decompose-or-delegate/i);
+  });
+
+  it('DISTRACTOR: with NO gate wired the same plan passes', async () => {
+    // The configuration that forced the first version's revert, asserted end to
+    // end rather than only at the pure function. 53 tests fail if this regresses.
+    const result = await runMission(mission(), seams(), { now: () => AT });
+
+    const decided = result.trail.find((e) => e.type === 'decomposition.decided');
+    expect(decided?.payload['decidedBy']).toBe('default');
+    expect(gateAVerdict(result.trail)?.payload['outcome']).toBe('pass');
+  });
+
+  it('DISTRACTOR: a gate that THROWS did not decide, and its plan is not faulted', async () => {
+    // A mutant reporting a thrown gate as `decidedBy: gate` survived all 589
+    // tests. The loop already falls back to splitting when the gate errors —
+    // faulting the planner for that split would blame it for an outage.
+    const result = await runMission(
+      mission(),
+      seams({ async assess() { throw new Error('gate backend unavailable'); } }),
+      { now: () => AT },
+    );
+
+    const decided = result.trail.find((e) => e.type === 'decomposition.decided');
+    expect(decided?.payload['decidedBy'], 'a gate that errored was recorded as having decided').toBe('default');
+    expect(gateAVerdict(result.trail)?.payload['outcome'], 'the planner was faulted for a gate outage').toBe('pass');
+  });
+});

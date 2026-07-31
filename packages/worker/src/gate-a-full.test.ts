@@ -303,20 +303,109 @@ describe('R33 AC-0 — Gate A audits every clause the dossier names', () => {
 });
 
 /**
- * The SIXTH clause — "sane use of the decompose-or-delegate gate" — is NOT built,
- * and this is why, rather than a silent omission.
+ * The SIXTH clause — "sane use of the decompose-or-delegate gate" (R33 AC-0).
  *
- * The check itself is clear and was written: a "split" producing exactly ONE
- * child is the gate's decision made incoherently — it pays a planning round-trip
- * and a fold-up to hand the same work to the same single agent. It was reverted
- * because 32 existing fixtures legitimately produce one-child splits: the loop's
- * documented default when NO decompose-or-delegate gate is wired is "always
- * split", so a single-criterion mission with no gate splits into one child. The
- * clause is right for production, where the gate IS wired, and wrong for a
- * configuration the loop deliberately supports.
+ * Written, REVERTED once, and now built on a different footing. The revert is
+ * worth keeping in view because the second attempt is shaped by it.
  *
- * Resolving it means deciding whether the no-gate default should still be
- * "always split" now that R31's gate exists in the runtime — a question about
- * R31's default, not about Gate A. Carried as unsatisfied on R33 AC-0 rather
- * than claimed.
+ * The check is clear: a "split" producing exactly ONE child is the gate's
+ * decision made incoherently — it pays a planning round-trip and a fold-up to
+ * hand the same work to the same single agent. Whatever the right call was, keep
+ * whole or split for real, this is neither.
+ *
+ * The first implementation applied it unconditionally and broke 32 fixtures. The
+ * loop's documented default when NO gate is wired is "always split", so a
+ * single-criterion mission with no gate splits into exactly one child — and the
+ * clause failed a configuration the loop deliberately supports. Right for
+ * production, wrong for a supported default.
+ *
+ * The fix is NOT to change R31's default, which is a separate question the
+ * defect (`bf62266d`) was explicit about. It is to scope the clause to plans
+ * where a gate ACTUALLY DECIDED. The loop already records `decomposition.decided`
+ * on both paths; what it did not record was WHO decided, so the two cases were
+ * distinguishable only by matching rationale prose. `decidedBy` makes that
+ * structural, and Gate A audits the gate's use only where the gate was used.
  */
+describe('R33 AC-0 — sane use of the decompose-or-delegate gate', () => {
+  const oneChild = [child(1)];
+
+  it('faults a GATE decision to split that produced exactly one child', async () => {
+    const verdict = await gateA(parentOf(oneChild), oneChild, coverAll(), cleanPlan(), META, {
+      decomposition: { decidedBy: 'gate', keepWhole: false },
+    });
+
+    expect(verdict.outcome).toBe('fail');
+    expect(clauses(verdict).join(' ')).toMatch(/decompose-or-delegate|gate/i);
+  });
+
+  it('names what was incoherent, not merely that something was', async () => {
+    // R33 AC-1: a rejection returns a structured verdict naming which clause
+    // failed, so the Orchestrator can re-split from it rather than retry blind.
+    const verdict = await gateA(parentOf(oneChild), oneChild, coverAll(), cleanPlan(), META, {
+      decomposition: { decidedBy: 'gate', keepWhole: false },
+    });
+
+    const finding = verdict.findings.find((f) => /gate/i.test(f.failingStep));
+    expect(String(finding?.detail)).toMatch(/one child|single child|exactly one/i);
+  });
+
+  it('DISTRACTOR: the DEFAULT split into one child is not faulted', async () => {
+    // The configuration that forced the revert. With no gate wired the loop
+    // splits by design and records that it did; faulting the planner for the
+    // loop's own default would reject a supported setup — and it is what broke
+    // 32 fixtures the first time.
+    const verdict = await gateA(parentOf(oneChild), oneChild, coverAll(), cleanPlan(), META, {
+      decomposition: { decidedBy: 'default', keepWhole: false },
+    });
+
+    expect(verdict.outcome, 'the no-gate default was faulted as an incoherent gate decision').toBe('pass');
+  });
+
+  it('DISTRACTOR: a caller supplying NO decomposition decision is not faulted', async () => {
+    // Every caller predating this clause, including the 32 fixtures. Absent is
+    // not the same as "a gate decided" — Gate A cannot audit a decision nobody
+    // told it about, and inventing one would be the opposite of this criterion.
+    const verdict = await gateA(parentOf(oneChild), oneChild, coverAll(), cleanPlan(), META);
+
+    expect(verdict.outcome).toBe('pass');
+  });
+
+  it('DISTRACTOR: a GATE split into SEVERAL children is sane and passes', async () => {
+    // The rule must be able to say yes. A clause that faulted every gate
+    // decision would make the gate unusable rather than audited.
+    const many = [child(1), child(2)];
+
+    const verdict = await gateA(parentOf(many), many, coverAll(), cleanPlan(), META, {
+      decomposition: { decidedBy: 'gate', keepWhole: false },
+    });
+
+    expect(verdict.outcome).toBe('pass');
+  });
+
+  it('faults a plan that SPLIT when the gate said keep whole', async () => {
+    // The other direction of "sane use", and a real one: the loop enforces
+    // keep-whole by running the parent as a leaf, so a multi-child plan carrying
+    // a keep-whole decision means the plan and the decision disagree. Auditing
+    // only the one-child case would leave the gate's decision unenforced in the
+    // direction where it actually withholds work.
+    const many = [child(1), child(2)];
+
+    const verdict = await gateA(parentOf(many), many, coverAll(), cleanPlan(), META, {
+      decomposition: { decidedBy: 'gate', keepWhole: true },
+    });
+
+    expect(verdict.outcome).toBe('fail');
+    expect(clauses(verdict).join(' ')).toMatch(/gate/i);
+  });
+
+  it('DISTRACTOR: keep-whole with ONE child is the gate being honoured, not defied', async () => {
+    // A kept-whole parent runs as a single leaf. Faulting that would reject the
+    // gate working exactly as intended — and it is the shape a naive "one child
+    // is always wrong" rule gets backwards.
+    const verdict = await gateA(parentOf(oneChild), oneChild, coverAll(), cleanPlan(), META, {
+      decomposition: { decidedBy: 'gate', keepWhole: true },
+    });
+
+    expect(verdict.outcome, 'the gate being honoured was faulted').toBe('pass');
+  });
+});

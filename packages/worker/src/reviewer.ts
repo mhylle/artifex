@@ -96,12 +96,36 @@ export interface CompletionJudge {
  * retrying a task that was specified wrong just burns budget rehearsing the same
  * mistake. A spec fault jumps straight to re-decomposition.
  */
+/** What Gate A needs beyond the plan itself (R33 AC-0's sixth clause). */
+export interface GateAOptions {
+  /**
+   * The decompose-or-delegate decision this plan was made under, if one was
+   * made (R31).
+   *
+   * `decidedBy` is the field that matters, and it exists because the first
+   * version of the sixth clause had to be reverted without it. The loop splits
+   * by default when no gate is wired and records that it did — so a one-child
+   * plan is incoherent when a GATE chose to split, and entirely correct when the
+   * loop's documented default did. Distinguishing them by matching rationale
+   * prose would be a convention; a field is a fact.
+   *
+   * Absent means no decision was reported, and Gate A audits nothing it was not
+   * told about — inventing a decision to audit would be the opposite of this
+   * criterion.
+   */
+  readonly decomposition?: {
+    readonly decidedBy: 'gate' | 'default';
+    readonly keepWhole: boolean;
+  };
+}
+
 export async function gateA(
   parent: TaskContract,
   children: readonly TaskContract[],
   judge: CoverageJudge,
   planJudge: PlanJudge,
   meta: VerdictMeta,
+  options: GateAOptions = {},
 ): Promise<Verdict> {
   if (children.length === 0) {
     throw new Error(`Gate A on ${parent.taskId}: no children — an empty decomposition cannot cover anything`);
@@ -234,6 +258,38 @@ export async function gateA(
         `The declared dependencies form a cycle (${cycle.join(' → ')}) — the plan cannot execute in any order. ` +
         `Refused here rather than at execution time, where it would be a scheduler waiting forever.`,
     });
+  }
+
+  // ---- sane use of the decompose-or-delegate gate (R33 AC-0, clause six) -----
+  // Audited ONLY where a gate actually decided. The loop's no-gate default also
+  // "splits", and faulting the planner for the loop's own default is what forced
+  // the first version of this clause to be reverted (`bf62266d`).
+  const decision = options.decomposition;
+  if (decision?.decidedBy === 'gate') {
+    if (!decision.keepWhole && children.length === 1) {
+      findings.push({
+        criterionId: parent.acceptanceCriteria[0]?.criterionId ?? 'plan',
+        errorClass: 'specification_fault' as const,
+        failingStep: 'Gate A decompose-or-delegate check',
+        detail:
+          'The gate chose to SPLIT and the plan produced exactly one child. That is the decision made ' +
+          'incoherently: it pays a planning round-trip and a fold-up to hand the same work to the same ' +
+          'single agent. Either the work was atomic and the gate should have kept it whole, or it was ' +
+          'not and the split should have produced siblings.',
+      });
+    }
+
+    if (decision.keepWhole && children.length > 1) {
+      findings.push({
+        criterionId: parent.acceptanceCriteria[0]?.criterionId ?? 'plan',
+        errorClass: 'specification_fault' as const,
+        failingStep: 'Gate A decompose-or-delegate check',
+        detail:
+          `The gate decided to KEEP WHOLE and the plan split into ${children.length} children anyway. ` +
+          'The gate withholds atomization from work that sequential entanglement damages, so a plan ' +
+          'that overrides it has discarded the one judgement made specifically about whether to split.',
+      });
+    }
   }
 
   return {

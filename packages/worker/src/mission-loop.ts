@@ -925,6 +925,12 @@ export async function runMission(
     // could reach a different answer than the tree that was actually built.
     const alreadyDecided = prior.childrenOf.has(parent.taskId) || prior.verified.has(parent.taskId);
     let keepWhole = false;
+    // WHO decided, carried to Gate A so it can audit the gate's use only where
+    // the gate was used (R33 AC-0, clause six). Without this the loop's no-gate
+    // default and a real gate decision are distinguishable only by matching
+    // rationale prose, which is what forced the clause's first version to be
+    // reverted (`bf62266d`).
+    let decidedBy: 'gate' | 'default' | null = null;
 
     if (!alreadyDecided) {
       let verdict: { keepWhole: boolean; rationale: string };
@@ -934,19 +940,25 @@ export async function runMission(
         // shape of the "value written that nothing reads" defects this project
         // has shipped repeatedly, inverted.
         verdict = { keepWhole: false, rationale: 'No decompose-or-delegate gate configured — defaulting to split.' };
+        decidedBy = 'default';
       } else {
         try {
           verdict = await seams.decompositionGate.assess({ contract: parent });
+          decidedBy = 'gate';
         } catch (error) {
           // A gate that cannot answer must not cost the mission: splitting is
           // the behaviour every caller had before the gate existed.
           verdict = { keepWhole: false, rationale: `Gate could not be evaluated (${describe(error)}) — defaulting to split.` };
+          // A gate that could not answer did NOT decide. Auditing its "use"
+          // would fault the planner for an outage.
+          decidedBy = 'default';
         }
       }
 
       keepWhole = verdict.keepWhole;
       record(parent.taskId, 'decision', 'decomposition.decided', 'orchestrator', {
         decision: keepWhole ? 'keep_whole' : 'split',
+        decidedBy,
         rationale: verdict.rationale,
         objective: parent.objective,
         // The budget the decision implies, so a reviewer can see what "a larger
@@ -1029,7 +1041,12 @@ export async function runMission(
 
     let aVerdict;
     try {
-      aVerdict = await gateA(parent, children, seams.coverageJudge, seams.planJudge, verdictMeta(seq));
+      aVerdict = await gateA(parent, children, seams.coverageJudge, seams.planJudge, verdictMeta(seq),
+        // Only when this run actually made the decision. On a RESUME the
+        // decision is already in the trail and `decidedBy` is null — auditing a
+        // decision this run did not make would judge the plan against a
+        // judgement it cannot see.
+        decidedBy === null ? {} : { decomposition: { decidedBy, keepWhole } });
     } catch (error) {
       return fail('Gate A could not be evaluated', [describe(error)]);
     }
