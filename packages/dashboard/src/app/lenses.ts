@@ -225,12 +225,30 @@ export interface ExperimentView {
   readonly outcome: 'kept' | 'reverted' | null;
 }
 
+/**
+ * An amendment petition, beside the sealed-bench verdict that judged it.
+ *
+ * The two are separate ledger events on purpose: `learning.proposal_emitted` is
+ * what the Learning Agent ARGUED, `learning.petition_evaluated` is what the
+ * sealed bench ANSWERED. Collapsing them at the source would let a reader
+ * mistake the learner's own filing for a judgement made against evidence it
+ * never chose — so they are paired here, in the projection, exactly as an
+ * experiment is paired with its resolution.
+ */
+export interface PetitionView {
+  readonly event: TimedEvent;
+  /** `null` while the petition is filed but not yet judged. */
+  readonly verdict: 'supported' | 'unsupported' | 'unevaluated' | null;
+  readonly supported: number;
+  readonly evaluated: number;
+}
+
 export interface LearningView {
   readonly experiments: readonly ExperimentView[];
   readonly adoptions: readonly TimedEvent[];
   readonly reverts: readonly TimedEvent[];
   /** Amendment petitions — PROPOSALS. Never rendered as applied changes. */
-  readonly petitions: readonly TimedEvent[];
+  readonly petitions: readonly PetitionView[];
   /** Templates the swarm has learned (R31 AC-2) — the library growing. */
   readonly libraryGrowth: readonly TimedEvent[];
 }
@@ -257,6 +275,12 @@ export interface LearningView {
  */
 export function buildLearningView(events: readonly TimedEvent[]): LearningView {
   const of = (type: string) => events.filter((e) => e.type === type);
+
+  const verdictOf = new Map(
+    of('learning.petition_evaluated').map(
+      (e) => [String((e.payload as { petitionId?: unknown }).petitionId), e] as const,
+    ),
+  );
 
   const resolutions = of('fast_loop.hot_fix_resolved');
   const outcomeOf = new Map(
@@ -303,7 +327,26 @@ export function buildLearningView(events: readonly TimedEvent[]): LearningView {
     experiments,
     adoptions: resolutions.filter(outcomeIs('kept')),
     reverts: resolutions.filter(outcomeIs('reverted')),
-    petitions: of('learning.proposal_emitted'),
+    // Paired with the verdict that judged it, keyed on the petition's own event
+    // id (defect `78e4e5cf`). An operator ratifies out-of-band, and the point of
+    // the sealed slice is that their decision rests on evidence the learner
+    // could not choose — so showing the argument without the answer inverts what
+    // the slice is for.
+    //
+    // Matched by id rather than by recency: a mission can raise more than one
+    // weak spot over its life, and "the latest verdict" would attach one
+    // petition's judgement to another. A verdict with no petition in this trail
+    // invents nothing, the same rule resolutions already follow.
+    petitions: of('learning.proposal_emitted').map((event): PetitionView => {
+      const verdict = verdictOf.get(event.eventId);
+      const p = verdict?.payload as { verdict?: unknown; supported?: unknown; evaluated?: unknown } | undefined;
+      return {
+        event,
+        verdict: p === undefined ? null : (String(p.verdict) as PetitionView['verdict']),
+        supported: Number(p?.supported ?? 0),
+        evaluated: Number(p?.evaluated ?? 0),
+      };
+    }),
     libraryGrowth: of('decomposition.template_learned'),
   };
 }

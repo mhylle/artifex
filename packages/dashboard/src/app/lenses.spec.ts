@@ -270,6 +270,86 @@ describe('R19 AC-2 — learning observatory lens', () => {
     expect(view.petitions).toEqual([]);
   });
 
+  /**
+   * The sealed verdict beside the petition it judges (defect `78e4e5cf`).
+   *
+   * The petition path records TWO events: `learning.proposal_emitted`, which is
+   * what the Learning Agent ARGUED, and `learning.petition_evaluated`, which is
+   * what the sealed bench ANSWERED. The lens rendered only the first, so an
+   * operator deciding ratification saw the learner's own case and not the
+   * independent evidence the sealed slice exists to provide — which inverts what
+   * that slice is for.
+   *
+   * They stay separate events on the ledger deliberately: collapsing them would
+   * let a reader mistake the learner's own filing for a judgement made against
+   * evidence it never chose. Pairing them belongs in the PROJECTION, which is
+   * exactly how `experiments` already pairs with its resolution.
+   */
+  const evaluated = (petitionId: string, verdict: string, supported: number, evaluatedCount: number) =>
+    ev('learning.petition_evaluated', null, {
+      petitionId, verdict, supported, evaluated: evaluatedCount, slice: 'sealed',
+    }, 'learning', '2026-07-30T09:03:00.000Z');
+
+  it('pairs a petition with the sealed-bench verdict that judged it', () => {
+    const petition = ev('learning.proposal_emitted', null,
+      { title: 'loosen budget enforcement', targets: 'constitution' }, 'learning');
+    const view = buildLearningView([...trail(), petition, evaluated(petition.eventId, 'supported', 1, 1)]);
+
+    expect(view.petitions).toHaveLength(1);
+    expect(view.petitions[0]!.verdict).toBe('supported');
+    expect(view.petitions[0]!.supported).toBe(1);
+    expect(view.petitions[0]!.evaluated).toBe(1);
+  });
+
+  it('reports UNSUPPORTED as itself, not as an absence', () => {
+    // Both sides of the discriminator. A projection that only ever surfaced
+    // `supported` would read as "no verdict yet" for the case where the bench
+    // actively argued AGAINST amending, which is the outcome that most needs to
+    // reach the person deciding.
+    const petition = ev('learning.proposal_emitted', null, { title: 't' }, 'learning');
+    const view = buildLearningView([...trail(), petition, evaluated(petition.eventId, 'unsupported', 1, 3)]);
+
+    expect(view.petitions[0]!.verdict).toBe('unsupported');
+    expect(view.petitions[0]!.supported).toBe(1);
+    expect(view.petitions[0]!.evaluated).toBe(3);
+  });
+
+  it('an UNJUDGED petition reads as null, never as supported', () => {
+    // The petition is filed before the verdict is appended, so this state is
+    // real and momentary. Defaulting it to `supported` would show an operator a
+    // green light nobody gave.
+    const petition = ev('learning.proposal_emitted', null, { title: 't' }, 'learning');
+    const view = buildLearningView([...trail(), petition]);
+
+    expect(view.petitions).toHaveLength(1);
+    expect(view.petitions[0]!.verdict).toBeNull();
+  });
+
+  it('DISTRACTOR: a verdict for a DIFFERENT petition does not attach to this one', () => {
+    // Two petitions in one trail is ordinary — a mission can raise more than one
+    // weak spot over its life. Matching on the petition id rather than on
+    // "the most recent verdict" is what keeps them apart.
+    const mine = ev('learning.proposal_emitted', null, { title: 'mine' }, 'learning');
+    const theirs = ev('learning.proposal_emitted', null, { title: 'theirs' }, 'learning');
+    const view = buildLearningView([
+      ...trail(), mine, theirs, evaluated(theirs.eventId, 'supported', 2, 2),
+    ]);
+
+    const forMine = view.petitions.find((p) => (p.event.payload as { title?: string }).title === 'mine');
+    const forTheirs = view.petitions.find((p) => (p.event.payload as { title?: string }).title === 'theirs');
+    expect(forMine!.verdict, 'a verdict leaked onto the wrong petition').toBeNull();
+    expect(forTheirs!.verdict).toBe('supported');
+  });
+
+  it('DISTRACTOR: an orphan verdict does not invent a petition to attach to', () => {
+    // The same rule the resolutions already follow: an evaluation can arrive for
+    // a petition filed in an earlier mission, and this lens is scoped to one
+    // trail. Fabricating a parent would show a petition nobody filed.
+    const view = buildLearningView([...trail(), evaluated('e-orphan', 'supported', 1, 1)]);
+
+    expect(view.petitions).toEqual([]);
+  });
+
   it('surfaces library growth as templates are learned', () => {
     // Named in the requirement's own description of this lens ("library
     // growth"), and now a thing the system actually does (R31 AC-2).

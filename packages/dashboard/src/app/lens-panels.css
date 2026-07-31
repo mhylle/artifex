@@ -27,3 +27,11 @@ ul, ol { list-style: none; padding: 0; margin: 0; display: grid; gap: .35rem; }
 .seq { color: #888; }
 .family { color: #6a4b9c; }
 .type { color: #33477d; }
+
+/* The sealed-bench verdict beside the petition it judges (defect `78e4e5cf`).
+   The colour carries no meaning on its own: the verdict word is always present
+   in the text, so an operator who cannot distinguish the hues still reads it. */
+.petitions .verdict { display: block; margin-bottom: .3rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+.petitions .verdict-supported { color: #2b6b45; }
+.petitions .verdict-unsupported { color: #8c3b3b; }
+.petitions .verdict-unevaluated, .petitions .verdict-pending { color: #7a6a3d; }
