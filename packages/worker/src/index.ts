@@ -19,6 +19,7 @@ import pg from 'pg';
 import { runMission } from './mission-loop.js';
 import { LedgerEvidenceSource } from './ledger-evidence.js';
 import { rankWeakSpots } from './science-loop.js';
+import { casesFromTrail } from './bench-producer.js';
 import { petitionFromWeakSpots, petitionRefusal } from './petition.js';
 import { ProposalEmitter } from './proposal-emitter.js';
 import { buildWorkerSeams } from './worker-seams.js';
@@ -165,6 +166,31 @@ export async function main(): Promise<void> {
         `< mission ${contract.missionId}: ${result.outcome} ` +
           `(${result.trail.length} events, ${result.escalations.length} escalations)`,
       );
+
+      // ---- verified tasks become bench cases (R25 AC-0, defect `c1b3ae71`) --
+      // `bench.record` had no production caller, so the bench held only what
+      // scripts had put there and everything downstream starved: the Reviewer's
+      // calibration probes (R35), the science loop's cases (R27), and the
+      // sealed-bench evaluation R29 AC-0 needs.
+      //
+      // Before the mining below, so a mission's own verified work is available
+      // to the next mission's science rather than one mission late.
+      //
+      // Failure is swallowed for the same reason the learning pass is: a case
+      // that could not be banked is a missing benchmark, never a failed mission.
+      try {
+        const banked = new Map<string, number>();
+        for (const existing of await bench.list()) {
+          banked.set(existing.capability, (banked.get(existing.capability) ?? 0) + 1);
+        }
+        const cases = casesFromTrail(result.trail, { sealedSoFar: banked });
+        for (const bankable of cases) await bench.record(bankable);
+        if (cases.length > 0) {
+          console.log(`  banked ${cases.length} bench case(s): ${cases.map((c) => c.slice).join(', ')}`);
+        }
+      } catch (cause) {
+        console.error('! banking bench cases failed:', String(cause));
+      }
 
       // ---- the science loop mines, now that there is history (R27 AC-0) -----
       // Run AFTER the mission's own events are durable, so this mission counts
