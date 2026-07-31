@@ -161,43 +161,124 @@ describe('R19 — ledger explorer lens', () => {
   });
 });
 
-describe('R19 — learning observatory lens', () => {
+describe('R19 AC-2 — learning observatory lens', () => {
+  /**
+   * REWRITTEN IN PLACE, not replaced. The buckets — experiments, adoptions,
+   * reverts, petitions — were always the right vocabulary. The SOURCES were
+   * wrong: the lens read `learning.experiment_started`, `learning.adopted`,
+   * `learning.reverted` and `learning.amendment_petitioned`, and **not one of
+   * those event types is emitted by anything in the system**. A grep across the
+   * worker and API finds no producer, and the live ledger holds none of them.
+   * The lens rendered four empty lists and would have forever.
+   *
+   * The earlier test said so honestly — "R26/R27 are unbuilt, so this lens has
+   * no experiments to display" — and that comment is now stale in the way that
+   * matters: both loops ARE built and emitting, under different names.
+   *
+   * What the system actually records:
+   *   `fast_loop.hot_fix_applied`   an experiment, carrying `bounds` and
+   *                                 `predictedEffect` — declared BEFORE the
+   *                                 outcome, which is what makes them
+   *                                 PRE-REGISTERED rather than reported.
+   *   `fast_loop.hot_fix_resolved`  `kept` or `reverted` — the ratchet.
+   *   `learning.proposal_emitted`   the propose-only emitter's petitions.
+   *   `decomposition.template_learned`  library growth.
+   */
+  const applied = (hotFixId: string, over: Record<string, unknown> = {}) =>
+    ev('fast_loop.hot_fix_applied', MISSION, {
+      hotFixId,
+      category: 'summarising',
+      criterionId: 'c-1',
+      bounds: { windowObservations: 4 },
+      predictedEffect: { baselineFailureRate: 0.75, predictedFailureRate: 0.1, basis: 'peer_criteria' },
+      ...over,
+    }, 'learning', '2026-07-30T09:01:00.000Z');
+
+  const resolved = (hotFixId: string, outcome: 'kept' | 'reverted') =>
+    ev('fast_loop.hot_fix_resolved', MISSION, {
+      hotFixId, outcome, reason: 'window closed',
+    }, 'learning', '2026-07-30T09:02:00.000Z');
+
+  it('shows an experiment IN FLIGHT with its pre-registered metrics', () => {
+    const view = buildLearningView([...trail(), applied('hf-1')]);
+
+    expect(view.experiments, 'a live experiment was not surfaced').toHaveLength(1);
+    const e = view.experiments[0]!;
+    expect(e.preRegistered.baselineFailureRate).toBeCloseTo(0.75, 5);
+    expect(e.preRegistered.predictedFailureRate).toBeCloseTo(0.1, 5);
+    expect(e.preRegistered.basis).toBe('peer_criteria');
+    expect(e.preRegistered.windowObservations).toBe(4);
+  });
+
+  it('an experiment is IN FLIGHT only until it resolves', () => {
+    // "Experiments in flight" is the criterion's own wording. A resolved
+    // experiment still happened, but showing it as running would make the lens
+    // claim work is underway that finished.
+    const view = buildLearningView([...trail(), applied('hf-1'), resolved('hf-1', 'kept')]);
+
+    expect(view.experiments.filter((e) => e.outcome === null), 'a resolved experiment still reads as in flight').toHaveLength(0);
+    expect(view.experiments[0]?.outcome).toBe('kept');
+  });
+
+  it('adoptions and reverts appear on the ratchet, each as itself', () => {
+    // BOTH values, because a projection that bucketed everything as an adoption
+    // would pass a test that only counted resolutions — and the fast loop's
+    // whole claim is that it undoes itself.
+    const view = buildLearningView([
+      ...trail(),
+      applied('hf-1'), resolved('hf-1', 'kept'),
+      applied('hf-2'), resolved('hf-2', 'reverted'),
+    ]);
+
+    expect(view.adoptions).toHaveLength(1);
+    expect(view.reverts).toHaveLength(1);
+  });
+
+  it('DISTRACTOR: an amendment petition is a PROPOSAL, never an adoption', () => {
+    // Invariant #4: the learner proposes and never ratifies. A lens that showed
+    // a petition as a change would misrepresent the constitution, and the
+    // separation belongs in the projection rather than in a CSS class.
+    const view = buildLearningView([
+      ...trail(),
+      ev('learning.proposal_emitted', null, { title: 'loosen the reviewer rubric', targets: 'constitution' }, 'learning'),
+    ]);
+
+    expect(view.petitions).toHaveLength(1);
+    expect(view.adoptions, 'a petition was rendered as an applied change').toHaveLength(0);
+    expect(view.reverts).toHaveLength(0);
+  });
+
+  it('DISTRACTOR: a resolution with no matching experiment is not invented into one', () => {
+    // Resolutions can arrive for an experiment applied in an earlier mission,
+    // and this lens is scoped to one trail. Fabricating a parent experiment
+    // would show pre-registered metrics nobody registered.
+    const view = buildLearningView([...trail(), resolved('hf-orphan', 'reverted')]);
+
+    expect(view.experiments).toHaveLength(0);
+    expect(view.reverts, 'the resolution itself is still real and still shown').toHaveLength(1);
+  });
+
   it('reports honestly that there is nothing to show when the loops have not run', () => {
-    // R26/R27 are unbuilt, so this lens has no experiments to display. Saying so
-    // is the correct rendering; inventing content would be the dashboard
-    // asserting something the ledger cannot justify.
+    // Kept from the original. An empty ledger must still render as empty —
+    // inventing content would be the dashboard asserting something the ledger
+    // cannot justify.
     const view = buildLearningView(trail());
 
     expect(view.experiments).toEqual([]);
     expect(view.adoptions).toEqual([]);
+    expect(view.reverts).toEqual([]);
     expect(view.petitions).toEqual([]);
   });
 
-  it('surfaces learning-family events when they exist', () => {
-    const withLearning = [
+  it('surfaces library growth as templates are learned', () => {
+    // Named in the requirement's own description of this lens ("library
+    // growth"), and now a thing the system actually does (R31 AC-2).
+    const view = buildLearningView([
       ...trail(),
-      ev('learning.experiment_started', null, { hypothesis: 'shorter prompts', metric: 'gate_b pass rate' }, 'learning'),
-      ev('learning.adopted', null, { change: 'shorter prompts' }, 'learning'),
-    ];
+      ev('decomposition.template_learned', MISSION, { templateId: 'tpl-1', capability: 'comparing' }, 'learning'),
+    ]);
 
-    const view = buildLearningView(withLearning);
-
-    expect(view.experiments).toHaveLength(1);
-    expect(view.adoptions).toHaveLength(1);
-  });
-
-  it('DISTRACTOR: an amendment petition is listed as a PROPOSAL, never as applied', () => {
-    // Invariant #4: the learner proposes, it never ratifies. A lens that showed
-    // a petition as a change would misrepresent the constitution.
-    const withPetition = [
-      ...trail(),
-      ev('learning.amendment_petitioned', null, { target: 'reviewer rubric' }, 'learning'),
-    ];
-
-    const view = buildLearningView(withPetition);
-
-    expect(view.petitions).toHaveLength(1);
-    expect(view.adoptions).toHaveLength(0);
+    expect(view.libraryGrowth).toHaveLength(1);
   });
 });
 

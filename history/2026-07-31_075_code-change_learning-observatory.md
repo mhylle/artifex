@@ -1,0 +1,21 @@
+# 2026-07-31 · 075 · code-change · The learning observatory reads events that exist — R19 satisfied, phases pillar green
+
+**What:** the observatory lens was projecting four event types **none of which anything emits**. Rewritten in place against the events the system actually records, and every lens driven in a real Chrome browser. R19 AC-2 satisfied, R19 satisfied, P19 completed — **all 51 phases now complete**.
+
+**The dead projection.** `buildLearningView` bucketed `learning.experiment_started`, `learning.adopted`, `learning.reverted` and `learning.amendment_petitioned`. A grep across the worker and API finds no producer for any of them, and the live ledger holds zero rows of all four. The lens rendered four empty lists and would have forever — the same dead-mechanism shape this project has found thirteen times, in a different language. Its own empty-state message blamed "R26/R27 are not built yet", which had gone stale the moment both loops shipped.
+
+**Rewritten in place, not replaced.** The buckets were always the right vocabulary; only the sources were wrong. It now reads `fast_loop.hot_fix_applied` (an experiment carrying `bounds` and `predictedEffect`, declared **before** any result — which is what makes them *pre-registered* rather than reported), `fast_loop.hot_fix_resolved` (`kept`/`reverted` — the ratchet), `learning.proposal_emitted` (petitions), and `decomposition.template_learned` (library growth, named in the requirement's own description of this lens).
+
+**Live in Chrome, all four lenses on real missions:** workforce showing 3 staffed with design+version, tier, held task, runtime and compliance; timeline showing 2 swimlanes with waited/ran and the ordered event sequence; ledger explorer at "16 of 16 events" with its filters; and the observatory showing the *real* revert from mission `90f2387f` and the *real* template learned by `3c0923dc`.
+
+**The in-flight clause, reached by time travel rather than by racing a mission.** An experiment opens and closes within a single mission, so by the time anyone looks it has resolved — two attempts to catch it live failed, one because the mission finished first and one because the trigger is stochastic (the contract bounced twice and only reached Gate B once, below the stall limit). Driving the timeline scrubber back to a moment between apply and resolve rendered **"Experiments in flight: mission · m-1 predicted 0.5 vs baseline 1 over 2 observations (peer_criteria)"**. That this works at all is AC-4 paying off: every lens is a projection of the same event list, so replay shows a real historical state rather than a reconstruction.
+
+**A fourteenth dead mechanism found on the way** (`d08191c8`): `ProposalEmitter` — invariant #4's only outward channel, the thing that makes amendments *propose-only* — is defined, tested, and **never constructed**. The single `learning.proposal_emitted` row in the database came from an early dogfood script. Deliberately not patched here: deciding when the Learning Agent should petition is **R29**'s requirement, still draft, and inventing a trigger would fabricate behaviour the design has not settled.
+
+**The bound on AC-2, stated rather than glossed.** The petitions clause is proven as a *rendering* — a mutation-checked distractor fails if a petition is ever counted as an adoption, and the section renders live, correctly separated and labelled "proposals only — never applied". But the *populated* case was never clicked through, because the system cannot produce a petition and the one real row belongs to a mission the fleet rail does not surface.
+
+**Also visible live, and worth recording:** the workforce lens groups every agent under "UNCATEGORISED" — the carried category-fragmentation item surfacing in the UI rather than only in weak-spot counts.
+
+**Verification.** 6 lens tests rewritten (RED first, 6 failed / 20 passed before the change), 66 dashboard tests green, full workspace build, four lenses driven in Chrome. Screenshot at `docs/evidence/p19/learning-observatory-in-flight.png`.
+
+**Outcome:** **the phases pillar is green — all 51 complete**, and acceptance-criteria stays green. Three blockers remain: 5 open defects, P19's template sub-tasks (now closed), and the architecture-drift pillar which cannot reach zero for the tooling reason in friction `7ef7a267`.

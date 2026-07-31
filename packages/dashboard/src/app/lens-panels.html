@@ -48,22 +48,42 @@
       <h3>Learning observatory</h3>
       @if (hasLearning()) {
         <h4>Experiments in flight</h4>
-        <ul>
-          @for (e of learning().experiments; track e.eventId) { <li>{{ e.payload | json }}</li> }
+        <ul class="experiments">
+          @for (x of inFlight(); track x.hotFixId) {
+            <li>
+              <span class="what">{{ x.category }} · {{ x.criterionId }}</span>
+              <!-- The pre-registered metrics, shown as the CLAIM they were: the
+                   baseline it must beat, the rate it predicted, and how many
+                   observations decide it. Declared before any result existed. -->
+              <span class="pre-registered">
+                predicted {{ x.preRegistered.predictedFailureRate }}
+                vs baseline {{ x.preRegistered.baselineFailureRate }}
+                over {{ x.preRegistered.windowObservations }} observations
+                <em>({{ x.preRegistered.basis }})</em>
+              </span>
+            </li>
+          }
+          @if (inFlight().length === 0) { <li class="empty">No experiment is running.</li> }
         </ul>
-        <h4>Adoptions and reverts</h4>
-        <ul>
-          @for (e of learning().adoptions; track e.eventId) { <li>adopted: {{ e.payload | json }}</li> }
-          @for (e of learning().reverts; track e.eventId) { <li>reverted: {{ e.payload | json }}</li> }
+        <h4>Adoptions and reverts <span class="count">the ratchet</span></h4>
+        <ul class="ratchet">
+          @for (e of learning().adoptions; track e.eventId) { <li class="adopted">adopted: {{ e.payload | json }}</li> }
+          @for (e of learning().reverts; track e.eventId) { <li class="reverted">reverted: {{ e.payload | json }}</li> }
         </ul>
         <h4>Amendment petitions <span class="count">proposals only — never applied</span></h4>
-        <ul>
+        <ul class="petitions">
           @for (e of learning().petitions; track e.eventId) { <li>{{ e.payload | json }}</li> }
+          @if (learning().petitions.length === 0) { <li class="empty">No petition is pending.</li> }
+        </ul>
+        <h4>Library growth <span class="count">templates learned</span></h4>
+        <ul class="library">
+          @for (e of learning().libraryGrowth; track e.eventId) { <li>{{ e.payload | json }}</li> }
+          @if (learning().libraryGrowth.length === 0) { <li class="empty">Nothing learned yet.</li> }
         </ul>
       } @else {
         <p class="empty">
-          Nothing to show. The learning loops are not built yet (R26 fast loop, R27 science loop),
-          so no experiment, adoption or amendment petition has ever been recorded.
+          Nothing to show. This mission recorded no experiment, adoption, petition
+          or learned template.
         </p>
       }
     </section>

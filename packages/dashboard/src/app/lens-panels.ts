@@ -49,9 +49,19 @@ export class LensPanels {
   /** The families actually present — the filter offers what exists, not a guess. */
   readonly families = computed(() => [...new Set(this.events().map((e) => e.family))].sort());
 
+  /**
+   * Experiments still running — the criterion says "experiments IN FLIGHT".
+   *
+   * A resolved experiment still happened and still appears on the ratchet as an
+   * adoption or a revert; listing it as running would have the lens claim work
+   * is underway that finished.
+   */
+  readonly inFlight = computed(() => this.learning().experiments.filter((e) => e.outcome === null));
+
   readonly hasLearning = computed(() => {
     const view = this.learning();
-    return view.experiments.length + view.adoptions.length + view.reverts.length + view.petitions.length > 0;
+    return view.experiments.length + view.adoptions.length + view.reverts.length
+      + view.petitions.length + view.libraryGrowth.length > 0;
   });
 
   percent(rate: number | null): string {

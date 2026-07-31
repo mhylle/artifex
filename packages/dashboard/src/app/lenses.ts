@@ -200,28 +200,110 @@ export function buildLedgerView(
 
 // ------------------------------------------------------ learning observatory --
 
+/** An experiment the fast loop is running, or has run (R26). */
+export interface ExperimentView {
+  readonly event: TimedEvent;
+  readonly hotFixId: string;
+  readonly category: string;
+  readonly criterionId: string;
+  /**
+   * Declared when the experiment was APPLIED, before any result existed.
+   *
+   * That ordering is the whole of "pre-registered": the same numbers reported
+   * after the fact would be a description of what happened, and could not be
+   * wrong. `basis` says whether the prediction rests on peer evidence or is the
+   * bare direction (ADR-0013), so the lens never presents a degenerate claim as
+   * a measured one.
+   */
+  readonly preRegistered: {
+    readonly baselineFailureRate: number;
+    readonly predictedFailureRate: number;
+    readonly basis: string;
+    readonly windowObservations: number;
+  };
+  /** `null` while still in flight. */
+  readonly outcome: 'kept' | 'reverted' | null;
+}
+
 export interface LearningView {
-  readonly experiments: readonly TimedEvent[];
+  readonly experiments: readonly ExperimentView[];
   readonly adoptions: readonly TimedEvent[];
   readonly reverts: readonly TimedEvent[];
   /** Amendment petitions — PROPOSALS. Never rendered as applied changes. */
   readonly petitions: readonly TimedEvent[];
+  /** Templates the swarm has learned (R31 AC-2) — the library growing. */
+  readonly libraryGrowth: readonly TimedEvent[];
 }
 
 /**
- * The swarm improving itself.
+ * The swarm improving itself (R19 AC-2).
  *
- * Petitions are kept in their own bucket rather than folded in with adoptions,
+ * REWRITTEN IN PLACE. The buckets were always right; the SOURCES were not. This
+ * read `learning.experiment_started`, `learning.adopted`, `learning.reverted`
+ * and `learning.amendment_petitioned` — and **nothing in the system emits any of
+ * them**. The lens rendered four empty lists and would have forever, which is
+ * the same dead-mechanism shape this project has found thirteen times, in a
+ * different language.
+ *
+ * What the ledger actually holds: the fast loop's `fast_loop.hot_fix_applied` /
+ * `_resolved` (R26), the propose-only emitter's `learning.proposal_emitted`
+ * (R11), and `decomposition.template_learned` (R31).
+ *
+ * Petitions stay in their own bucket rather than folding in with adoptions,
  * because invariant #4 is that the learner proposes and never ratifies. A lens
- * that showed a petition as a change would misrepresent the constitution — the
- * separation belongs in the projection, not in a CSS class.
+ * that showed a petition as a change would misrepresent the constitution — and
+ * that separation belongs in the projection, not in a CSS class a redesign could
+ * drop.
  */
 export function buildLearningView(events: readonly TimedEvent[]): LearningView {
   const of = (type: string) => events.filter((e) => e.type === type);
+
+  const resolutions = of('fast_loop.hot_fix_resolved');
+  const outcomeOf = new Map(
+    resolutions.map((e) => [String((e.payload as { hotFixId?: unknown }).hotFixId), e]),
+  );
+
+  const experiments = of('fast_loop.hot_fix_applied').map((event): ExperimentView => {
+    const p = event.payload as {
+      hotFixId?: unknown; category?: unknown; criterionId?: unknown;
+      bounds?: { windowObservations?: unknown };
+      predictedEffect?: { baselineFailureRate?: unknown; predictedFailureRate?: unknown; basis?: unknown };
+    };
+    const hotFixId = String(p.hotFixId ?? '');
+    const resolution = outcomeOf.get(hotFixId);
+    const outcome = resolution === undefined
+      ? null
+      : String((resolution.payload as { outcome?: unknown }).outcome) === 'kept'
+        ? ('kept' as const)
+        : ('reverted' as const);
+
+    return {
+      event,
+      hotFixId,
+      category: String(p.category ?? 'unknown'),
+      criterionId: String(p.criterionId ?? 'unknown'),
+      preRegistered: {
+        baselineFailureRate: Number(p.predictedEffect?.baselineFailureRate ?? 0),
+        predictedFailureRate: Number(p.predictedEffect?.predictedFailureRate ?? 0),
+        basis: String(p.predictedEffect?.basis ?? 'unknown'),
+        windowObservations: Number(p.bounds?.windowObservations ?? 0),
+      },
+      outcome,
+    };
+  });
+
+  // Split on the RESOLUTION's own outcome, so a lens cannot report a revert as
+  // an adoption. A resolution whose experiment was applied in an earlier mission
+  // still appears here — it really happened — but no experiment is invented to
+  // parent it, which would show pre-registered metrics nobody registered.
+  const outcomeIs = (want: string) => (e: TimedEvent) =>
+    String((e.payload as { outcome?: unknown }).outcome) === want;
+
   return {
-    experiments: of('learning.experiment_started'),
-    adoptions: of('learning.adopted'),
-    reverts: of('learning.reverted'),
-    petitions: of('learning.amendment_petitioned'),
+    experiments,
+    adoptions: resolutions.filter(outcomeIs('kept')),
+    reverts: resolutions.filter(outcomeIs('reverted')),
+    petitions: of('learning.proposal_emitted'),
+    libraryGrowth: of('decomposition.template_learned'),
   };
 }
