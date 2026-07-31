@@ -891,9 +891,6 @@ export function createMissionSeams(
           'You are about to run this mission. Before any work starts, list anything a',
           'reasonable person could read in more than one way, however small.',
           '',
-          'Return an empty list if the request is unambiguous — do not invent a question',
-          'to fill it.',
-          '',
           brief,
         ].join('\n'))) as { questions?: Array<{ about: string; question: string }> };
 

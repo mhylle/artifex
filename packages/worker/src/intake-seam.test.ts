@@ -144,4 +144,27 @@ describe('bf766244 — what is open and what it costs are asked separately', () 
 
     expect(out.questions.map((q) => q.stakes)).toEqual(['low', 'high']);
   });
+
+  it('does NOT tell the model to return an empty list — that sentence suppressed everything', async () => {
+    // Measured one sentence apart, same schema, same input, four runs each:
+    //   WITH "return an empty list ... do not invent":  0/4 runs, 0 questions
+    //   WITHOUT it:                                      4/4 runs, 15 questions
+    //
+    // The guard was carried over from the single-call prompt into the split and
+    // re-introduced exactly the conservatism the split existed to remove. The
+    // "do not invent" worry is answered by the SECOND call instead: a spurious
+    // question rated low is carried rather than blocking, so an over-eager
+    // question costs a carried assumption, not a stopped mission.
+    //
+    // This asserts PROMPT wording rather than schema shape, which is usually the
+    // weaker test. Here the prompt IS the thing under test — the schema was
+    // already correct and the suppression was entirely in the words.
+    const gen = generatorReturning({});
+    await seamsWith(gen).interrogator!.assess({ mission: mission() });
+
+    const openPrompt = gen.prompts[0] ?? '';
+    expect(openPrompt, 'CONTROL: the open-questions probe never ran').toMatch(/more than one way/i);
+    expect(openPrompt).not.toMatch(/empty list/i);
+    expect(openPrompt).not.toMatch(/do not invent/i);
+  });
 });
