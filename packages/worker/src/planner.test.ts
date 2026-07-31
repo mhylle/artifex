@@ -449,3 +449,100 @@ describe('R32 — a malformed dependency answer must not cost the mission', () =
     }
   });
 });
+
+/**
+ * Inputs the planner DECLARES and must actually read.
+ *
+ * `Planner.propose` accepts `rejectedBecause` (R33 AC-1) and, now,
+ * `templateRecipe` (R31 AC-2). Both are useless unless the prompt carries them,
+ * and `createStepwisePlanner` destructured `{ contract }` alone — so in the
+ * deployed system every re-split re-proposed from the bare objective, which is
+ * exactly the "spending a model call to rehearse the rejection" its own comment
+ * warns about (defect `2e79255f`).
+ *
+ * These tests read the PROMPT, because that is the only place the input can have
+ * an effect. Every loop-level test supplies its own planner fixture that honours
+ * the seam, so the contract was kept by every double and by nothing in
+ * production — a shape no interface test can catch.
+ */
+function capturingGenerator(): { generator: StructuredGenerator; prompts: string[] } {
+  const prompts: string[] = [];
+  const generator: StructuredGenerator = {
+    async generate({ probe }) {
+      const id = (probe.schema as { $id?: string }).$id ?? '';
+      prompts.push(probe.prompt);
+      if (id === 'SubtaskCount') return { count: 2 };
+      if (id === 'SubtaskDependency') return { dependsOn: [] };
+      if (id === 'SubtaskOutline') return { objectives: ['First piece.', 'Second piece.'] };
+      return {
+        objective: 'IGNORED', category: 'explain',
+        criterion: 'It is explained.', outOfScope: 'Not the rest.', blastRadius: 'low' as const,
+      };
+    },
+  };
+  return { generator, prompts };
+}
+
+describe('2e79255f — a re-split is AIMED, not a rehearsal of the rejection', () => {
+  it('puts the rejection clauses in the prompt', async () => {
+    const { generator, prompts } = capturingGenerator();
+
+    await plannerOn(generator).propose({
+      contract: contract(),
+      rejectedBecause: ['task 2 is not atomic: it bundles retrieval and summarising'],
+    });
+
+    expect(
+      prompts.join('\n'),
+      'the planner re-proposed from the bare objective — the verdict never reached the model',
+    ).toMatch(/bundles retrieval and summarising/);
+  });
+
+  it('DISTRACTOR: a FIRST attempt carries no rejection text', async () => {
+    // Absent means absent. Telling the model about a rejection that did not
+    // happen would bias the first plan against a shape nothing objected to.
+    const { generator, prompts } = capturingGenerator();
+
+    await plannerOn(generator).propose({ contract: contract() });
+
+    expect(prompts.join('\n')).not.toMatch(/rejected|previous plan/i);
+  });
+});
+
+describe('R31 AC-2 — a decomposition template GUIDES the split', () => {
+  it('puts the template recipe in the prompt', async () => {
+    const { generator, prompts } = capturingGenerator();
+
+    await plannerOn(generator).propose({
+      contract: contract(),
+      templateRecipe: 'Split comparison work into one subtask per item, then one that compares them.',
+    });
+
+    expect(
+      prompts.join('\n'),
+      'the template was looked up, recorded, and never actually used',
+    ).toMatch(/one subtask per item/);
+  });
+
+  it('DISTRACTOR: no template means no template text', async () => {
+    const { generator, prompts } = capturingGenerator();
+
+    await plannerOn(generator).propose({ contract: contract() });
+
+    expect(prompts.join('\n')).not.toMatch(/template/i);
+  });
+
+  it('DISTRACTOR: a template GUIDES rather than dictates — the count probe still runs', async () => {
+    // A template that replaced the planner's own judgement would make a stale
+    // recipe binding on work it no longer fits. It is guidance in the prompt,
+    // not a bypass of the model.
+    const { generator, prompts } = capturingGenerator();
+
+    await plannerOn(generator).propose({
+      contract: contract(),
+      templateRecipe: 'Split into exactly three parts, always.',
+    });
+
+    expect(prompts.some((p) => /How many INDEPENDENT subtasks/.test(p))).toBe(true);
+  });
+});

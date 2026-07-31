@@ -351,10 +351,32 @@ export function createStepwisePlanner(options: ModelSeamOptions): Planner {
     })) as T;
 
   return {
-    async propose({ contract }) {
+    async propose({ contract, rejectedBecause, templateRecipe }) {
+      // Both of the seam's optional inputs reach the MODEL here, and neither did
+      // before. `rejectedBecause` was declared, documented, passed by the loop —
+      // and destructured away, so every re-split in the deployed system
+      // re-proposed from the bare objective and rehearsed the rejection it was
+      // handed (defect `2e79255f`). `templateRecipe` is R31 AC-2's "the template
+      // guides the split"; a template looked up and recorded but never put in
+      // front of the planner guides nothing.
+      //
+      // Guidance, not dictation: the count probe still runs, so a stale recipe
+      // cannot bind work it no longer fits.
+      const guidance: string[] = [
+        ...(templateRecipe === undefined
+          ? []
+          : ['', 'A template for this kind of work suggests:', `  ${templateRecipe}`]),
+        ...(rejectedBecause === undefined || rejectedBecause.length === 0
+          ? []
+          : ['', 'The PREVIOUS plan for this objective was rejected because:',
+             ...rejectedBecause.map((r) => `  - ${r}`),
+             'Produce a different split that does not repeat those faults.']),
+      ];
+
       const { count } = await ask<{ count: number }>(
         SubtaskCountSchema,
-        `How many INDEPENDENT subtasks fully cover this objective? Answer with a number only.\n\nOBJECTIVE: ${contract.objective}`,
+        `How many INDEPENDENT subtasks fully cover this objective? Answer with a number only.\n\nOBJECTIVE: ${contract.objective}` +
+          guidance.join('\n'),
       );
 
       const outlinePrompt = (exclude: readonly string[]): string =>
@@ -363,6 +385,7 @@ export function createStepwisePlanner(options: ModelSeamOptions): Planner {
           `Each must be a different piece of the work — not a restatement of the whole.`,
           ``,
           `OBJECTIVE: ${contract.objective}`,
+          ...guidance,
           ...(exclude.length > 0
             ? ['', 'These are already taken; give different ones:', ...exclude.map((o) => `  - ${o}`)]
             : []),

@@ -108,6 +108,25 @@ export interface WorkerDependencies {
    * deployed worker cannot run with the reviewer's leniency unmeasured.
    */
   readonly bench: SealedBenchStore;
+  /**
+   * Learnable decomposition templates (R31 AC-2).
+   *
+   * REQUIRED here, optional on the seam — the pattern that has caught three dead
+   * mechanisms. A template store the deployed worker never constructs would make
+   * the criterion's "given" unreachable while every test passed.
+   */
+  readonly templates: DecompositionTemplateStore;
+}
+
+/** The slice of the template store the worker binds to (R31 AC-2). */
+export interface DecompositionTemplateStore {
+  forCapability(capability: string): Promise<{ readonly templateId: string; readonly recipe: string } | null>;
+  remember(input: {
+    readonly capability: string;
+    readonly recipe: string;
+    readonly sourceMissionId: string;
+  }): Promise<{ readonly templateId: string }>;
+  recordOutcome(templateId: string, survived: boolean): Promise<void>;
 }
 
 /** The slice of the replay bench the worker binds to (R35 AC-1). */
@@ -195,6 +214,7 @@ export function buildWorkerSeams(deps: WorkerDependencies, missionId: string): M
     },
     deps.commons,
     fastLoop,
+    deps.templates,
     {
       // Sealed slice only, and RETIRED cases excluded: a case that no longer
       // represents the work is not ground truth about the reviewer either.

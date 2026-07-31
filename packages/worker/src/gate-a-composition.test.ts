@@ -146,3 +146,139 @@ describe('R33 AC-0 — the loop feeds Gate A the decomposition decision', () => 
     expect(gateAVerdict(result.trail)?.payload['outcome'], 'the planner was faulted for a gate outage').toBe('pass');
   });
 });
+
+/**
+ * R31 AC-2 in the loop — templates guide, are recorded, and accumulate.
+ *
+ * The pure pieces are proven elsewhere: the planner puts the recipe in its
+ * prompt (`planner.test.ts`) and the store enforces its own rules against a real
+ * Postgres (`decomposition-template.test.ts`). What neither can see is whether
+ * the loop looks a template up, hands it to the planner, records its use, and
+ * folds the outcome back — the four things the criterion actually asks for.
+ */
+describe('R31 AC-2 — a template guides the split and accumulates evidence', () => {
+  function templateStore(existing: { templateId: string; recipe: string } | null) {
+    const remembered: Array<{ capability: string; recipe: string }> = [];
+    const outcomes: Array<{ templateId: string; survived: boolean }> = [];
+    return {
+      remembered,
+      outcomes,
+      seam: {
+        async forCapability() { return existing; },
+        async remember(input: { capability: string; recipe: string }) {
+          remembered.push(input);
+          return { templateId: 'tpl-new' };
+        },
+        async recordOutcome(templateId: string, survived: boolean) {
+          outcomes.push({ templateId, survived });
+        },
+      },
+    };
+  }
+
+  /** Captures what the planner was actually told. */
+  function recordingPlanner(base: MissionSeams) {
+    const seen: Array<{ templateRecipe?: string }> = [];
+    return {
+      seen,
+      seams: {
+        ...base,
+        planner: {
+          async propose(input: { templateRecipe?: string }) {
+            seen.push(input);
+            return base.planner.propose(input as never);
+          },
+        },
+      } as MissionSeams,
+    };
+  }
+
+  it('hands the template recipe to the PLANNER, not merely to the ledger', async () => {
+    // The difference between guiding a split and logging that one could have
+    // been guided.
+    const store = templateStore({ templateId: 'tpl-1', recipe: 'One subtask per item.' });
+    const planner = recordingPlanner(seams());
+
+    await runMission(mission(), { ...planner.seams, templates: store.seam } as never, { now: () => AT });
+
+    expect(planner.seen[0]?.templateRecipe, 'the template was looked up and never used').toBe('One subtask per item.');
+  });
+
+  it('records the template use on the ledger', async () => {
+    const store = templateStore({ templateId: 'tpl-1', recipe: 'One subtask per item.' });
+
+    const result = await runMission(mission(), { ...seams(), templates: store.seam } as never, { now: () => AT });
+
+    const used = result.trail.find((e) => e.type === 'decomposition.template_used');
+    expect(used?.payload['templateId']).toBe('tpl-1');
+  });
+
+  it('folds the Gate A outcome back into the template record', async () => {
+    // "Templates accumulate evidence and become learnable assets" — the half
+    // that makes them learnable rather than merely reusable.
+    const store = templateStore({ templateId: 'tpl-1', recipe: 'One subtask per item.' });
+
+    await runMission(mission(), { ...seams(), templates: store.seam } as never, { now: () => AT });
+
+    expect(store.outcomes).toHaveLength(1);
+    expect(store.outcomes[0]?.templateId).toBe('tpl-1');
+  });
+
+  it('scores the template on whether the split SURVIVED Gate A', async () => {
+    // This fixture's plan is a one-child GATE split, which the sixth clause
+    // faults — so the guided split did NOT survive, and the template must be
+    // scored down. A recorder hard-coding `true` passes every other test here.
+    const store = templateStore({ templateId: 'tpl-1', recipe: 'One subtask per item.' });
+
+    await runMission(
+      mission(),
+      {
+        ...seams({ async assess() { return { keepWhole: false, rationale: 'divisible' }; } }),
+        templates: store.seam,
+      } as never,
+      { now: () => AT },
+    );
+
+    expect(store.outcomes[0]?.survived, 'a rejected split was recorded as a success').toBe(false);
+  });
+
+  it('LEARNS a template from a split that survived with no template guiding it', async () => {
+    // Without this the criterion's "given" is unreachable: nothing else creates
+    // a template, so the store would stay empty forever and every lookup would
+    // return null.
+    const store = templateStore(null);
+
+    const result = await runMission(mission(), { ...seams(), templates: store.seam } as never, { now: () => AT });
+
+    expect(store.remembered, 'a surviving split taught the system nothing').toHaveLength(1);
+    expect(store.remembered[0]?.recipe).toMatch(/State it\./);
+    expect(result.trail.some((e) => e.type === 'decomposition.template_learned')).toBe(true);
+  });
+
+  it('DISTRACTOR: a REJECTED split with no template teaches nothing', async () => {
+    // Learning from a plan Gate A refused would fill the store with recipes for
+    // producing rejected decompositions — the opposite of a learnable asset.
+    const store = templateStore(null);
+
+    await runMission(
+      mission(),
+      {
+        ...seams({ async assess() { return { keepWhole: false, rationale: 'divisible' }; } }),
+        templates: store.seam,
+      } as never,
+      { now: () => AT },
+    );
+
+    expect(store.remembered, 'a rejected split was distilled into a template').toHaveLength(0);
+  });
+
+  it('DISTRACTOR: a mission with NO template store runs exactly as before', async () => {
+    const withStore = await runMission(
+      mission(), { ...seams(), templates: templateStore(null).seam } as never, { now: () => AT },
+    );
+    const without = await runMission(mission(), seams(), { now: () => AT });
+
+    expect(without.outcome).toBe(withStore.outcome);
+    expect(without.trail.some((e) => e.type === 'decomposition.template_used')).toBe(false);
+  });
+});

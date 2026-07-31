@@ -16,3 +16,4 @@ export * from './asset-registry-repository.js';
 export * from './knowledge-commons-repository.js';
 export * from './replay-bench-repository.js';
 export * from './hot-fix-repository.js';
+export * from './decomposition-template-repository.js';

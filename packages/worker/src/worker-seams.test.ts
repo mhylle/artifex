@@ -38,6 +38,8 @@ function dependencies() {
     roleWrites: [] as Array<{ designId: string; roleInstructions: string }>,
     hotFixApplied: [] as Array<{ patchedValue: string }>,
     hotFixResolved: [] as Array<{ revert: boolean }>,
+    templatesRemembered: [] as Array<{ capability: string; recipe: string }>,
+    templateOutcomes: [] as Array<{ templateId: string; survived: boolean }>,
   };
 
   const deps: WorkerDependencies = {
@@ -65,6 +67,16 @@ function dependencies() {
     },
     commons: {
       async submit(entry: { claim: string }) { calls.submitted.push(entry); return { entryId: 'e-1' }; },
+    },
+    templates: {
+      async forCapability() { return null; },
+      async remember(input: { capability: string; recipe: string }) {
+        calls.templatesRemembered.push(input);
+        return { templateId: 'tpl-1' };
+      },
+      async recordOutcome(templateId: string, survived: boolean) {
+        calls.templateOutcomes.push({ templateId, survived });
+      },
     },
     hotFixes: {
       async apply(input: { patchedValue: string }) { calls.hotFixApplied.push(input); return 'hf-1'; },
@@ -428,5 +440,40 @@ describe('buildWorkerSeams — the sealed bench feeds the probes', () => {
     const { deps } = benched([]);
 
     await expect(buildWorkerSeams(deps, MISSION_ID).calibration!.probes!()).resolves.toEqual([]);
+  });
+});
+
+/**
+ * R31 AC-2 — the deployed worker really has a template store.
+ *
+ * `MissionSeams.templates` is optional so every existing caller compiles;
+ * `WorkerDependencies.templates` is required so the binary cannot run without
+ * one. That split is the pattern that has caught three dead mechanisms, and a
+ * template store nothing constructs would leave the criterion's "given" —
+ * "a decomposition template in the Asset Registry matching the kind of work" —
+ * permanently unreachable while every test stayed green.
+ */
+describe('buildWorkerSeams — decomposition templates', () => {
+  it('supplies a templates seam at all', async () => {
+    const { deps } = dependencies();
+
+    expect(buildWorkerSeams(deps, MISSION_ID).templates, 'the deployed worker has no template store').toBeDefined();
+  });
+
+  it('passes the real store through rather than a stub', async () => {
+    const { deps, calls } = dependencies();
+    const seams = buildWorkerSeams(deps, MISSION_ID);
+
+    await seams.templates!.remember({
+      capability: 'comparing', recipe: 'One subtask per item.', sourceMissionId: MISSION_ID,
+    });
+    await seams.templates!.recordOutcome('tpl-1', false);
+
+    expect(calls.templatesRemembered).toEqual([
+      { capability: 'comparing', recipe: 'One subtask per item.', sourceMissionId: MISSION_ID },
+    ]);
+    // BOTH values of the boolean, because a recorder hard-coding `true` would
+    // pass a test that only ever recorded a success.
+    expect(calls.templateOutcomes).toEqual([{ templateId: 'tpl-1', survived: false }]);
   });
 });

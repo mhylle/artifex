@@ -173,6 +173,33 @@ export interface MissionSeams {
    * worker binary uses. A seam nothing constructs is a seam that does not exist.
    */
   readonly fastLoop?: FastLoopSeam;
+  /**
+   * Learnable decomposition templates (R31 AC-2).
+   *
+   * Optional at the seam and REQUIRED in `WorkerDependencies`, the pattern that
+   * has now caught three dead mechanisms: every existing caller predates
+   * templates, and the deployed worker must not run without them.
+   */
+  readonly templates?: DecompositionTemplateSeam;
+}
+
+/**
+ * What the loop needs from the template store (R31 AC-2).
+ *
+ * Structural, like the registry and commons seams — the worker depends on
+ * `shared-types` and its own seams, never on the fabric.
+ */
+export interface DecompositionTemplateSeam {
+  /** The recipe to guide a split of this capability, or null. */
+  forCapability(capability: string): Promise<{ readonly templateId: string; readonly recipe: string } | null>;
+  /** Distil a split that survived Gate A into a reusable recipe. */
+  remember(input: {
+    readonly capability: string;
+    readonly recipe: string;
+    readonly sourceMissionId: string;
+  }): Promise<{ readonly templateId: string }>;
+  /** Fold one more outcome — did the split this guided survive Gate A? */
+  recordOutcome(templateId: string, survived: boolean): Promise<void>;
 }
 
 /**
@@ -931,6 +958,8 @@ export async function runMission(
     // rationale prose, which is what forced the clause's first version to be
     // reverted (`bf62266d`).
     let decidedBy: 'gate' | 'default' | null = null;
+    /** The template guiding this split, so its outcome can be folded back. */
+    let template: { readonly templateId: string; readonly recipe: string } | null = null;
 
     if (!alreadyDecided) {
       let verdict: { keepWhole: boolean; rationale: string };
@@ -984,8 +1013,28 @@ export async function runMission(
       // what makes an operator's earlier decision still refer to this task.
       children = recovered;
     } else {
+      // ---- a learned recipe guides the split (R31 AC-2) ------------------
+      // Looked up by CAPABILITY — the taxonomy R38's clustering converges — so
+      // templates accumulate per kind of work rather than per task, which is
+      // what makes them learnable at all. Failure is swallowed: guidance is an
+      // improvement, and losing a mission because a recipe lookup failed would
+      // trade the work for the advice.
       try {
-        children = await decompose(parent, seams.planner);
+        template = (await seams.templates?.forCapability(capabilityOf(parent.category))) ?? null;
+      } catch {
+        template = null;
+      }
+      if (template !== null) {
+        record(parent.taskId, 'decision', 'decomposition.template_used', 'orchestrator', {
+          templateId: template.templateId,
+          capability: capabilityOf(parent.category),
+          recipe: template.recipe,
+        });
+      }
+
+      try {
+        children = await decompose(parent, seams.planner,
+          template === null ? undefined : { templateRecipe: template.recipe });
       } catch (error) {
         return fail('decomposition failed', [describe(error)]);
       }
@@ -1051,6 +1100,44 @@ export async function runMission(
       return fail('Gate A could not be evaluated', [describe(error)]);
     }
     record(parent.taskId, 'verification', 'gate_a.verdict_issued', 'reviewer', { ...aVerdict });
+
+    // ---- templates accumulate evidence (R31 AC-2) ---------------------------
+    // Scored on whether the split SURVIVED GATE A, not on whether the mission
+    // succeeded. A template's job is to produce a well-formed decomposition;
+    // blaming it for a worker that later failed would grade it on something it
+    // has no influence over.
+    //
+    // And when a split survives with NO template guiding it, that split is the
+    // evidence a template is distilled from — otherwise the criterion's given,
+    // "a decomposition template in the Asset Registry matching the kind of
+    // work", would be unreachable, because nothing else creates one.
+    if (seams.templates !== undefined) {
+      const capability = capabilityOf(parent.category);
+      const survived = aVerdict.outcome === 'pass';
+      try {
+        if (template !== null) {
+          await seams.templates.recordOutcome(template.templateId, survived);
+        } else if (survived) {
+          const stored = await seams.templates.remember({
+            capability,
+            // The recipe is the SHAPE of the split that worked, in the planner's
+            // own words. Asking a model to summarise "how to split this kind of
+            // work" would be a new seam and a new thing to be wrong about; the
+            // objectives that passed Gate A are evidence, not a guess.
+            recipe:
+              `Split into ${children.length} subtasks along these lines: ` +
+              children.map((c) => c.objective).join(' | '),
+            sourceMissionId: mission.missionId,
+          });
+          record(parent.taskId, 'decision', 'decomposition.template_learned', 'learning_agent', {
+            templateId: stored.templateId, capability, childCount: children.length,
+          });
+        }
+      } catch {
+        // Bookkeeping, not the mission. A template store outage must not cost a
+        // plan that Gate A just approved.
+      }
+    }
 
     if (aVerdict.outcome === 'pass') break;
 

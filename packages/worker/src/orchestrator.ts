@@ -62,6 +62,18 @@ export interface Planner {
      * rejection.
      */
     readonly rejectedBecause?: readonly string[];
+    /**
+     * A learned "how to split this kind of work" recipe (R31 AC-2).
+     *
+     * Absent when the Asset Registry holds no template for this capability,
+     * which is every capability the swarm has not yet split successfully.
+     *
+     * GUIDANCE, not a rule: it goes into the prompt alongside the objective and
+     * the planner still decides. A template that bypassed the planner would make
+     * a stale recipe binding on work it no longer fits, and templates are meant
+     * to accumulate evidence — which requires being able to be wrong.
+     */
+    readonly templateRecipe?: string;
   }): Promise<DecompositionProposal>;
 }
 
@@ -115,12 +127,17 @@ function childTaskId(parentTaskId: string, index: number): string {
 export async function decompose(
   parent: TaskContract,
   planner: Planner,
-  /** Findings from a Gate A rejection of the previous plan (R33 AC-1). */
-  options?: { readonly rejectedBecause?: readonly string[] },
+  options?: {
+    /** Findings from a Gate A rejection of the previous plan (R33 AC-1). */
+    readonly rejectedBecause?: readonly string[];
+    /** A learned recipe for splitting this kind of work (R31 AC-2). */
+    readonly templateRecipe?: string;
+  },
 ): Promise<TaskContract[]> {
   const proposal = await planner.propose({
     contract: parent,
     ...(options?.rejectedBecause === undefined ? {} : { rejectedBecause: options.rejectedBecause }),
+    ...(options?.templateRecipe === undefined ? {} : { templateRecipe: options.templateRecipe }),
   });
 
   if (proposal.subtasks.length === 0) {

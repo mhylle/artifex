@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
  */
 import { pathToFileURL } from 'node:url';
 
-import { AssetRegistryRepository, HotFixRepository, KnowledgeCommonsRepository, LedgerRepository, ModelCatalogRepository, ReplayBenchRepository, runMigrations } from '@artifex/memory-fabric';
+import { AssetRegistryRepository, DecompositionTemplateRepository, HotFixRepository, KnowledgeCommonsRepository, LedgerRepository, ModelCatalogRepository, ReplayBenchRepository, runMigrations } from '@artifex/memory-fabric';
 import { ModelRouter, createBackend } from '@artifex/model-router';
 import type { TaskContract } from '@artifex/shared-types';
 import { Worker } from 'bullmq';
@@ -70,6 +70,10 @@ export async function main(): Promise<void> {
   // the one thing that catches a reviewer wrong the same way every time, which
   // unanimity sampling cannot (`627cd71c`).
   const bench = new ReplayBenchRepository(pool);
+  // Learnable decomposition templates (R31 AC-2). Distilled from splits that
+  // survived Gate A, and offered back as guidance the next time the swarm meets
+  // that kind of work.
+  const templates = new DecompositionTemplateRepository(pool);
   const router = new ModelRouter({
     catalog: {
       // `null` means "no admitted model for this tier"; a rejection would mean
@@ -126,7 +130,7 @@ export async function main(): Promise<void> {
         // Registry stayed a null-bidding stub for the project's whole life
         // (defect `41f7555c`) with every suite green.
         buildWorkerSeams(
-          { generator, models: { worker, evaluator }, assets, ledger, commons, hotFixes, bench },
+          { generator, models: { worker, evaluator }, assets, ledger, commons, hotFixes, bench, templates },
           contract.missionId,
         ),
         {

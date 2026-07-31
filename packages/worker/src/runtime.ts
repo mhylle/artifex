@@ -19,7 +19,7 @@ import { Type } from '@sinclair/typebox';
 
 import type { RegistryLookup } from './agent-creator.js';
 import { composeDesign } from './design-playbook.js';
-import type { ControlSignals, DecompositionGate, FastLoopSeam, KnowledgeCommonsSubmitter } from './mission-loop.js';
+import type { ControlSignals, DecompositionGate, DecompositionTemplateSeam, FastLoopSeam, KnowledgeCommonsSubmitter } from './mission-loop.js';
 import { plantProbes } from './calibration.js';
 import type { TaskContract } from '@artifex/shared-types';
 
@@ -498,6 +498,7 @@ export function createMissionSeams(
   registry?: RegistryLookup,
   commons?: KnowledgeCommonsSubmitter,
   fastLoop?: FastLoopSeam,
+  templates?: DecompositionTemplateSeam,
   bench?: SealedBenchReader,
 ): MissionSeams {
   const gen = (
@@ -512,6 +513,7 @@ export function createMissionSeams(
     ...(control === undefined ? {} : { control }),
     ...(commons === undefined ? {} : { commons }),
     ...(fastLoop === undefined ? {} : { fastLoop }),
+    ...(templates === undefined ? {} : { templates }),
 
     planner: createStepwisePlanner({
       generator,
