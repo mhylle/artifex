@@ -111,6 +111,51 @@ export class HotFixRepository {
   }
 
   /**
+   * Resolved hot-fixes, oldest first — the science loop's candidate queue
+   * (R26's "fast-loop results become science-loop hypotheses", ADR-0017).
+   *
+   * RESOLVED only. An unresolved hot-fix is still being measured in its own
+   * mission, and re-testing a change while its first verdict is still open would
+   * make both measurements meaningless.
+   *
+   * Reverted ones are included, and are the most interesting candidates rather
+   * than the least: the fast loop reverts on a window as small as two
+   * observations, which is the right call in-mission and far too little evidence
+   * to conclude the change is bad. Filtering them out here would quietly decide
+   * the question the science loop exists to ask.
+   *
+   * Oldest first, so the caller drains a queue rather than re-testing whatever
+   * happened most recently.
+   */
+  async resolvedCandidates(limit: number): Promise<HotFixRecord[]> {
+    const { rows } = await this.#pool.query(
+      `SELECT hot_fix_id, mission_id, category, criterion_id, target_kind, target_asset_id,
+              previous_value, patched_value, window_observations,
+              baseline_failure_rate, predicted_failure_rate, prediction_basis
+         FROM hot_fix
+        WHERE resolved_at IS NOT NULL
+        ORDER BY resolved_at ASC, hot_fix_id ASC
+        LIMIT $1`,
+      [limit],
+    );
+
+    return rows.map((r) => ({
+      hotFixId: r.hot_fix_id,
+      missionId: r.mission_id,
+      category: r.category,
+      criterionId: r.criterion_id,
+      targetKind: r.target_kind,
+      targetAssetId: r.target_asset_id,
+      previousValue: r.previous_value,
+      patchedValue: r.patched_value,
+      windowObservations: Number(r.window_observations),
+      baselineFailureRate: Number(r.baseline_failure_rate),
+      predictedFailureRate: Number(r.predicted_failure_rate),
+      predictionBasis: r.prediction_basis,
+    }));
+  }
+
+  /**
    * Close the experiment with a verdict.
    *
    * `outcome` and `reason` are both required by the store, so there is no way to

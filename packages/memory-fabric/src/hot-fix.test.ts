@@ -347,6 +347,72 @@ describe('R26 — the repository carries rows between the pure decisions and the
     expect(rows[0]?.outcome_reason).toBe('kept first');
   });
 
+  /**
+   * The science loop's candidate queue (ADR-0017).
+   *
+   * R26 says fast-loop results become science-loop hypotheses, and this is the
+   * read that makes that sentence executable: a hot-fix is already a worker-layer
+   * change to one concrete asset, so it is a candidate the bench can re-test.
+   */
+  it('offers RESOLVED hot-fixes as candidates, oldest first', async () => {
+    const first = await repo.apply(plan({ missionId: nextId() }));
+    await repo.resolve({ hotFixId: first!, revert: true, reason: 'first', observedFailureRate: 0.9 });
+    const second = await repo.apply(plan({ missionId: nextId() }));
+    await repo.resolve({ hotFixId: second!, revert: false, reason: 'second', observedFailureRate: 0.1 });
+
+    const candidates = await repo.resolvedCandidates(10);
+    const ids = candidates.map((c) => c.hotFixId);
+
+    expect(ids.indexOf(first!), 'the queue is not draining oldest-first').toBeLessThan(ids.indexOf(second!));
+  });
+
+  it('carries the PATCH, which is the only thing that makes a candidate runnable', async () => {
+    // The ledger event records which asset was patched and not what it was
+    // patched to (defect `aa6948ee`), so this store is where the runnable change
+    // actually lives. A candidate without its patched value cannot be executed
+    // against a bench case at all.
+    const id = await repo.apply(plan({ missionId: nextId() }));
+    await repo.resolve({ hotFixId: id!, revert: true, reason: 'r', observedFailureRate: 0.9 });
+
+    const mine = (await repo.resolvedCandidates(50)).find((c) => c.hotFixId === id);
+
+    expect(mine?.patchedValue).toBeTruthy();
+    expect(mine?.previousValue).toBeTruthy();
+    expect(mine?.patchedValue).not.toBe(mine?.previousValue);
+  });
+
+  it('DISTRACTOR: an UNRESOLVED hot-fix is not a candidate', async () => {
+    // It is still being measured in its own mission. Re-testing a change while
+    // its first verdict is open would make both measurements meaningless.
+    const live = await repo.apply(plan({ missionId: nextId() }));
+
+    const ids = (await repo.resolvedCandidates(50)).map((c) => c.hotFixId);
+
+    expect(ids, 'an in-flight experiment was offered for re-testing').not.toContain(live);
+  });
+
+  it('DISTRACTOR: a REVERTED hot-fix IS a candidate — that is the point', async () => {
+    // Both sides of the discriminator. The fast loop reverts on a window as
+    // small as two observations, which is right in-mission and far too little to
+    // conclude the change is bad. Filtering reverts out here would quietly
+    // answer the question the science loop exists to ask.
+    const id = await repo.apply(plan({ missionId: nextId() }));
+    await repo.resolve({ hotFixId: id!, revert: true, reason: 'window did not move', observedFailureRate: 0.9 });
+
+    expect((await repo.resolvedCandidates(50)).map((c) => c.hotFixId)).toContain(id);
+  });
+
+  it('respects the limit, so one pass cannot drain an unbounded backlog', async () => {
+    // Each candidate costs real model calls per case per replication. Without a
+    // bound, mission latency would become a function of research backlog.
+    for (let i = 0; i < 3; i += 1) {
+      const id = await repo.apply(plan({ missionId: nextId() }));
+      await repo.resolve({ hotFixId: id!, revert: true, reason: 'r', observedFailureRate: 0.9 });
+    }
+
+    expect(await repo.resolvedCandidates(2)).toHaveLength(2);
+  });
+
   it('DISTRACTOR: one mission live fix does not block a DIFFERENT mission', async () => {
     // The bound is per mission. If it were global the fast loop would serialise
     // across the whole swarm and effectively never fire.

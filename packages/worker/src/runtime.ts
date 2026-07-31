@@ -492,6 +492,74 @@ export function sampledPlanAudit(judge: PlanJudge, samples: number): PlanJudge {
   };
 }
 
+/**
+ * The two seams the science loop needs to run a candidate (ADR-0017).
+ *
+ * Built here rather than in `index.ts` because `AnswerSchema` and
+ * `CompletionSchema` live here with the model seam, and a second copy of either
+ * would let a candidate be asked for a different shape than a real worker is —
+ * which would make the bench measure the schema rather than the change.
+ *
+ * The judge is the SAME completion judge Gate B uses, at the evaluative tier.
+ * Judging a replay more cheaply than the original verdict would compare a
+ * candidate against a standard the recorded outcome never had to meet.
+ */
+export function createCandidateSeams(generator: StructuredGenerator, models: RuntimeModels) {
+  const gen = (
+    m: { provider: string; model: string },
+    schema: unknown,
+    prompt: string,
+  ): Promise<unknown> => generator.generate({ provider: m.provider, model: m.model, probe: { schema, prompt } });
+
+  return {
+    generator: {
+      async answer(input: {
+        readonly roleInstructions: string;
+        readonly objective: string;
+        readonly criteria: readonly string[];
+      }): Promise<unknown> {
+        // The candidate's patched instructions go FIRST, where a design's role
+        // instructions sit for a real worker — the position is part of what is
+        // under test, not a formatting choice.
+        return (await gen(models.worker, AnswerSchema, [
+          input.roleInstructions,
+          '',
+          'Answer the task so that EVERY acceptance criterion below is satisfied.',
+          '',
+          `TASK: ${input.objective}`,
+          'ACCEPTANCE CRITERIA (you are graded on exactly these):',
+          ...input.criteria.map((c) => `  - ${c}`),
+        ].join('\n'))) as unknown;
+      },
+    },
+    judge: {
+      async meetsAll(input: {
+        readonly objective: string;
+        readonly criteria: readonly { readonly criterionId: string; readonly statement: string }[];
+        readonly deliverable: unknown;
+      }): Promise<boolean> {
+        const out = (await gen(models.evaluator, CompletionSchema, [
+          'Judge whether the delivered work meets EACH acceptance criterion.',
+          'Assess every one, and use only the ids given.',
+          '',
+          `TASK: ${input.objective}`,
+          'ACCEPTANCE CRITERIA:',
+          ...input.criteria.map((c) => `  - ${c.criterionId}: ${c.statement}`),
+          '',
+          `DELIVERED: ${JSON.stringify(input.deliverable)}`,
+        ].join('\n'))) as { criteria?: { criterionId: string; met: boolean }[] };
+
+        const assessed = out.criteria ?? [];
+        // Every criterion must be assessed AND met. A judge that returned a
+        // subset would otherwise pass a candidate on the criteria it happened to
+        // mention, which is how a partial answer becomes a win.
+        const byId = new Map(assessed.map((c) => [c.criterionId, c.met]));
+        return input.criteria.every((c) => byId.get(c.criterionId) === true);
+      },
+    },
+  };
+}
+
 export function createMissionSeams(
   generator: StructuredGenerator,
   models: RuntimeModels,

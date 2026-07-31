@@ -20,6 +20,9 @@ import { runMission } from './mission-loop.js';
 import { LedgerEvidenceSource } from './ledger-evidence.js';
 import { rankWeakSpots } from './science-loop.js';
 import { casesFromTrail } from './bench-producer.js';
+import { candidateExecutor, candidateJudge } from './candidate-execution.js';
+import { buildScienceLoop } from './science-seams.js';
+import { createCandidateSeams } from './runtime.js';
 import { evaluatePetition } from './sealed-evaluation.js';
 import { petitionFromWeakSpots, petitionRefusal } from './petition.js';
 import { ProposalEmitter } from './proposal-emitter.js';
@@ -339,6 +342,61 @@ export async function main(): Promise<void> {
         }
       } catch (cause) {
         console.error('! weak-spot mining failed:', String(cause));
+      }
+
+      // ---- the science loop EXPERIMENTS, not just mines (R27 AC-1/2/3) -----
+      // Defect `a1288794`: `ScienceLoop` was constructed only by its own test,
+      // so the worker ran the mining half and nothing else. What blocked it was
+      // a question rather than code — ADR-0017 answers it: a candidate is a
+      // fast-loop hot-fix, re-tested properly on the bench.
+      //
+      // ONE candidate per pass, oldest first. Not a tuning threshold: it is a
+      // queue drained one item per mission-completion, because each run costs
+      // real model calls per case per replication and mission latency must not
+      // become a function of research backlog.
+      try {
+        const candidates = await hotFixes.resolvedCandidates(1);
+        const openCases = await bench.list({ slice: 'open' });
+
+        if (candidates.length > 0 && openCases.length > 0) {
+          const seams = createCandidateSeams(generator, { worker, evaluator });
+          const byId = new Map(
+            candidates.map((c) => [c.hotFixId, { candidateId: c.hotFixId, patchedValue: c.patchedValue }]),
+          );
+
+          const loop = buildScienceLoop({
+            index: ledger, reader: ledger, bench, designs: assets,
+            executor: candidateExecutor(byId, seams.generator),
+            judge: candidateJudge(seams.judge),
+          });
+
+          // The budget IS the open bench: every candidate sits the same exam,
+          // which is what makes heterogeneous changes comparable (AC-1). It is
+          // read from the bench rather than chosen, so it grows with the
+          // evidence instead of being a number someone picked.
+          const results = await loop.experiment(candidates.map((c) => c.hotFixId), {
+            totalBudget: openCases.length * candidates.length,
+            replications: 2,
+          });
+
+          for (const decision of loop.evaluate(results)) {
+            await ledger.append({
+              eventId: randomUUID(),
+              missionId: contract.missionId,
+              taskId: null,
+              family: 'learning',
+              type: 'learning.candidate_evaluated',
+              actor: { kind: 'learning_agent', id: 'learning_agent', displayName: 'Learning Agent' },
+              // The verdict AND why, so a rejected candidate is still a
+              // measurement the next hypothesis can build on.
+              payload: { ...decision },
+              occurredAt: new Date().toISOString(),
+            });
+            console.log(`  candidate ${decision.evidence.candidateId}: ${decision.adopt ? 'ADOPT' : 'reject'} — ${decision.reason}`);
+          }
+        }
+      } catch (cause) {
+        console.error('! science experiment failed:', String(cause));
       }
 
       return { outcome: result.outcome, events: result.trail.length };
