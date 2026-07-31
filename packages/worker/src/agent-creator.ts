@@ -9,6 +9,7 @@
  * The manifest carries a **logical** tier, never a concrete model: the Model
  * Catalog resolves it at dispatch, so models stay swappable data (ADR-0002).
  */
+import { MISSION_CATEGORY, VERIFICATION_CATEGORY_PREFIX } from '@artifex/shared-types';
 import type { CapabilityManifest, TaskContract } from '@artifex/shared-types';
 
 import { computeTier } from './tier-policy.js';
@@ -154,7 +155,13 @@ const PROVEN_OBSERVATIONS = 3;
  * and silently pool every unlabelled task onto a single agent.
  */
 export function capabilityOf(category: string): string {
-  const head = category.split('/')[0] ?? '';
+  // A semicolon is treated exactly like a slash, for a different reason. The
+  // planner is shown the registry's capabilities as a `'; '`-joined sentence,
+  // and the model has pasted a chunk of that sentence straight back — the live
+  // ledger holds `scientific writing; verification.scientific_writing`. A
+  // category naming several capabilities is a paste, and the first one is the
+  // answer the planner actually meant.
+  const head = category.split(/[/;]/)[0] ?? '';
   const normalised = head
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
@@ -176,6 +183,34 @@ function tokensOf(capability: string): string[] {
     .split(' ')
     .map((token) => (token.length > 3 && token.endsWith('s') ? token.slice(0, -1) : token))
     .filter((token) => token.length > 0);
+}
+
+/**
+ * The subset of the registry's categories a proposal may resolve to, and a
+ * planner may be shown.
+ *
+ * The registry stores every design it has ever staffed, and two of those
+ * categories are written by Artifex rather than proposed by anyone: the mission
+ * role on task zero, and the `verification.` namespace `verifierCapabilityOf`
+ * derives above. Measured live, they are not a rounding error — eleven of the
+ * thirty-five stored categories are verification capabilities, and the single
+ * highest-observation entry is the mission role with 57.
+ *
+ * That matters because `resolveCapability` takes the FIRST candidate sharing any
+ * token and the registry orders by observations, so the mission role is tried
+ * first every time, and a producer's proposal can be resolved onto a
+ * verification capability — hiring the design that exists to check the work to
+ * do the work.
+ *
+ * Filtering, never re-ordering: the order IS the evidence tie-break, so a
+ * proposal that could join two capabilities still joins the better-established
+ * one.
+ */
+export function proposableCapabilities(known: readonly string[]): string[] {
+  return known.filter(
+    (capability) =>
+      capability !== MISSION_CATEGORY && !capability.startsWith(VERIFICATION_CATEGORY_PREFIX),
+  );
 }
 
 /**
@@ -289,7 +324,11 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
   // already knows (R38 AC-0), so a taxonomy converges instead of growing by one
   // entry per task. A registry that cannot answer degrades to normalising the
   // proposal alone — worse clustering, never a broken staffing.
-  const known = await registry.knownCapabilities?.().catch(() => []) ?? [];
+  // Filtered, because the registry stores the roles Artifex assigns itself
+  // alongside the capabilities the planner proposed, and the mission role sits
+  // at the TOP of the observation ordering — so an unfiltered list resolves
+  // producer proposals onto structural categories.
+  const known = proposableCapabilities(await registry.knownCapabilities?.().catch(() => []) ?? []);
   const capability = resolveCapability(contract.category, known);
 
   // A REDESIGN never reuses (R28 AC-0). Every other rung of the ladder changes
@@ -420,7 +459,7 @@ export interface StaffedVerifier {
  * bid and quietly turn into "never reuse a verifier".
  */
 export function verifierCapabilityOf(category: string): string {
-  return `verification.${capabilityOf(category)}`;
+  return `${VERIFICATION_CATEGORY_PREFIX}${capabilityOf(category)}`;
 }
 
 /**

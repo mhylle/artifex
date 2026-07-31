@@ -40,6 +40,23 @@ export const TextSchema = Type.String({ minLength: 1 });
 export const TimestampSchema = Type.String({ format: 'date-time' });
 
 /**
+ * The two categories Artifex assigns to a contract itself, rather than reading
+ * from a planner's proposal.
+ *
+ * Every other category is free text the planner invented at runtime, and the
+ * whole capability taxonomy is deliberately open (R23/R38). These two are not:
+ * intake stamps `MISSION_CATEGORY` on task zero, and the Agent Creator derives
+ * `VERIFICATION_CATEGORY_PREFIX + <capability>` for every verifier it staffs.
+ *
+ * They live here because two packages need the same answer. The API writes the
+ * mission category, the worker filters on it, and a literal in each would let a
+ * rename pass silently — which is the two-sites-keying-on-different-versions
+ * shape that produced defect `340aa7de`.
+ */
+export const MISSION_CATEGORY = 'mission';
+export const VERIFICATION_CATEGORY_PREFIX = 'verification.';
+
+/**
  * How expensive being wrong here is. Drives the computed model tier (ADR-0002)
  * and the Reviewer's verification depth.
  */

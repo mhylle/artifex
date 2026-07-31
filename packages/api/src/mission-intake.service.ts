@@ -12,7 +12,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { BadRequestException } from '@nestjs/common';
-import { MissionIntakeRequestSchema, TaskContractSchema, assertValid, validate } from '@artifex/shared-types';
+import { MISSION_CATEGORY, MissionIntakeRequestSchema, TaskContractSchema, assertValid, validate } from '@artifex/shared-types';
 import type { AutonomyDial, BlastRadius, TaskContract } from '@artifex/shared-types';
 
 import type { LedgerSink } from './ledger.types';
@@ -131,7 +131,11 @@ export class MissionIntakeService {
       // depth zero, and is graded exactly like anything else.
       missionId,
       parentTaskId: null,
-      category: 'mission',
+      // The shared constant, because the worker FILTERS on this exact value
+      // when deciding which registry categories a planner may be shown
+      // (`proposableCapabilities`). A literal in each package would let a rename
+      // pass silently and quietly re-admit the mission role as a suggestion.
+      category: MISSION_CATEGORY,
       depth: 0,
       objective: request.objective,
       acceptanceCriteria: request.successCriteria.map((statement, index) => ({

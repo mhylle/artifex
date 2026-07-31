@@ -20,7 +20,7 @@
  */
 import type { ErrorClass, EscalationRung, LedgerEventInput, LogicalTier, TaskContract } from '@artifex/shared-types';
 
-import { capabilityOf, staff, staffVerifier } from './agent-creator.js';
+import { capabilityOf, proposableCapabilities, staff, staffVerifier } from './agent-creator.js';
 import { concurrencyFor } from './design-playbook.js';
 import type { DesignAuthor, RegistryLookup } from './agent-creator.js';
 import { decompose, foldUp } from './orchestrator.js';
@@ -1116,7 +1116,13 @@ export async function runMission(
       // the name is already coined and clustering can only merge what shares a
       // token — measured cost of that ordering: 1.07 designs per category.
       // Failure is swallowed: naming guidance is an improvement, not a gate.
-      const known = await seams.registry.knownCapabilities?.().catch(() => []) ?? [];
+      // Filtered for the same reason `staff()` filters: the registry's list is
+      // topped by the mission role and salted with the `verification.` namespace,
+      // and suggesting either invites the planner to name a subtask after a role
+      // the system stamps on contracts itself.
+      const known = proposableCapabilities(
+        await seams.registry.knownCapabilities?.().catch(() => []) ?? [],
+      );
 
       try {
         children = await decompose(parent, seams.planner, {
