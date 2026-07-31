@@ -170,6 +170,46 @@ const CompletionSchema = Type.Object(
   { $id: 'CompletionAssessment', additionalProperties: false },
 );
 
+/**
+ * The default number of missions in flight at once (R39, ADR-0021).
+ *
+ * **Openly chosen, not derived.** Task-level concurrency IS derived —
+ * `concurrencyFor` reads it off the parent's budget and blast radius — but a
+ * mission has no parent contract to read it from, and the real bottleneck is a
+ * single local Ollama the worker cannot measure.
+ *
+ * What the requirement DOES determine is that it must exceed 1. R39 exists so
+ * the fleet view is not "a list of one", and a default of 1 would leave
+ * "instance per mission" false in the shipped binary while the code looked
+ * capable of it — the ornamental shape this project keeps finding.
+ *
+ * Four is small enough not to thrash one GPU with simultaneous constrained
+ * decoding, and large enough that concurrency is the normal case rather than a
+ * configuration someone has to discover.
+ */
+const DEFAULT_MISSION_CONCURRENCY = 4;
+
+/**
+ * How many missions this worker runs at once, honouring an operator override.
+ *
+ * Takes the environment as an argument rather than reading `process.env`, so the
+ * rule is testable without mutating global state — the same reason every other
+ * policy in this package is a pure function of its inputs.
+ *
+ * A junk, zero, negative or fractional value falls back rather than being
+ * obeyed: `concurrency: 0` makes a BullMQ consumer accept no jobs at all, so a
+ * typo in an environment variable would silently stop the swarm and look exactly
+ * like an empty queue. An explicit `1` IS honoured — serialising on purpose is a
+ * legitimate operator choice, and "no arbitrary caps" cuts both ways.
+ */
+export function missionConcurrency(env: Record<string, string | undefined>): number {
+  const raw = env['WORKER_CONCURRENCY'];
+  if (raw === undefined) return DEFAULT_MISSION_CONCURRENCY;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) return DEFAULT_MISSION_CONCURRENCY;
+  return parsed;
+}
+
 export interface RuntimeModels {
   /** Cheapest admitted model — the bulk of atomic worker tasks. */
   readonly worker: { readonly provider: string; readonly model: string };

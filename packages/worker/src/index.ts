@@ -22,7 +22,7 @@ import { rankWeakSpots } from './science-loop.js';
 import { casesFromTrail } from './bench-producer.js';
 import { candidateExecutor, candidateJudge } from './candidate-execution.js';
 import { buildScienceLoop } from './science-seams.js';
-import { createCandidateSeams } from './runtime.js';
+import { createCandidateSeams, missionConcurrency } from './runtime.js';
 import { evaluatePetition } from './sealed-evaluation.js';
 import { petitionFromWeakSpots, petitionRefusal } from './petition.js';
 import { ProposalEmitter } from './proposal-emitter.js';
@@ -420,7 +420,11 @@ export async function main(): Promise<void> {
 
       return { outcome: result.outcome, events: result.trail.length };
     },
-    { connection: redis, concurrency: 1 },
+    // Instance per mission, shared brain (R39). This was `concurrency: 1`, so a
+    // second mission simply waited and the fleet view could only ever show the
+    // "list of one" the requirement exists to end. The value is an operator
+    // choice with a default above 1 — see ADR-0021.
+    { connection: redis, concurrency: missionConcurrency(process.env) },
   );
 
   consumer.on('failed', (job, error) => {
