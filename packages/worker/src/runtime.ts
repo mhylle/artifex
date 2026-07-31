@@ -43,6 +43,7 @@ import type { IntentJudge, PlanJudge } from './reviewer.js';
 import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
 import type { MissionSeams } from './mission-loop.js';
+import type { IntakeQuestion } from './intake-dialogue.js';
 
 const AnswerSchema = Type.Object(
   { answer: Type.String({ minLength: 1 }) },
@@ -636,6 +637,42 @@ const ToolRequestSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/**
+ * What the intake dialogue asks the model for (R30).
+ *
+ * No example phrasings and no closed vocabulary, per this project's standing
+ * rule: a worked example of a bad criterion teaches the model to match that
+ * example rather than to read the words in front of it, and the taxonomy of
+ * what can be ambiguous about a request is not something to freeze.
+ *
+ * `stakes` is asked as a consequence question rather than a severity label,
+ * because "how bad is this" invites a model to grade its own uncertainty, while
+ * "would guessing change what gets delivered" is a question about the work.
+ */
+const IntakeQuestionsSchema = Type.Object(
+  {
+    questions: Type.Array(
+      Type.Object(
+        {
+          about: Type.String({
+            description: 'The criterion id, or the name of the field, this question is about.',
+          }),
+          question: Type.String({
+            description: 'The question to put to the requester, answerable in a sentence.',
+          }),
+          stakes: Type.Union([Type.Literal('low'), Type.Literal('high')], {
+            description:
+              'high if guessing wrong would change what gets built or delivered; low if the work is ' +
+              'defensible either way.',
+          }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
 export function createMissionSeams(
   generator: StructuredGenerator,
   models: RuntimeModels,
@@ -790,6 +827,39 @@ export function createMissionSeams(
         ].join('\n'))) as { objective: string };
 
         return { objective: out.objective, acceptanceCriteria: null };
+      },
+    },
+
+    /**
+     * The intake dialogue (R30) — Stage 1, before anything is decomposed.
+     *
+     * EVALUATIVE tier, like the gates: "is this criterion answerable as written"
+     * is a judgement about the shape of the work, and fold-up taught us that
+     * evaluative questions belong a tier above the doing (insight `1aad1dd5`).
+     *
+     * The model is asked what it would need to know, not to grade the request.
+     * A scoring prompt gets a score back and nothing a requester can act on; a
+     * question is the thing the dossier actually asks for.
+     */
+    interrogator: {
+      async assess({ mission: m }) {
+        const out = (await gen(models.evaluator, IntakeQuestionsSchema, [
+          'You are about to run this mission. Before any work starts, list what you would',
+          'have to ask the requester in order to know when the mission is done.',
+          '',
+          'Ask only about things the request leaves genuinely open. A criterion you could',
+          'grade as written needs no question. Return an empty list if nothing is open —',
+          'do not invent a question to fill it.',
+          '',
+          `OBJECTIVE: ${m.objective}`,
+          'SUCCESS CRITERIA (these are what the work will be graded against):',
+          ...m.acceptanceCriteria.map((c) => `  [${c.criterionId}] ${c.statement}`),
+          `OUT OF SCOPE: ${m.boundaries.outOfScope.join('; ') || '(nothing stated)'}`,
+          `EFFORT BUDGET: ${m.budget.floor}–${m.budget.ceiling} ${m.budget.unit}`,
+          `AUTONOMY DIAL: ${m.autonomyDial}`,
+        ].join('\n'))) as { questions?: IntakeQuestion[] };
+
+        return { questions: out.questions ?? [] };
       },
     },
 

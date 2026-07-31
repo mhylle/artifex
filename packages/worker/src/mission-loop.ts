@@ -22,6 +22,8 @@ import type { ErrorClass, EscalationRung, LedgerEventInput, LogicalTier, TaskCon
 
 import { capabilityOf, proposableCapabilities, staff, staffVerifier } from './agent-creator.js';
 import { concurrencyFor } from './design-playbook.js';
+import { triageQuestions } from './intake-dialogue.js';
+import type { IntakeQuestion } from './intake-dialogue.js';
 import type { DesignAuthor, RegistryLookup } from './agent-creator.js';
 import { decompose, foldUp } from './orchestrator.js';
 import type { Planner, Reconciler } from './orchestrator.js';
@@ -130,6 +132,14 @@ export interface MissionSeams {
   readonly registry: RegistryLookup;
   readonly author: DesignAuthor;
   readonly clarityJudge: ClarityJudge;
+  /**
+   * The intake dialogue (R30). Optional so every caller predating it compiles;
+   * REQUIRED at the composition root, which is the pattern that has caught five
+   * dead mechanisms here.
+   */
+  readonly interrogator?: {
+    assess(input: { readonly mission: TaskContract }): Promise<{ readonly questions: IntakeQuestion[] }>;
+  };
   readonly work: SpecialistWork;
   readonly completionJudge: CompletionJudge;
   readonly reconciler: Reconciler;
@@ -2165,6 +2175,75 @@ export async function runMission(
 
     return { ok: true, deliverable: folded.deliverable };
   };
+
+  // ---- Stage 1 · the intake dialogue (R30) ---------------------------------
+  // Runs BEFORE anything is decomposed or staffed, which is what "refuses to
+  // start the mission" has to mean: not a late rejection, but no task tree at
+  // all until the request is answerable.
+  //
+  // Here rather than in the control plane (ADR-0022). Judging whether a
+  // criterion is testable is a model call, and a model call at the API would
+  // turn a degraded model into a total intake outage — the control plane's job
+  // is to accept and record.
+  //
+  // Skipped on resume: the questions are already on the trail, and re-asking
+  // them is how a mission that a human just answered would stop again on the
+  // same question.
+  if (seams.interrogator !== undefined && !resuming) {
+    // Swallowed on failure. An interrogation that cannot run must not stop a
+    // mission a requester has already specified well — degrading to "ask
+    // nothing" loses a safeguard, degrading to "refuse everything" loses the
+    // system.
+    // The failure is RECORDED, not merely swallowed. Degrading to "ask nothing"
+    // is the right policy — a model outage must not stop a well-specified
+    // mission — but an unrecorded degrade is indistinguishable from "the model
+    // found nothing to ask", and AC-1's whole demand is that an ambiguity is
+    // never silently assumed away. Observed live: the first vague mission run
+    // under concurrent load threw here and proceeded to decompose, looking
+    // exactly like a clean interrogation.
+    let asked: { readonly questions: IntakeQuestion[] };
+    try {
+      asked = await seams.interrogator.assess({ mission });
+    } catch (error) {
+      asked = { questions: [] };
+      record(mission.taskId, 'contract', 'intake.interrogation_failed', 'orchestrator', {
+        detail: describe(error),
+        consequence: 'the mission proceeds uninterrogated — ambiguities were not surfaced',
+      });
+    }
+
+    const triaged = triageQuestions(asked.questions, mission.autonomyDial);
+
+    // EVERY question is recorded, blocking or not. AC-1 is that an ambiguity is
+    // "never silently resolved by assumption", and the ledger is where "not
+    // silently" is discharged.
+    for (const question of triaged.blocking) {
+      record(mission.taskId, 'contract', 'intake.question_raised', 'orchestrator', {
+        about: question.about, question: question.question, stakes: question.stakes, blocking: true,
+      });
+    }
+    for (const question of triaged.flagged) {
+      record(mission.taskId, 'contract', 'intake.assumption_flagged', 'orchestrator', {
+        about: question.about, question: question.question, stakes: question.stakes, blocking: false,
+      });
+    }
+
+    if (triaged.blocking.length > 0) {
+      // The attention queue is how a human sees it (R18), and resume-by-replay
+      // is how the answer comes back (R41). Both already exist; this is the
+      // producer they were missing for intake.
+      record(mission.taskId, 'escalation', 'escalation.awaiting_human', 'orchestrator', {
+        objective: mission.objective,
+        rung: 'intake_clarification',
+        autonomyDial: mission.autonomyDial,
+        findings: triaged.blocking.map((q) => `[${q.about}] ${q.question}`),
+      });
+      return surrender(
+        'the intake dialogue has unanswered questions',
+        triaged.blocking.map((q) => `[${q.about}] ${q.question}`),
+      );
+    }
+  }
 
   const root = await runSubtree(mission, 0);
 

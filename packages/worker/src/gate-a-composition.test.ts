@@ -471,3 +471,135 @@ describe('340aa7de — the loop feeds the planner known capabilities', () => {
     expect(result.trail.some((e) => e.type === 'task.contracted'), 'the split never happened').toBe(true);
   });
 });
+
+/**
+ * R30 AC-0/AC-1 in the loop — the dialogue actually runs, and actually refuses.
+ *
+ * `triageQuestions` is proven in `intake-dialogue.test.ts`. What that cannot see
+ * is whether anything CALLS it, whether a blocking question stops the mission
+ * before a task tree exists, and whether every question reaches the ledger. This
+ * project has found fifteen mechanisms that were correct and unreachable, so the
+ * producer gets its test in the same iteration.
+ */
+describe('R30 — the intake dialogue runs before anything is decomposed', () => {
+  const interrogator = (questions: Array<{ about: string; question: string; stakes: 'low' | 'high' }>) => ({
+    calls: [] as unknown[],
+    seam: {
+      async assess(input: unknown) {
+        (interrogatorCalls as unknown[]).push(input);
+        return { questions };
+      },
+    },
+  });
+  let interrogatorCalls: unknown[] = [];
+
+  it('refuses to start: a blocking question means NO task is contracted', async () => {
+    // "Refuses to start the mission while any is missing" — not a late
+    // rejection. The absence of `task.contracted` is the assertion, because a
+    // mission that planned and then stopped has already started.
+    interrogatorCalls = [];
+    const result = await runMission(
+      mission(),
+      { ...seams(), interrogator: interrogator([{ about: 'm-1', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+      { now: () => AT },
+    );
+
+    expect(interrogatorCalls, 'the interrogator was never consulted').toHaveLength(1);
+    expect(result.outcome).toBe('surrendered');
+    expect(
+      result.trail.some((e) => e.type === 'task.contracted'),
+      'the mission planned work despite an unanswered blocking question',
+    ).toBe(false);
+    expect(result.trail.some((e) => e.type === 'agent.staffed' && e.taskId !== MISSION_ID)).toBe(false);
+  });
+
+  it('puts the blocking question on the attention queue, quoting it', async () => {
+    // A refusal a human cannot act on is a dead end. The requester has to be
+    // able to read the actual question.
+    interrogatorCalls = [];
+    const result = await runMission(
+      mission(),
+      { ...seams(), interrogator: interrogator([{ about: 'm-1', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+      { now: () => AT },
+    );
+
+    const waiting = result.trail.find((e) => e.type === 'escalation.awaiting_human');
+    expect(waiting, 'nothing reached the attention queue').toBeDefined();
+    expect(JSON.stringify(waiting?.payload)).toMatch(/Which audience\?/);
+    expect(result.trail.some((e) => e.type === 'intake.question_raised')).toBe(true);
+  });
+
+  it('carries a low-stakes ambiguity instead, and RECORDS it rather than assuming it', async () => {
+    // AC-1's real demand. The mission proceeds — and the assumption is on the
+    // trail, so it was never silently resolved. Both halves asserted: a rule
+    // that blocked everything would satisfy "recorded" and fail the criterion.
+    interrogatorCalls = [];
+    const result = await runMission(
+      mission(),
+      { ...seams(), interrogator: interrogator([{ about: 'm-1', question: 'Which audience?', stakes: 'low' }]).seam } as never,
+      { now: () => AT },
+    );
+
+    const flagged = result.trail.find((e) => e.type === 'intake.assumption_flagged');
+    expect(flagged, 'a carried ambiguity left no trace — it was silently assumed').toBeDefined();
+    expect(JSON.stringify(flagged?.payload)).toMatch(/Which audience\?/);
+    expect(
+      result.trail.some((e) => e.type === 'task.contracted'),
+      'a LOW-stakes ambiguity stopped the mission',
+    ).toBe(true);
+  });
+
+  it('DISTRACTOR: a mission with NO interrogator runs exactly as before', async () => {
+    // Every caller predating the dialogue must be untouched — the additive half.
+    const withOut = await runMission(mission(), seams(), { now: () => AT });
+
+    expect(withOut.trail.some((e) => e.type === 'intake.question_raised')).toBe(false);
+    expect(withOut.trail.some((e) => e.type === 'task.contracted')).toBe(true);
+  });
+
+  it('DISTRACTOR: an interrogator that THROWS does not stop a well-specified mission', async () => {
+    // Degrading to "ask nothing" loses a safeguard; degrading to "refuse
+    // everything" loses the system. A model outage must not become an intake
+    // outage — the same reasoning that keeps the call out of the API.
+    const result = await runMission(
+      mission(),
+      { ...seams(), interrogator: { async assess() { throw new Error('model down'); } } } as never,
+      { now: () => AT },
+    );
+
+    expect(result.trail.some((e) => e.type === 'task.contracted'), 'a model outage blocked intake').toBe(true);
+  });
+
+  it('DISTRACTOR: a RESUMED mission is not re-interrogated', async () => {
+    // Re-asking is how a mission a human just answered stops again on the same
+    // question. The prior trail carries a contract, so the loop is resuming.
+    interrogatorCalls = [];
+    const prior = (await runMission(mission(), seams(), { now: () => AT })).trail;
+
+    await runMission(
+      mission(),
+      { ...seams(), interrogator: interrogator([{ about: 'm-1', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+      { now: () => AT, resumeFrom: prior as never },
+    );
+
+    expect(interrogatorCalls, 'a resumed mission was interrogated again').toHaveLength(0);
+  });
+
+  it('RECORDS an interrogation failure rather than degrading in silence', async () => {
+    // Observed live: the first vague mission threw here under concurrent load
+    // and went straight on to decompose, indistinguishable from a clean
+    // interrogation. Degrading open is the right policy; degrading INVISIBLY is
+    // the thing AC-1 rules out.
+    const result = await runMission(
+      mission(),
+      { ...seams(), interrogator: { async assess() { throw new Error('model down'); } } } as never,
+      { now: () => AT },
+    );
+
+    const failure = result.trail.find((e) => e.type === 'intake.interrogation_failed');
+    expect(failure, 'the interrogation failed and left no trace').toBeDefined();
+    expect(String(failure?.payload['detail'])).toMatch(/model down/);
+    // ...and the mission still ran, because a model outage is not a spec problem.
+    expect(result.trail.some((e) => e.type === 'task.contracted')).toBe(true);
+  });
+});
