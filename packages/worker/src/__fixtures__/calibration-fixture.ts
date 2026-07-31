@@ -87,9 +87,24 @@ export function seams(script: CalibrationScript = {}): MissionSeams {
         },
         async probes() {
           if (script.probeExpecting === undefined) return [];
-          // Planted against the task the loop actually ran, so the probe is
-          // scored rather than silently skipped as unseen.
-          return [{ taskId: MISSION_ID, expected: script.probeExpecting }];
+          // A REAL planted probe: its own contract and its own deliverable, run
+          // through the same Gate B as the mission's work.
+          //
+          // The first version returned `{taskId: MISSION_ID, expected}` — the id
+          // of the task the loop actually ran. That is not a planted probe at
+          // all, it is relabelling real work as one, and it could only ever
+          // score whatever the mission happened to do. It passed because nothing
+          // implemented `probes`, so no probe was ever reviewed and the shape
+          // was never exercised. Fixed at the fixture, which was the thing that
+          // was wrong.
+          return [{
+            taskId: 'probe:fixture:planted',
+            expected: script.probeExpecting,
+            contract: mission(),
+            deliverable: { answer: 'an answer to some other question entirely' },
+            sourceCaseId: 'fixture',
+            borrowedFrom: script.probeExpecting === 'fail' ? 'other-case' : null,
+          }];
         },
       },
     }),

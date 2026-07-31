@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
  */
 import { pathToFileURL } from 'node:url';
 
-import { AssetRegistryRepository, HotFixRepository, KnowledgeCommonsRepository, LedgerRepository, ModelCatalogRepository, runMigrations } from '@artifex/memory-fabric';
+import { AssetRegistryRepository, HotFixRepository, KnowledgeCommonsRepository, LedgerRepository, ModelCatalogRepository, ReplayBenchRepository, runMigrations } from '@artifex/memory-fabric';
 import { ModelRouter, createBackend } from '@artifex/model-router';
 import type { TaskContract } from '@artifex/shared-types';
 import { Worker } from 'bullmq';
@@ -65,6 +65,11 @@ export async function main(): Promise<void> {
   // decision core, constitutional guard, store — were built and mutation-proven
   // in one iteration and called by nothing; this line is the producer.
   const hotFixes = new HotFixRepository(pool);
+  // The sealed replay bench (R35 AC-1, defect `2eeef21f`). Its known answers are
+  // what turns `probeMisses` from a correct function into a measurement — and
+  // the one thing that catches a reviewer wrong the same way every time, which
+  // unanimity sampling cannot (`627cd71c`).
+  const bench = new ReplayBenchRepository(pool);
   const router = new ModelRouter({
     catalog: {
       // `null` means "no admitted model for this tier"; a rejection would mean
@@ -121,7 +126,7 @@ export async function main(): Promise<void> {
         // Registry stayed a null-bidding stub for the project's whole life
         // (defect `41f7555c`) with every suite green.
         buildWorkerSeams(
-          { generator, models: { worker, evaluator }, assets, ledger, commons, hotFixes },
+          { generator, models: { worker, evaluator }, assets, ledger, commons, hotFixes, bench },
           contract.missionId,
         ),
         {

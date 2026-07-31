@@ -20,6 +20,24 @@ import { Type } from '@sinclair/typebox';
 import type { RegistryLookup } from './agent-creator.js';
 import { composeDesign } from './design-playbook.js';
 import type { ControlSignals, DecompositionGate, FastLoopSeam, KnowledgeCommonsSubmitter } from './mission-loop.js';
+import { plantProbes } from './calibration.js';
+import type { TaskContract } from '@artifex/shared-types';
+
+/**
+ * The slice of the sealed bench the calibration seam reads (R35 AC-1).
+ *
+ * Structural, like every other fabric dependency here — the runtime imports no
+ * repository. Sealed rather than open on purpose: the open slice is what the
+ * Learning Agent optimises against, so scoring the Reviewer on it would measure
+ * how well the reviewer agrees with something already tuned to the reviewer.
+ */
+export interface SealedBenchReader {
+  sealedCases(): Promise<readonly {
+    readonly caseId: string;
+    readonly contract: unknown;
+    readonly verifiedOutcome: unknown;
+  }[]>;
+}
 import type { IntentJudge, PlanJudge } from './reviewer.js';
 import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner } from './planner.js';
 import type { StructuredGenerator } from './planner.js';
@@ -480,6 +498,7 @@ export function createMissionSeams(
   registry?: RegistryLookup,
   commons?: KnowledgeCommonsSubmitter,
   fastLoop?: FastLoopSeam,
+  bench?: SealedBenchReader,
 ): MissionSeams {
   const gen = (
     m: { provider: string; model: string },
@@ -831,6 +850,31 @@ export function createMissionSeams(
      * why `627cd71c` was logged rather than assumed solved.
      */
     calibration: {
+      /**
+       * Known-answer probes, drawn from the SEALED bench (R35 AC-1).
+       *
+       * The sealed slice's documented purpose is exactly this — "used to
+       * evaluate amendment petitions and to calibrate the Reviewer" — so
+       * reading it here is the grant working, not a leak. What R25 forbids is
+       * the LEARNING AGENT seeing it, and the learner's reader is bound to the
+       * open view.
+       *
+       * An empty bench yields no probes. That is the ordinary state of a young
+       * system, not a fault, and the calibration simply reports none planted.
+       */
+      async probes() {
+        if (bench === undefined) return [];
+        try {
+          const cases = await bench.sealedCases();
+          return plantProbes(cases.map((c) => ({
+            caseId: c.caseId,
+            contract: c.contract as TaskContract,
+            verifiedOutcome: c.verifiedOutcome,
+          })));
+        } catch {
+          return [];
+        }
+      },
       async sample(issued) {
         const target = issued[0];
         if (target === undefined) return [];

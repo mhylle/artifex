@@ -22,6 +22,8 @@
  * overturn a gate would put the yardstick in the business of overruling the
  * thing it measures.
  */
+import type { TaskContract } from '@artifex/shared-types';
+
 
 export interface IssuedVerdict {
   readonly taskId: string;
@@ -178,4 +180,87 @@ export function independenceViolation(input: {
   }
 
   return null;
+}
+
+/** A case whose correct answer is already known — a sealed bench case, in practice. */
+export interface KnownCase {
+  readonly caseId: string;
+  readonly contract: TaskContract;
+  readonly verifiedOutcome: unknown;
+}
+
+/** A probe ready to be run through the real Gate B. */
+export interface PlantedProbe {
+  /** Deterministic, and never a real task id — probes are not mission work. */
+  readonly taskId: string;
+  readonly expected: 'pass' | 'fail';
+  readonly contract: TaskContract;
+  readonly deliverable: unknown;
+  readonly sourceCaseId: string;
+  /** Which case the wrong answer was borrowed from; null for a known-good probe. */
+  readonly borrowedFrom: string | null;
+}
+
+/**
+ * Build the probes to inject into the review stream (R35 AC-1).
+ *
+ * A known-BAD probe pairs one case's contract with ANOTHER case's verified
+ * answer. Two reasons, and both matter:
+ *
+ *   It fabricates nothing. Every byte is an answer the system itself verified,
+ *   so the probe makes no judgement about what "wrong" looks like — which is
+ *   precisely the judgement a probe exists to avoid making.
+ *
+ *   It can only be caught by READING the answer against the criteria. An empty
+ *   deliverable would be refused by Gate B's mechanical tier with no model
+ *   involved, so it would measure the mechanical tier and report a healthy catch
+ *   rate while the semantic tier — where rubber-stamping actually happens — went
+ *   untested.
+ *
+ * A known-GOOD probe is each case's own verified answer. `probeMisses` scores
+ * both directions because leniency is not the only failure: the tier-2 judges
+ * have shown reflexive rejection at a 58% false-bounce rate (ADR-0010), and a
+ * calibration measuring only leniency would have missed all of it.
+ *
+ * The planter REFUSES rather than inventing. One case has nothing to borrow
+ * from; two cases with identical answers would produce a probe labelled "fail"
+ * whose deliverable is correct, scoring the reviewer a miss for being right.
+ * Both cases simply plant no bad probe.
+ */
+export function plantProbes(cases: readonly KnownCase[]): PlantedProbe[] {
+  const probes: PlantedProbe[] = [];
+
+  cases.forEach((own, i) => {
+    probes.push({
+      taskId: `probe:${own.caseId}:good`,
+      expected: 'pass',
+      contract: own.contract,
+      deliverable: own.verifiedOutcome,
+      sourceCaseId: own.caseId,
+      borrowedFrom: null,
+    });
+
+    // Subsumed by the identical-answer guard below — with one case the rotation
+    // lends back to itself, so the deliverables always match. Kept because it
+    // states the rule directly rather than leaving it to a coincidence of
+    // modular arithmetic. Verified as an equivalent mutant: removing it alone
+    // changes nothing, and removing BOTH breaks two tests.
+    if (cases.length < 2) return;
+
+    // Rotate rather than pick at random: deterministic, so a replay plants the
+    // same probes, and every case both lends and borrows exactly once.
+    const lender = cases[(i + 1) % cases.length]!;
+    if (JSON.stringify(lender.verifiedOutcome) === JSON.stringify(own.verifiedOutcome)) return;
+
+    probes.push({
+      taskId: `probe:${own.caseId}:bad`,
+      expected: 'fail',
+      contract: own.contract,
+      deliverable: lender.verifiedOutcome,
+      sourceCaseId: own.caseId,
+      borrowedFrom: lender.caseId,
+    });
+  });
+
+  return probes;
 }

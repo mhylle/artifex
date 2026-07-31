@@ -99,6 +99,25 @@ export interface WorkerDependencies {
    * means the deployed worker cannot quietly run without it.
    */
   readonly hotFixes: HotFixStore;
+  /**
+   * The sealed replay bench (R35 AC-1, defect `2eeef21f`).
+   *
+   * REQUIRED for the same reason `commons` and `hotFixes` are: `probes()` is
+   * optional on the seam, and optional-at-the-seam is precisely what let
+   * `probeMisses` sit correct and unfed since P35. Required here means the
+   * deployed worker cannot run with the reviewer's leniency unmeasured.
+   */
+  readonly bench: SealedBenchStore;
+}
+
+/** The slice of the replay bench the worker binds to (R35 AC-1). */
+export interface SealedBenchStore {
+  list(filter?: { readonly slice?: string }): Promise<readonly {
+    readonly caseId: string;
+    readonly contract: unknown;
+    readonly verifiedOutcome: unknown;
+    readonly retiredAt: string | null;
+  }[]>;
 }
 
 /**
@@ -176,5 +195,11 @@ export function buildWorkerSeams(deps: WorkerDependencies, missionId: string): M
     },
     deps.commons,
     fastLoop,
+    {
+      // Sealed slice only, and RETIRED cases excluded: a case that no longer
+      // represents the work is not ground truth about the reviewer either.
+      sealedCases: async () =>
+        (await deps.bench.list({ slice: 'sealed' })).filter((c) => c.retiredAt === null),
+    },
   );
 }

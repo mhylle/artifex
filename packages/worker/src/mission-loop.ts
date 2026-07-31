@@ -28,7 +28,7 @@ import type { Planner, Reconciler } from './orchestrator.js';
 import { gateA, gateB } from './reviewer.js';
 import type { CompletionJudge, CoverageJudge, IntentJudge, PlanJudge } from './reviewer.js';
 import { calibrationOf, probeMisses } from './calibration.js';
-import type { IssuedVerdict, Probe, ReReview } from './calibration.js';
+import type { IssuedVerdict, PlantedProbe, ReReview } from './calibration.js';
 import { pedigreeOf, surrenderDossier } from './dossier.js';
 import { entryRungFor, isStalled, worstClass } from './escalation.js';
 import type { AttemptSignature } from './escalation.js';
@@ -251,7 +251,15 @@ export interface CalibrationSeam {
   /** Which of these verdicts to re-review. Sampling policy belongs to the caller. */
   sample(issued: readonly IssuedVerdict[]): Promise<readonly ReReview[]>;
   /** Probes planted in this mission, if any. */
-  probes?(): Promise<readonly Probe[]>;
+  /**
+   * Probes planted for this mission, if any (R35 AC-1).
+   *
+   * Returns work to be REVIEWED, not merely a list of expected verdicts. It
+   * carried `{taskId, expected}` alone while nothing implemented it, which could
+   * never have measured anything: `probeMisses` matches those ids against
+   * verdicts, and no verdict for a synthetic task would ever exist.
+   */
+  probes?(): Promise<readonly PlantedProbe[]>;
 }
 
 export interface Escalation {
@@ -567,6 +575,31 @@ export async function runMission(
     });
   }
 
+  /**
+   * The evidence bundle a probe is reviewed with (R35 AC-1).
+   *
+   * Shaped so the MECHANICAL tier stays quiet, because a probe measures the
+   * SEMANTIC one. Effort is set to the contract's floor so the ceiling check
+   * cannot trip, and a token action is supplied when the contract granted tools
+   * so the "entitled to tools, used none" check cannot either. Without that, a
+   * known-GOOD probe would fail for a bookkeeping reason and be scored a miss
+   * against a reviewer that did nothing wrong.
+   */
+  const probeBundle = (probe: PlantedProbe) => ({
+    bundleId: probe.taskId,
+    taskId: probe.taskId,
+    agentId: 'probe',
+    deliverable: probe.deliverable,
+    actions: probe.contract.inputs.toolEntitlements.length === 0
+      ? []
+      : [{ tool: 'probe', input: {}, output: {}, at: now() } as never],
+    consulted: [],
+    assumptions: [],
+    reflection: null,
+    effortSpent: probe.contract.budget.floor,
+    producedAt: now(),
+  });
+
   // ---- the fast loop (R26) -------------------------------------------------
   // Every Gate B result this mission has produced, in order, as one criterion
   // each. The fast loop's whole input, and it is derived from work already done
@@ -731,14 +764,63 @@ export async function runMission(
 
     try {
       const reReviews = await seams.calibration.sample(issued);
-      const probes = (await seams.calibration.probes?.()) ?? [];
+
+      // ---- probes are RUN, not merely declared (R35 AC-1) -------------------
+      // The criterion says "when the Reviewer PROCESSES it", so each planted
+      // probe goes through the same `gateB` with the same judges that graded the
+      // mission's real work. Declaring a probe and never reviewing it would
+      // measure nothing at all — which is what `probes()` returning bare
+      // {taskId, expected} amounted to while nothing implemented it.
+      //
+      // Deliberately kept OUT of the re-review sample: there is no point asking
+      // a second opinion about a case whose answer is already known, and mixing
+      // probes into `issued` would let synthetic work contaminate the agreement
+      // rate, the fold-up, and the designs' track records.
+      const planted = (await seams.calibration.probes?.()) ?? [];
+      const probeVerdicts: IssuedVerdict[] = [];
+      for (const probe of planted) {
+        try {
+          const verdict = await gateB(
+            probe.contract,
+            probeBundle(probe),
+            seams.completionJudge,
+            seams.intentJudge,
+            { verdictId: probe.taskId, reviewerId: 'probe', issuedAt: now() },
+          );
+          probeVerdicts.push({
+            taskId: probe.taskId,
+            outcome: verdict.outcome === 'pass' ? 'pass' : 'fail',
+            reviewerId: 'probe',
+            verdictId: probe.taskId,
+            objective: probe.contract.objective,
+            deliverable: probe.deliverable,
+          });
+        } catch {
+          // An unevaluable probe is not a miss. Scoring it as one would blame
+          // the reviewer for an outage.
+        }
+      }
 
       const calibration = calibrationOf(issued, reReviews);
-      const misses = probeMisses(probes, issued);
+      const misses = probeMisses(planted, probeVerdicts);
 
       record(mission.taskId, 'verification', 'reviewer.calibrated', 'reviewer', {
         ...calibration,
-        probesPlanted: probes.length,
+        // Planted AND processed, because they differ and the gap matters: a
+        // bench full of unusable cases would report zero misses and read as a
+        // perfectly calibrated reviewer. Observed live on mission `6082c48e` —
+        // 4 planted, 2 processed, because a case left by an old dogfood script
+        // carried `{"o": "sealed case"}` where a contract belongs.
+        probesPlanted: planted.length,
+        probesProcessed: probeVerdicts.length,
+        // Every processed probe, not only the failures. "Zero misses" is not
+        // evidence unless you can see what was actually caught — and the catch
+        // is the half that shows the reviewer working.
+        probeResults: probeVerdicts.map((v) => ({
+          taskId: v.taskId,
+          expected: planted.find((p) => p.taskId === v.taskId)?.expected ?? 'unknown',
+          actual: v.outcome,
+        })),
         misses,
       });
     } catch {

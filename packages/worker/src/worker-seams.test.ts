@@ -358,3 +358,75 @@ describe('buildWorkerSeams — the fast loop', () => {
     expect(calls.roleWrites, 'the asset was patched with no log entry to revert it').toHaveLength(0);
   });
 });
+
+/**
+ * R35 AC-1 — probes are really planted (defect `2eeef21f`).
+ *
+ * `probeMisses` sat correct and unfed since P35 because `probes()` is optional
+ * on the seam. `WorkerDependencies.bench` is required for the same reason
+ * `commons` and `hotFixes` are: the deployed worker must not run with the
+ * reviewer's leniency unmeasured.
+ */
+describe('buildWorkerSeams — the sealed bench feeds the probes', () => {
+  function benched(cases: Array<{ caseId: string; contract: unknown; verifiedOutcome: unknown; retiredAt: string | null }>) {
+    const asked: Array<{ slice?: string } | undefined> = [];
+    const { deps } = dependencies();
+    deps.bench = {
+      async list(filter?: { slice?: string }) { asked.push(filter); return cases; },
+    };
+    return { deps, asked };
+  }
+
+  const aCase = (caseId: string, answer: string, retiredAt: string | null = null) => ({
+    caseId,
+    contract: { objective: `question ${caseId}`, category: 'answering', acceptanceCriteria: [] },
+    verifiedOutcome: { answer },
+    retiredAt,
+  });
+
+  it('supplies a probes() seam at all', async () => {
+    const { deps } = benched([]);
+
+    expect(buildWorkerSeams(deps, MISSION_ID).calibration?.probes).toBeDefined();
+  });
+
+  it('reads the SEALED slice, never the open one', async () => {
+    // The open slice is what the Learning Agent optimises against. Scoring the
+    // Reviewer on it would measure how well the reviewer agrees with something
+    // already tuned to the reviewer.
+    const { deps, asked } = benched([aCase('a', '100'), aCase('b', 'Paris')]);
+
+    await buildWorkerSeams(deps, MISSION_ID).calibration!.probes!();
+
+    expect(asked[0]?.slice, 'the probes were drawn from the wrong slice').toBe('sealed');
+  });
+
+  it('plants both directions from two sealed cases', async () => {
+    const { deps } = benched([aCase('a', '100'), aCase('b', 'Paris')]);
+
+    const probes = await buildWorkerSeams(deps, MISSION_ID).calibration!.probes!();
+
+    expect(probes.filter((p) => p.expected === 'fail').length, 'no known-bad probe').toBeGreaterThan(0);
+    expect(probes.filter((p) => p.expected === 'pass').length).toBeGreaterThan(0);
+  });
+
+  it('DISTRACTOR: a RETIRED case is not used as ground truth', async () => {
+    // A case that no longer represents the work is not ground truth about the
+    // reviewer either. With the only other case retired there is nothing to
+    // borrow, so no known-bad probe can be built.
+    const { deps } = benched([aCase('a', '100'), aCase('b', 'Paris', '2026-07-01T00:00:00.000Z')]);
+
+    const probes = await buildWorkerSeams(deps, MISSION_ID).calibration!.probes!();
+
+    expect(probes.filter((p) => p.expected === 'fail'), 'a retired case was borrowed from').toHaveLength(0);
+    expect(probes.filter((p) => p.expected === 'pass')).toHaveLength(1);
+  });
+
+  it('DISTRACTOR: an empty bench yields no probes rather than throwing', async () => {
+    // The ordinary state of a young system. The calibration reports none
+    // planted; it does not fail the mission.
+    const { deps } = benched([]);
+
+    await expect(buildWorkerSeams(deps, MISSION_ID).calibration!.probes!()).resolves.toEqual([]);
+  });
+});
