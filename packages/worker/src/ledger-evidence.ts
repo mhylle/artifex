@@ -22,7 +22,7 @@ import type { MissionEvidence } from './science-loop.js';
 export interface MissionIndex {
   listMissions(): Promise<ReadonlyArray<{
     readonly missionId: string;
-    readonly status: 'running' | 'delivered' | 'surrendered';
+    readonly status: 'running' | 'delivered' | 'surrendered' | 'abandoned';
     readonly escalations: number;
   }>>;
 }
@@ -151,7 +151,13 @@ export class LedgerEvidenceSource {
       if (wanted !== null && !wanted.has(mission.missionId)) continue;
       // Skipped BEFORE reading: an unfinished mission is not history, and
       // replaying it would cost a query to produce nothing.
-      if (mission.status === 'running') continue;
+      //
+      // ABANDONED counts as unfinished here too (defect `dd2e9d18`). A mission
+      // the startup sweep recorded as abandoned died because a worker process
+      // was killed — its partial verdicts are evidence about infrastructure,
+      // not about the work, and feeding them to the learner would let a crashed
+      // container be ranked as a weak spot in a capability.
+      if (mission.status === 'running' || mission.status === 'abandoned') continue;
 
       const events = await this.#reader.replay({ missionId: mission.missionId });
 

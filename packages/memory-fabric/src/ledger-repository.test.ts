@@ -311,6 +311,34 @@ describe('R21 — listMissions projects the fleet out of the ledger', () => {
     expect(found?.status).toBe('surrendered');
   });
 
+  it('reports a swept mission as abandoned, not running (defect dd2e9d18)', async () => {
+    // Nothing writes an event when a worker dies, so the startup sweep appends
+    // one. Without this the projection would call the corrective event nothing
+    // and keep reporting the mission as running.
+    const missionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Killed mid-flight.' } }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.abandoned' }));
+
+    const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
+
+    expect(found?.status).toBe('abandoned');
+  });
+
+  it('reports an abandoned mission that RAN AGAIN as running — the sweep is self-correcting', async () => {
+    // The property the sweep's safety rests on. A mission wrongly swept (or
+    // deliberately resumed) records `mission.started` afterwards, and the last
+    // status-bearing event decides — so a mistaken abandonment is temporary
+    // rather than a permanent lie on the trail.
+    const missionId = randomUUID();
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Back from the dead.' } }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.abandoned' }));
+    await ledger.append(makeEvent({ missionId, type: 'mission.started', payload: { objective: 'Back from the dead.' } }));
+
+    const found = (await ledger.listMissions()).find((m) => m.missionId === missionId);
+
+    expect(found?.status).toBe('running');
+  });
+
   it('DISTRACTOR: a historical mission carrying only `mission.folded` still reads delivered', async () => {
     // The anti-regression that stopped this being a one-word swap. 46 missions
     // in the live ledger carry `mission.folded` and only 42 carry

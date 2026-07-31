@@ -54,7 +54,7 @@ export interface RequesterView {
    * reassurance that makes a dashboard worse than no dashboard.
    */
   readonly assumptions: readonly string[] | null;
-  readonly outcome: 'running' | 'delivered' | 'surrendered';
+  readonly outcome: 'running' | 'delivered' | 'surrendered' | 'abandoned';
 }
 
 const str = (payload: Record<string, unknown>, key: string): string | null => {
@@ -106,6 +106,16 @@ export function buildRequesterView(events: readonly LedgerEventView[]): Requeste
 
       case 'mission.started':
         objective = str(payload, 'objective') ?? objective;
+        // A revived mission reads as running again, so a requester is never
+        // left on a stale obituary (ADR-0025).
+        outcome = 'running';
+        break;
+
+      // The worker died; the startup sweep noticed (defect `dd2e9d18`). Told to
+      // the requester in their own terms rather than dressed up as a surrender,
+      // which would imply the system made a decision it never made.
+      case 'mission.abandoned':
+        outcome = 'abandoned';
         break;
 
       case 'task.contracted': {

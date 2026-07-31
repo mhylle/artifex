@@ -83,6 +83,32 @@ describe('R10 AC-2 — the task tree renders from ledger events', () => {
     expect(tree?.blockers, 'a delivered mission still showed the blockers it got past').toEqual([]);
   });
 
+  it('shows a swept mission as abandoned (defect dd2e9d18)', () => {
+    // Nothing writes an event when a worker dies, so the startup sweep appends
+    // one. A projection that ignored it would keep the detail header saying
+    // "running" while the rail said "abandoned" — the same contradiction this
+    // defect already produced once.
+    const swept = [
+      ev(1, 'mission.started', MISSION, { objective: 'Killed mid-flight' }),
+      ev(2, 'mission.abandoned', MISSION, { reason: 'no job on the queue at worker startup' }),
+    ];
+
+    expect(buildMissionTree(swept)?.status).toBe('abandoned');
+  });
+
+  it('shows an abandoned mission that RAN AGAIN as running — the sweep is self-correcting', () => {
+    // The property the sweep's safety rests on: a mistaken abandonment is
+    // temporary, because the mission records `mission.started` when it runs and
+    // the last status-bearing event decides.
+    const revived = [
+      ev(1, 'mission.started', MISSION, { objective: 'Back from the dead' }),
+      ev(2, 'mission.abandoned', MISSION, {}),
+      ev(3, 'mission.started', MISSION, { objective: 'Back from the dead' }),
+    ];
+
+    expect(buildMissionTree(revived)?.status).toBe('running');
+  });
+
   it('DISTRACTOR: a mission that delivered and THEN surrendered reads surrendered', () => {
     // The other side of the discriminator. A rule that simply preferred the
     // cheerier of two flags would report a delivery the mission took back.

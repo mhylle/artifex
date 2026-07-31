@@ -195,6 +195,17 @@ describe('buildRequesterView', () => {
     expect(buildRequesterView(delivered).outcome).toBe('delivered');
   });
 
+  it('reports a swept mission as abandoned, and a revived one as running again', () => {
+    // Both sides. A requester whose mission died in a worker crash is told so;
+    // if it later runs, they are told that too rather than left on a stale
+    // obituary.
+    const swept = [...trail(), ev('mission.abandoned', MISSION, {}, 'contract')];
+    const revived = [...swept, ev('mission.started', MISSION, {}, 'contract')];
+
+    expect(buildRequesterView(swept).outcome).toBe('abandoned');
+    expect(buildRequesterView(revived).outcome).toBe('running');
+  });
+
   it('reports a surrendered-then-resumed mission by its LAST outcome', () => {
     const resumed = [
       ...trail(),

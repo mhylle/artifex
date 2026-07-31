@@ -13,7 +13,7 @@ import { pathToFileURL } from 'node:url';
 import { AssetRegistryRepository, DecompositionTemplateRepository, HotFixRepository, KnowledgeCommonsRepository, LedgerRepository, ModelCatalogRepository, ReplayBenchRepository, runMigrations } from '@artifex/memory-fabric';
 import { ModelRouter, createBackend } from '@artifex/model-router';
 import type { TaskContract } from '@artifex/shared-types';
-import { Worker } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import pg from 'pg';
 
 import { runMission } from './mission-loop.js';
@@ -26,6 +26,7 @@ import { createCandidateSeams, missionConcurrency } from './runtime.js';
 import { evaluatePetition } from './sealed-evaluation.js';
 import { petitionFromWeakSpots, petitionRefusal } from './petition.js';
 import { ProposalEmitter } from './proposal-emitter.js';
+import { sweepAbandonedMissions } from './abandoned-sweep.js';
 import { buildWorkerSeams } from './worker-seams.js';
 
 export * from './constitution.js';
@@ -44,6 +45,7 @@ export * from './learning-projection.js';
 export * from './proposal-emitter.js';
 export * from './runtime.js';
 export * from './worker-seams.js';
+export * from './abandoned-sweep.js';
 
 export const PACKAGE_NAME = '@artifex/worker';
 
@@ -104,6 +106,40 @@ export async function main(): Promise<void> {
   console.log(`${PACKAGE_NAME}: listening on "${MISSION_QUEUE_NAME}"`);
   console.log(`  worker tier 1     -> ${worker.provider}/${worker.model}`);
   console.log(`  evaluative tier 2 -> ${evaluator.provider}/${evaluator.model}`);
+
+  /**
+   * Record the missions the last worker died holding (defect `dd2e9d18`).
+   *
+   * Runs at boot, BEFORE the consumer starts, because that is the one moment
+   * the question has a definite answer: a mission with no outcome on the ledger
+   * and no job on the queue is owned by a process that no longer exists. It
+   * invents no staleness threshold.
+   *
+   * Fail-safe, per the memory-fabric guardrail that a bootstrap scan must never
+   * throw out of the hook — a sweep that cannot run must not stop the worker
+   * from working.
+   */
+  try {
+    const sweepQueue = new Queue(MISSION_QUEUE_NAME, { connection: redis });
+    const swept = await sweepAbandonedMissions({
+      // The SAME projection the fleet header reads. Two definitions of
+      // "running" is what this defect was made of.
+      fleet: () => ledger.listMissions(),
+      liveMissionIds: async () =>
+        new Set(
+          (await sweepQueue.getJobs(['waiting', 'active', 'delayed', 'paused']))
+            .map((job) => String(job?.data?.missionId ?? ''))
+            .filter((id) => id !== ''),
+        ),
+      append: (event) => ledger.append(event),
+      newId: () => randomUUID(),
+      now: () => new Date().toISOString(),
+    });
+    await sweepQueue.close();
+    if (swept.length > 0) console.log(`  recorded ${swept.length} abandoned mission(s) from a previous run`);
+  } catch (cause: unknown) {
+    console.log(`  abandoned-mission sweep skipped: ${String(cause)}`);
+  }
 
   const consumer = new Worker<{ missionId: string; contract: TaskContract }>(
     MISSION_QUEUE_NAME,

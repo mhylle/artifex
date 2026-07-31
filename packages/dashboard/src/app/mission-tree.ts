@@ -32,7 +32,7 @@ export type TaskStatus =
   | 'failed'
   | 'bounced';
 
-export type MissionStatus = 'running' | 'delivered' | 'surrendered';
+export type MissionStatus = 'running' | 'delivered' | 'surrendered' | 'abandoned';
 
 /**
  * A criterion's state (R16).
@@ -146,6 +146,18 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
     switch (type) {
       case 'mission.started':
         missionObjective = str(payload, 'objective') ?? '';
+        // Status too, not only the objective. A mission that was swept as
+        // abandoned and then actually ran must read as running again — that
+        // self-correction is what makes the startup sweep safe to do
+        // automatically on an append-only trail (ADR-0025).
+        missionStatus = 'running';
+        break;
+      // Nothing writes an event when a worker dies, so the startup sweep
+      // appends this one (defect `dd2e9d18`). Distinct from `surrendered`:
+      // a surrender is a decision the system made and can explain, an
+      // abandonment is a death it can only notice afterwards.
+      case 'mission.abandoned':
+        missionStatus = 'abandoned';
         break;
       // BOTH delivery events (defect `dd2e9d18`). `mission.delivered` was added
       // by R37 AC-0 because a mission the decompose-or-delegate gate keeps WHOLE

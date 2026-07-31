@@ -97,11 +97,32 @@ interface AttentionRow {
   waiting_since: Date;
 }
 
+/**
+ * A mission's status from its most recent status-bearing event.
+ *
+ * One place, so the fleet cannot drift from whatever else needs to ask. Named
+ * rather than inlined because "which event means which status" is exactly the
+ * knowledge that went stale in three separate projections (defect `dd2e9d18`).
+ */
+export function missionStatusFor(lastStatusEvent: string | null): MissionSummary['status'] {
+  switch (lastStatusEvent) {
+    case 'mission.surrendered':
+      return 'surrendered';
+    case 'mission.abandoned':
+      return 'abandoned';
+    case 'mission.folded':
+    case 'mission.delivered':
+      return 'delivered';
+    default:
+      return 'running';
+  }
+}
+
 export interface MissionSummary {
   readonly missionId: string;
   /** From the `mission.started` event; null until the runtime picks it up. */
   readonly objective: string | null;
-  readonly status: 'running' | 'delivered' | 'surrendered';
+  readonly status: 'running' | 'delivered' | 'surrendered' | 'abandoned';
   readonly eventCount: number;
   readonly escalations: number;
   /** Specialists staffed for this mission — the fleet's "agents active" total. */
@@ -265,8 +286,16 @@ export class LedgerRepository {
         -- delivered read as running forever. Both are kept rather than swapped:
         -- 46 missions carry only mission.folded, and dropping it would flip
         -- them back to running and make the count worse than the defect.
+        -- mission.started is IN the set, and that is what makes the abandoned
+        -- sweep safe rather than merely tidy. A mission wrongly swept records
+        -- mission.started when it does run, and the last status-bearing event
+        -- decides -- so a mistaken abandonment corrects itself instead of
+        -- becoming a permanent lie on an append-only trail.
         (ARRAY_AGG(type ORDER BY seq DESC) FILTER (
-          WHERE type IN ('mission.folded', 'mission.delivered', 'mission.surrendered')
+          WHERE type IN (
+            'mission.started', 'mission.folded', 'mission.delivered',
+            'mission.surrendered', 'mission.abandoned'
+          )
         ))[1]                                 AS last_terminal,
         COUNT(*)                              AS event_count,
         COUNT(*) FILTER (WHERE type = 'escalation.rung_climbed') AS escalations,
@@ -292,12 +321,10 @@ export class LedgerRepository {
       // Resume (R41) made "surrendered, answered, delivered" an ordinary
       // history, and there the cheerier outcome is simply the current one.
       // Reporting the older state is the same lie facing the other way.
-      status:
-        row.last_terminal === null
-          ? 'running'
-          : row.last_terminal === 'mission.surrendered'
-            ? 'surrendered'
-            : 'delivered',
+      // `mission.started` and a missing event both mean running, so the default
+      // is a real answer rather than a fallback: a mission whose trail holds
+      // only `mission.intake_accepted` has been commissioned and not yet run.
+      status: missionStatusFor(row.last_terminal),
       eventCount: Number(row.event_count),
       escalations: Number(row.escalations),
       agentsStaffed: Number(row.agents_staffed),

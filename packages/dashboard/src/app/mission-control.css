@@ -26,6 +26,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .badge { text-transform: uppercase; font-size: .7rem; letter-spacing: .04em; padding: .15rem .45rem; border-radius: 3px; background: #eef2fb; color: #33477d; }
 [data-status='surrendered'] .badge, li[data-status='failed'] .badge { background: #fcecec; color: #9c2b23; }
 [data-status='delivered'] .badge, li[data-status='verified'] .badge { background: #e8f6ed; color: #1f6b40; }
+/* Abandoned is grey, not red: nothing went wrong with the work, the process
+   running it died. Colouring it like a surrender would imply a decision. */
+[data-status='abandoned'] .badge { background: #eee; color: #666; }
 .blockers { background: #fcecec; border-radius: 4px; padding: .6rem 1.2rem; color: #9c2b23; }
 .tasks { list-style: none; padding: 0; display: grid; gap: .4rem; }
 .tasks li { display: flex; gap: .6rem; align-items: center; padding: .5rem .7rem; border: 1px solid #eee; border-radius: 6px; }

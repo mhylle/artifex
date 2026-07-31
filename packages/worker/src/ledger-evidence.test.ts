@@ -29,7 +29,7 @@ const ev = (missionId: string, taskId: string | null, type: string, payload: Rec
 });
 
 function sources(
-  missions: Array<{ missionId: string; status: 'running' | 'delivered' | 'surrendered'; escalations: number }>,
+  missions: Array<{ missionId: string; status: 'running' | 'delivered' | 'surrendered' | 'abandoned'; escalations: number }>,
   trails: Record<string, ReturnType<typeof ev>[]>,
 ): { index: MissionIndex; reader: MissionReader } {
   return {
@@ -114,6 +114,25 @@ describe('R27 AC-0 — evidence is assembled from the real ledger', () => {
     // look weak simply because its work is still in progress.
     const { index, reader } = sources(
       [{ missionId: 'm-1', status: 'running', escalations: 0 }],
+      {
+        'm-1': [
+          ev('m-1', 't-1', 'task.contracted', { category: 'writing', contract: { budget: { ceiling: 10 } } }),
+          ev('m-1', 't-1', 'gate_b.verdict_issued', { outcome: 'fail' }),
+        ],
+      },
+    );
+
+    expect(await new LedgerEvidenceSource(index, reader).evidenceFor(['m-1'])).toEqual([]);
+  });
+
+  it('DISTRACTOR: an ABANDONED mission contributes nothing — its death judges nothing', async () => {
+    // A mission the startup sweep recorded as abandoned (defect `dd2e9d18`) died
+    // because a worker process was killed, not because the work was bad. Its
+    // partial verdicts are evidence about infrastructure, and feeding them to
+    // the learner would let a crashed container be recorded as a weak spot in a
+    // capability — the measurement tool lying about what it measured.
+    const { index, reader } = sources(
+      [{ missionId: 'm-1', status: 'abandoned', escalations: 0 }],
       {
         'm-1': [
           ev('m-1', 't-1', 'task.contracted', { category: 'writing', contract: { budget: { ceiling: 10 } } }),

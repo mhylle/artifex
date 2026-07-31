@@ -17,7 +17,7 @@ export interface LedgerSink {
 export interface MissionSummary {
   readonly missionId: string;
   readonly objective: string | null;
-  readonly status: 'running' | 'delivered' | 'surrendered';
+  readonly status: 'running' | 'delivered' | 'surrendered' | 'abandoned';
   readonly eventCount: number;
   readonly escalations: number;
   readonly agentsStaffed: number;
