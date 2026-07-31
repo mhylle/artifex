@@ -199,6 +199,82 @@ describe('defect 753bc6dd — a verified task submits its finding to the commons
     expect(commons.submit).not.toHaveBeenCalled();
   });
 
+  /**
+   * A stranger re-derives it (R24 AC-1, defect `913ead75`).
+   *
+   * `corroborate` and `publish` had no caller, and the reason a caller had never
+   * been written is that it could not have worked: a claim is the objective
+   * followed by the deliverable, so its identity embeds the free-text answer.
+   * Measured on the live store — 56 entries, 11 designs, ZERO claims shared by
+   * two designs. Two agents who independently find the same fact write different
+   * words. Matching must be on the QUESTION.
+   */
+  const spyStranger = (strangers: Array<{ entryId: string; impact: 'low' | 'high' }> = []) => ({
+    submit: vi.fn(async () => ({ entryId: 'e-new' })),
+    strangersFor: vi.fn(async () => strangers),
+    corroborate: vi.fn(async () => ({ entryId: 'e-1' })),
+  });
+
+  it('corroborates a stranger entry on the same question, and records it', async () => {
+    const commons = spyStranger([{ entryId: 'e-old', impact: 'high' }]);
+
+    const result = await runMission(mission(), seams({ commons }), { now: () => AT });
+
+    expect(commons.strangersFor, 'the stranger search never ran').toHaveBeenCalled();
+    expect(commons.corroborate).toHaveBeenCalledWith('e-old', expect.objectContaining({
+      missionId: MISSION_ID,
+    }));
+    expect(result.trail.some((e) => e.type === 'knowledge.corroborated'),
+      'the corroboration happened off-ledger').toBe(true);
+  });
+
+  it('searches by the QUESTION and excludes its OWN design', async () => {
+    // Both halves of AC-1 in one assertion. Searching by the claim would find
+    // nothing at all; searching without excluding the producer would offer the
+    // design its own earlier answer, which `corroborate` then refuses — turning
+    // an ordinary repeat into a thrown error on the happy path.
+    const commons = spyStranger();
+
+    await runMission(mission(), seams({ commons }), { now: () => AT });
+
+    const [question, byDesignId] = commons.strangersFor.mock.calls[0] ?? [];
+    expect(question, 'the search was not keyed on the objective').not.toContain('{');
+    expect(byDesignId, 'the search did not exclude the producing design').toBeTruthy();
+  });
+
+  it('DISTRACTOR: no stranger means nothing is corroborated', async () => {
+    // Both sides. A caller that corroborated unconditionally would publish
+    // anything one agent asserted twice, which is the whole failure AC-1 names.
+    const commons = spyStranger([]);
+
+    const result = await runMission(mission(), seams({ commons }), { now: () => AT });
+
+    expect(commons.corroborate).not.toHaveBeenCalled();
+    expect(result.trail.some((e) => e.type === 'knowledge.corroborated')).toBe(false);
+  });
+
+  it('DISTRACTOR: a FAILED task corroborates nothing', async () => {
+    // Corroboration is re-derivation by a VERIFIED task. An unverified answer
+    // agreeing with a quarantined claim is two guesses, not evidence.
+    const commons = spyStranger([{ entryId: 'e-old', impact: 'high' }]);
+
+    await runMission(mission(), seams({ commons, gateBPasses: false }), { now: () => AT });
+
+    expect(commons.corroborate).not.toHaveBeenCalled();
+  });
+
+  it('DISTRACTOR: a corroboration that THROWS does not cost the mission its work', async () => {
+    const commons = {
+      submit: vi.fn(async () => ({ entryId: 'e-new' })),
+      strangersFor: vi.fn(async () => { throw new Error('commons is down'); }),
+      corroborate: vi.fn(),
+    };
+
+    const result = await runMission(mission(), seams({ commons } as never), { now: () => AT });
+
+    expect(result.outcome).toBe('delivered');
+  });
+
   it('DISTRACTOR: a commons that throws does NOT cost the mission its verified work', async () => {
     // A knowledge store is a side benefit. Losing a passed deliverable because a
     // bookkeeping write failed would trade the product for the receipt.

@@ -227,7 +227,12 @@ export function buildWorkerSeams(deps: WorkerDependencies, missionId: string): M
       // to grade its own lineage and the check would report nothing.
       ancestorsOf: (designId: string) => assets.ancestorsOf(designId),
     },
-    deps.commons,
+    {
+      submit: (entry) => deps.commons.submit(entry),
+      // R24 AC-1's stranger search and the corroboration it enables.
+      strangersFor: (question, byDesignId) => deps.commons.strangersFor(question, byDesignId),
+      corroborate: (entryId, by) => deps.commons.corroborate(entryId, by),
+    },
     fastLoop,
     deps.templates,
     {

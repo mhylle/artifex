@@ -147,6 +147,43 @@ export class KnowledgeCommonsRepository {
    * whole point: a second run of the same agent reproducing its own mistake is
    * not evidence, it is the mistake happening twice.
    */
+  /**
+   * Quarantined entries on the same QUESTION, produced by someone else
+   * (R24 AC-1, defect `913ead75`).
+   *
+   * **Keyed on the question, not the claim, and that is the whole point.** A
+   * submitted claim is the objective followed by the deliverable, so its
+   * identity embeds the free-text answer. Measured against the live store: 56
+   * entries from 11 designs and ZERO claims produced by two different designs —
+   * not by accident, because two agents who independently find the same fact
+   * write different words. A caller matching on the claim string would have
+   * searched forever and found nothing.
+   *
+   * The question is the durable part. Same live data: two questions really were
+   * answered by two different designs, and four were repeated by one design
+   * alone, so both sides of AC-1's distinction exist in reality.
+   *
+   * The producing design is excluded HERE as well as in `corroborate`. The
+   * refusal there is the guarantee; this is so the caller never even attempts a
+   * self-corroboration, which would otherwise be a thrown error on the ordinary
+   * path of a design answering its own question twice.
+   *
+   * Quarantined only: a published entry has had its decision made and faces an
+   * expiry rather than more votes.
+   */
+  async strangersFor(question: string, byDesignId: string): Promise<KnowledgeEntry[]> {
+    const { rows } = await this.#pool.query<EntryRow>(
+      `SELECT ${RETURNED}
+         FROM knowledge_entry
+        WHERE status = 'quarantined'
+          AND produced_by_design_id <> $2
+          AND claim LIKE $1 || '%'
+        ORDER BY created_at ASC`,
+      [question, byDesignId],
+    );
+    return rows.map(toEntry);
+  }
+
   async corroborate(entryId: string, by: Corroboration): Promise<KnowledgeEntry> {
     const existing = await this.findById(entryId);
     if (existing === null) throw new Error(`no knowledge entry ${entryId} to corroborate`);

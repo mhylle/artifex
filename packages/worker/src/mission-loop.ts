@@ -279,6 +279,26 @@ export interface KnowledgeCommonsSubmitter {
       readonly verifiedBy: string;
     };
   }): Promise<unknown>;
+
+  /**
+   * Quarantined entries on the same QUESTION from a different design (R24 AC-1).
+   *
+   * REQUIRED, not optional. `submit` alone leaves every finding in quarantine
+   * forever, which is exactly the state the live commons was in: 56 entries, 11
+   * designs, zero published. An optional corroboration seam would have let that
+   * stay true while every suite passed.
+   */
+  strangersFor(question: string, byDesignId: string): Promise<ReadonlyArray<{
+    readonly entryId: string;
+    readonly impact: 'low' | 'high';
+  }>>;
+
+  /** Record that a stranger re-derived it. The store refuses self-corroboration. */
+  corroborate(entryId: string, by: {
+    readonly designId: string;
+    readonly missionId: string;
+    readonly evidence: readonly string[];
+  }): Promise<unknown>;
 }
 
 /**
@@ -1830,6 +1850,38 @@ export async function runMission(
           // Failure is swallowed for the same reason the track record's is: a
           // knowledge store is a side benefit, and losing verified work because
           // a bookkeeping write failed trades the product for the receipt.
+          // ---- a stranger re-derives it (R24 AC-1, defect `913ead75`) -----
+          // BEFORE submitting, because this task's own entry must not be in the
+          // candidate set — it would be the same design answering itself.
+          //
+          // Matched on the QUESTION, never the claim. A claim is the objective
+          // followed by the deliverable, so its identity embeds the free-text
+          // answer: measured on the live store, 56 entries from 11 designs and
+          // ZERO claims shared by two designs. Two agents who independently find
+          // the same fact write different words, so a claim-keyed search could
+          // only ever return nothing.
+          //
+          // Swallowed like the submit below: corroboration is a side benefit,
+          // and losing verified work to a bookkeeping failure trades the product
+          // for the receipt.
+          try {
+            // Optional-chained like `submit` below: `commons` is optional in
+            // `MissionSeams`, and a run without it must behave exactly as before.
+            for (const stranger of (await seams.commons?.strangersFor(child.objective, manifest.designId)) ?? []) {
+              await seams.commons?.corroborate(stranger.entryId, {
+                designId: manifest.designId,
+                missionId: mission.missionId,
+                evidence: [executedEventId, verdictEventId],
+              });
+              record(child.taskId, 'learning', 'knowledge.corroborated', 'worker', {
+                entryId: stranger.entryId,
+                impact: stranger.impact,
+                byDesignId: manifest.designId,
+                question: child.objective,
+              });
+            }
+          } catch { /* see above */ }
+
           await seams.commons?.submit({
             claim: `${child.objective} ${JSON.stringify(outcome.bundle.deliverable)}`,
             impact: child.blastRadius === 'high' ? 'high' : 'low',

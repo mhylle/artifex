@@ -142,6 +142,86 @@ describe('R24 AC-1 — a stranger must find it again', () => {
   });
 });
 
+describe('R24 AC-1 — finding the stranger who could re-derive it (defect `913ead75`)', () => {
+  // FIXTURE NOTE: `produced_by_design_id` is a `uuid` column, and these tests
+  // first used readable ids like 'design-stranger', which Postgres rejected
+  // outright. A real stranger id is a uuid; the tests were wrong, not the query.
+  const STRANGER = 'bbbbbbbb-1111-4222-8333-444444444444';
+  /**
+   * The query that makes corroboration possible at all.
+   *
+   * A submitted claim is `${objective} ${JSON.stringify(deliverable)}`, so its
+   * identity embeds the free-text answer. Measured against the live store: 56
+   * entries from 11 designs and **zero** claims produced by two different
+   * designs — not by accident, because two agents who independently find the
+   * same fact write different words. Matching on the claim string could never
+   * find a stranger.
+   *
+   * The QUESTION is the durable part. Measured on the same live data: two
+   * questions really were answered by two different designs, and four were
+   * repeated by one design alone — so both sides of AC-1's distinction exist in
+   * reality, not merely in a fixture.
+   */
+  it('finds a quarantined entry on the same question from a DIFFERENT design', async () => {
+    const question = `What is the freezing point of water? ${nextId()}`;
+    const mine = await submit({ claim: `${question} {"answer":"0C"}` });
+
+    const strangers = await commons.strangersFor(question, STRANGER);
+
+    expect(strangers.map((e) => e.entryId)).toContain(mine.entryId);
+  });
+
+  it('DISTRACTOR: does NOT offer an entry the SAME design produced', async () => {
+    // The whole of "a stranger must find it again". The live store holds four
+    // questions answered repeatedly by one design — including the same design
+    // stating the boiling point of water three times — and none of those is a
+    // re-derivation. `corroborate` already refuses this; refusing it here too
+    // means the caller never even attempts it.
+    const question = `What is the boiling point of water? ${nextId()}`;
+    await submit({ claim: `${question} {"answer":"100C"}` });
+
+    expect(await commons.strangersFor(question, PRODUCER)).toEqual([]);
+  });
+
+  it('DISTRACTOR: does not match a DIFFERENT question', async () => {
+    // Both sides. A query that ignored the question would return every
+    // quarantined entry in the store and corroborate unrelated findings.
+    const question = `What is the melting point of lead? ${nextId()}`;
+    await submit({ claim: `${question} {"answer":"327C"}` });
+
+    expect(await commons.strangersFor(`An entirely different question ${nextId()}`, STRANGER))
+      .toEqual([]);
+  });
+
+  it('DISTRACTOR: does not offer an already PUBLISHED entry', async () => {
+    // Corroboration is for quarantined findings. Re-corroborating something
+    // already published would add evidence to a decision that has been made,
+    // and the entry has an expiry to face rather than more votes.
+    const question = `What is the speed of sound at sea level? ${nextId()}`;
+    const entry = await submit({ claim: `${question} {"answer":"343 m/s"}`, impact: 'low' });
+    await commons.publish(entry.entryId, 60);
+
+    expect(await commons.strangersFor(question, STRANGER)).toEqual([]);
+  });
+
+  it('matches on the QUESTION even though the two answers differ in wording', async () => {
+    // The point of the whole change. Two designs answering the same question
+    // produce different claim strings; keying on the question is what lets the
+    // second one count as a re-derivation of the first.
+    const question = `How many sides does a hexagon have? ${nextId()}`;
+    const first = await submit({ claim: `${question} {"answer":"six"}` });
+    await submit({
+      claim: `${question} {"answer":"It has 6 sides."}`,
+      provenance: { producedByDesignId: STRANGER } as never,
+    });
+
+    const strangers = await commons.strangersFor(question, STRANGER);
+
+    expect(strangers.map((e) => e.entryId), 'the first design\'s entry was not offered').toContain(first.entryId);
+    expect(strangers.every((e) => e.provenance.producedByDesignId !== STRANGER)).toBe(true);
+  });
+});
+
 describe('R24 AC-2 — knowledge is mortal', () => {
   it('an expired published entry is NOT served as current fact', async () => {
     const entry = await submit();
