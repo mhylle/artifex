@@ -467,7 +467,19 @@ function foldPriorTrail(events: readonly LedgerEventInput[]): PriorState {
     }
 
     if (event.type === 'operator.decided') {
-      decided.add(taskId);
+      // A REJECTION is an answer, but it is not permission to continue.
+      //
+      // This folded every ruling in regardless of its value, so `reject` read
+      // exactly like `approve`. Measured live: an operator answered a blocking
+      // intake question with `decision: "reject"` and the note "No - do not
+      // proceed with this mission", and the mission ran and DELIVERED. The
+      // cockpit renders a Reject button on every attention item, so the label
+      // was promising something the runtime did not keep.
+      //
+      // Only the decision VALUE is inspected, never the note: judging whether
+      // free prose means yes or no is exactly the string-matching this project
+      // refuses to do, and the operator already has a field for saying which.
+      if (event.payload['decision'] !== 'reject') decided.add(taskId);
       continue;
     }
 

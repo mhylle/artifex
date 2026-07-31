@@ -638,6 +638,53 @@ describe('R30 — the intake dialogue runs before anything is decomposed', () =>
       expect(result.outcome).toBe('delivered');
     });
 
+    it('a REJECTED question does not clear the block — a refusal is not permission', async () => {
+      // Measured live before this was written: an operator answered a blocking
+      // intake question with `decision: "reject"` and the note "No - do not
+      // proceed with this mission", and the mission ran and DELIVERED anyway.
+      // `foldPriorTrail` added to `decided` on any `operator.decided` without
+      // reading the decision, so a refusal read exactly like consent.
+      const prior = await blockedTrail();
+      const escalation = prior.find((e) => e['type'] === 'escalation.awaiting_human')!;
+      prior.push({
+        ...escalation,
+        type: 'operator.decided',
+        taskId: MISSION_ID,
+        payload: { decision: 'reject', note: 'No - do not proceed.' },
+      });
+
+      interrogatorCalls = [];
+      const result = await runMission(
+        mission(),
+        { ...seams(), interrogator: interrogator([{ criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+        { now: () => AT, resumeFrom: prior as never },
+      );
+
+      expect(interrogatorCalls, 'CONTROL: intake never ran, so the block was not tested').toHaveLength(1);
+      expect(result.trail.some((e) => e.type === 'task.contracted'), 'a rejected mission went ahead and worked').toBe(false);
+    });
+
+    it('DISTRACTOR: a ruling with NO decision value still clears — only a refusal blocks', async () => {
+      // `decision` is optional on a cockpit action, so an operator who answers
+      // without picking approve/reject has still answered. A rule keyed on
+      // `=== 'approve'` would read that silence as refusal and strand the
+      // mission on a technicality — and it survived the first mutation round,
+      // because every other fixture here sets the field explicitly.
+      const prior = await blockedTrail();
+      const escalation = prior.find((e) => e['type'] === 'escalation.awaiting_human')!;
+      prior.push({ ...escalation, type: 'operator.decided', taskId: MISSION_ID, payload: { note: 'Engineers.' } });
+
+      interrogatorCalls = [];
+      const result = await runMission(
+        mission(),
+        { ...seams(), interrogator: interrogator([{ criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+        { now: () => AT, resumeFrom: prior as never },
+      );
+
+      expect(interrogatorCalls, 'the answered question was put to the requester again').toHaveLength(0);
+      expect(result.trail.some((e) => e.type === 'task.contracted')).toBe(true);
+    });
+
     it('DISTRACTOR: a decision on a DIFFERENT task does not clear the mission block', async () => {
       // The other side of the discriminator. A rule keyed on "any decision
       // exists" rather than "this task was decided" would pass the test above

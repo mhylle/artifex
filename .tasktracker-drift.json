@@ -1,0 +1,17 @@
+{
+  "_comment": "Artifex's source layout, for Tasktracker's architecture-drift walker. Without this the walker falls back to its built-in defaults, which are NestJS/Angular filename suffixes plus that project's own directory prefixes — on this monorepo they inventoried 7 of ~142 source files, so honest component references were reported as `orphaned` (friction 7ef7a267). Everything Artifex ships lives under packages/ or tools/, named for what it does rather than for a framework convention.",
+  "_scope": "packages/ only. `tools/` is the AI-layer dev tooling (the codebase-search MCP), not the product ARCHITECTURE.md describes — the same line the walker's own defaults draw when they ignore tests. Build and test scaffolding is excluded for that reason too, not to flatter the count.",
+  "includeSuffixes": [],
+  "includeDirPrefixes": ["packages/"],
+  "dirPrefixExtensions": [".ts", ".html", ".css"],
+  "ignoreFragments": [
+    ".spec.ts",
+    ".test.ts",
+    "vitest.config.ts",
+    "vitest.integration.config.ts",
+    "/test/",
+    "/dist/",
+    "/node_modules/",
+    "/coverage/"
+  ]
+}
