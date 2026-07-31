@@ -2285,7 +2285,28 @@ export async function runMission(
   // Skipped on resume: the questions are already on the trail, and re-asking
   // them is how a mission that a human just answered would stop again on the
   // same question.
-  if (seams.interrogator !== undefined && !resuming) {
+  //
+  // ...which is exactly what it did, because `resuming` was the wrong guard for
+  // that intent (defect `2bedadb8`, ADR-0023). `resuming` means "work exists to
+  // continue", and a mission blocked at intake surrenders BEFORE anything is
+  // contracted — so the one trail that most needs the skip is the one
+  // guaranteed not to qualify for it. Proven live: an operator answered through
+  // the real cockpit route, the mission was re-enqueued, the worker replayed 14
+  // events, and re-interrogated and blocked again.
+  //
+  // The second guard is not a new policy. The intake block IS an escalation —
+  // `escalation.awaiting_human`, rung `intake_clarification`, recorded against
+  // the mission task — and `prior.decided` is the rule this system already uses
+  // for "a human has answered this escalation, do not stop here again". Intake
+  // was the one site not applying it.
+  //
+  // The bound, stated rather than implied: the ruling's note is not checked
+  // against the questions, so an operator who approves without answering gets
+  // the mission run. That is the same trust the ladder already extends to every
+  // other rung — `decided` inspects no notes either — and inventing a verifier
+  // for a human's answer would put the gate above the authority it escalates to.
+  const intakeAnswered = prior.decided.has(mission.taskId);
+  if (seams.interrogator !== undefined && !resuming && !intakeAnswered) {
     // Swallowed on failure. An interrogation that cannot run must not stop a
     // mission a requester has already specified well — degrading to "ask
     // nothing" loses a safeguard, degrading to "refuse everything" loses the

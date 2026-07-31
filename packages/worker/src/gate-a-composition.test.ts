@@ -585,6 +585,93 @@ describe('R30 — the intake dialogue runs before anything is decomposed', () =>
     expect(interrogatorCalls, 'a resumed mission was interrogated again').toHaveLength(0);
   });
 
+  /**
+   * The answer channel (defect `2bedadb8`, ADR-0023).
+   *
+   * The intake block IS an escalation — `escalation.awaiting_human` with rung
+   * `intake_clarification`, recorded against the mission task. The system
+   * already has exactly one rule for "a human has answered this escalation, do
+   * not stop here again": `prior.decided`, folded from `operator.decided` and
+   * honoured by the escalation ladder. Intake was the one site not applying it,
+   * which is find-shape (b) — and the consequence was find-shape (v): a gate
+   * that can say no with no channel for the answer that makes it say yes.
+   *
+   * Proven live before this was written. An operator answered mission
+   * 63498d62 through the real cockpit route; `operator.decided` was recorded,
+   * the mission was re-enqueued, the worker replayed 14 events — and
+   * re-interrogated and blocked again. The answer changed nothing.
+   */
+  describe('an operator answer clears the intake block', () => {
+    /** A real intake-blocked trail: escalation and surrender, no contract. */
+    async function blockedTrail(): Promise<Array<Record<string, unknown>>> {
+      interrogatorCalls = [];
+      const trail = (await runMission(
+        mission(),
+        { ...seams(), interrogator: interrogator([{ criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+        { now: () => AT },
+      )).trail as unknown as Array<Record<string, unknown>>;
+
+      expect(trail.some((e) => e['type'] === 'escalation.awaiting_human'), 'FIXTURE: nothing blocked').toBe(true);
+      expect(trail.some((e) => e['type'] === 'task.contracted'), 'FIXTURE: a contract would make this a normal resume').toBe(false);
+      return trail;
+    }
+
+    /** The operator's ruling, shaped like the live one: taskId === missionId. */
+    function decidedOn(trail: Array<Record<string, unknown>>, taskId: string) {
+      const escalation = trail.find((e) => e['type'] === 'escalation.awaiting_human')!;
+      expect(escalation['taskId'], 'FIXTURE: the live escalation is recorded against the mission task').toBe(MISSION_ID);
+      return [...trail, { ...escalation, type: 'operator.decided', taskId, payload: { decision: 'approve', note: 'Engineers.' } }];
+    }
+
+    it('does not re-interrogate, and the mission finally runs', async () => {
+      const prior = decidedOn(await blockedTrail(), MISSION_ID);
+
+      interrogatorCalls = [];
+      const result = await runMission(
+        mission(),
+        { ...seams(), interrogator: interrogator([{ criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+        { now: () => AT, resumeFrom: prior as never },
+      );
+
+      expect(interrogatorCalls, 'the answered question was put to the requester again').toHaveLength(0);
+      expect(result.trail.some((e) => e.type === 'task.contracted'), 'the mission still refused to start').toBe(true);
+      expect(result.outcome).toBe('delivered');
+    });
+
+    it('DISTRACTOR: a decision on a DIFFERENT task does not clear the mission block', async () => {
+      // The other side of the discriminator. A rule keyed on "any decision
+      // exists" rather than "this task was decided" would pass the test above
+      // and let one unrelated ruling wave every future mission through.
+      const prior = decidedOn(await blockedTrail(), 'some-other-task-id');
+
+      interrogatorCalls = [];
+      const result = await runMission(
+        mission(),
+        { ...seams(), interrogator: interrogator([{ criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+        { now: () => AT, resumeFrom: prior as never },
+      );
+
+      expect(interrogatorCalls, 'CONTROL: intake did not run, so the block was not tested').toHaveLength(1);
+      expect(result.trail.some((e) => e.type === 'task.contracted'), 'an unrelated decision cleared the block').toBe(false);
+    });
+
+    it('DISTRACTOR: an UNANSWERED intake block still blocks on replay', async () => {
+      // Today's behaviour, preserved. Re-enqueuing without an answer must not
+      // become a way to launder a mission past intake.
+      const prior = await blockedTrail();
+
+      interrogatorCalls = [];
+      const result = await runMission(
+        mission(),
+        { ...seams(), interrogator: interrogator([{ criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+        { now: () => AT, resumeFrom: prior as never },
+      );
+
+      expect(interrogatorCalls, 'CONTROL: intake did not run').toHaveLength(1);
+      expect(result.trail.some((e) => e.type === 'task.contracted'), 'an unanswered block let the mission through').toBe(false);
+    });
+  });
+
   it('RECORDS an interrogation failure rather than degrading in silence', async () => {
     // Observed live: the first vague mission threw here under concurrent load
     // and went straight on to decompose, indistinguishable from a clean
