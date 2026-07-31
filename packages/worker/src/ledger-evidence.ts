@@ -15,6 +15,7 @@
  * is still in progress. "The last N missions" would be a constant nobody
  * measured — the ledger already knows which missions are over.
  */
+import { capabilityOf } from './agent-creator.js';
 import type { MissionEvidence } from './science-loop.js';
 
 /** The cross-mission index — `LedgerRepository.listMissions` in practice. */
@@ -35,6 +36,24 @@ export interface MissionReader {
   }>>;
 }
 
+/**
+ * The registry, read-only — `AssetRegistryRepository.findById` in practice.
+ *
+ * REQUIRED, not optional. An optional lookup is how a mechanism ends up wired
+ * everywhere and called nowhere: every construction site would compile without
+ * it and the ladder would silently collapse to its bottom rung.
+ */
+export interface DesignLookup {
+  findById(designId: string): Promise<{ readonly category: string } | null>;
+}
+
+/** What a task recorded about which capability did its work, before resolution. */
+interface CategoryEvidence {
+  capability?: string;
+  designId?: string;
+  raw?: string;
+}
+
 /** Accumulated per (mission, category). */
 interface Bucket {
   gateBAttempts: number;
@@ -46,10 +65,54 @@ interface Bucket {
 export class LedgerEvidenceSource {
   readonly #index: MissionIndex;
   readonly #reader: MissionReader;
+  readonly #designs: DesignLookup;
+  /** Memoised across the whole pass: the lookup is a query inside a loop. */
+  readonly #categoryOfDesign = new Map<string, string | null>();
 
-  constructor(index: MissionIndex, reader: MissionReader) {
+  constructor(index: MissionIndex, reader: MissionReader, designs: DesignLookup) {
     this.#index = index;
     this.#reader = reader;
+    this.#designs = designs;
+  }
+
+  /**
+   * The category a task's work belongs to, down a ladder of what was RECORDED.
+   *
+   * Never inference. `resolveCapability` would merge more — measured, 105 raw
+   * categories down to 57 — but listing the merges rather than the count shows
+   * it folding `Rail Travel Overview` into `hand tools overview` and `Marine
+   * Engineering / Sailing Basics` into `mechanical engineering`. That bias is
+   * right when staffing one proposal at a time, because a wrong reuse is caught
+   * downstream at the evidence bar. Here the bucket IS the output — a claim
+   * about which capability is weak — so a guess corrupts the answer instead of
+   * being checked by it.
+   */
+  async #categoryFor(evidence: CategoryEvidence): Promise<string | undefined> {
+    // Rung 1 — what staffing resolved, recorded on the event itself.
+    if (evidence.capability !== undefined) return evidence.capability;
+
+    // Rung 2 — what staffing resolved, looked up by the design id the event has
+    // carried since P0 and the ranker never read.
+    if (evidence.designId !== undefined) {
+      const known = this.#categoryOfDesign.get(evidence.designId);
+      if (known === undefined) {
+        const design = await this.#designs.findById(evidence.designId).catch(() => null);
+        // Normalised, because registry rows written before normalisation
+        // existed still carry the planner's capitals and slashes. Without this
+        // the same capability lands in two buckets depending on which rung
+        // reached it, which is the fragmentation the ladder exists to end.
+        const stored = design === null ? null : capabilityOf(design.category);
+        this.#categoryOfDesign.set(evidence.designId, stored);
+        if (stored !== null) return stored;
+      } else if (known !== null) {
+        return known;
+      }
+    }
+
+    // Rung 3 — normalisation, which merges case and punctuation variants and
+    // nothing else. Reached by every task whose design predates the registry's
+    // current id scheme: 140 of 220 live staffings have no row to find.
+    return evidence.raw === undefined ? undefined : capabilityOf(evidence.raw);
   }
 
   /**
@@ -74,47 +137,57 @@ export class LedgerEvidenceSource {
 
       const events = await this.#reader.replay({ missionId: mission.missionId });
 
-      // Which category each task belongs to, and what it was allowed to spend.
-      const categoryOf = new Map<string, string>();
+      // What each task RECORDED about its capability, and what it was allowed
+      // to spend. Collected first and resolved after, because the ladder's
+      // middle rung is a query and the precedence between rungs must not depend
+      // on the order events happen to arrive in.
+      const recorded = new Map<string, CategoryEvidence>();
       const ceilingOf = new Map<string, number>();
+      const evidenceOf = (taskId: string): CategoryEvidence => {
+        const existing = recorded.get(taskId);
+        if (existing !== undefined) return existing;
+        const fresh: CategoryEvidence = {};
+        recorded.set(taskId, fresh);
+        return fresh;
+      };
+
       for (const event of events) {
         if (event.taskId === null) continue;
 
         if (event.type === 'task.contracted') {
-          // The planner's RAW phrasing — a fallback, not the preference. Kept
-          // because thousands of historical events predate the capability
-          // field, and dropping them would empty the ranking to improve its
-          // resolution: all the evidence traded for cleaner buckets.
           const category = event.payload['category'];
-          // The `!has` guard is an EQUIVALENT mutant under current ordering —
-          // removing it changes nothing, because replay is ordered by `seq` and
-          // `task.contracted` always precedes `agent.staffed` for a task, so the
-          // capability set below always wins anyway. Kept as a statement of
-          // precedence rather than a reliance on arrival order: if a future
-          // event ever re-contracts a task after staffing, the resolved
-          // capability must still not be overwritten by a raw name.
-          if (typeof category === 'string' && !categoryOf.has(event.taskId)) {
-            categoryOf.set(event.taskId, category);
-          }
+          // `??=` rather than `=` is an EQUIVALENT mutant: a task is contracted
+          // exactly once (re-contracting appends `task.recontracted`, a
+          // different type), so first-wins and last-wins are indistinguishable.
+          // No test asserts it, because a fixture with two contracts for one
+          // task would be asserting a state the system cannot produce.
+          if (typeof category === 'string') evidenceOf(event.taskId).raw ??= category;
           const contract = event.payload['contract'] as { budget?: { ceiling?: unknown } } | undefined;
           const ceiling = contract?.budget?.ceiling;
           if (typeof ceiling === 'number') ceilingOf.set(event.taskId, ceiling);
           continue;
         }
 
-        // The RESOLVED capability wins wherever it exists (defect `340aa7de`).
-        // `staff()` merges the planner's invented name onto a known capability;
-        // bucketing on the raw name re-splits what it merged. Measured: 31 raw
-        // categories over tasks that staffed 22 capabilities, with one
-        // capability absorbing five raw names — five buckets of one observation
-        // where the registry held one design with ten, which is why every weak
-        // spot looked like a singleton.
+        // Only the PRODUCER's staffing. A task carries two staffings on the same
+        // task id, and the verifier's has its own `verifier.staffed` type —
+        // reading it here would put every verified task in a `verification.*`
+        // bucket and make production evidence disappear.
         if (event.type === 'agent.staffed') {
           const capability = event.payload['capability'];
           if (typeof capability === 'string' && capability.length > 0) {
-            categoryOf.set(event.taskId, capability);
+            evidenceOf(event.taskId).capability = capability;
+          }
+          const designId = event.payload['designId'];
+          if (typeof designId === 'string' && designId.length > 0) {
+            evidenceOf(event.taskId).designId = designId;
           }
         }
+      }
+
+      const categoryOf = new Map<string, string>();
+      for (const [taskId, evidence] of recorded) {
+        const category = await this.#categoryFor(evidence);
+        if (category !== undefined) categoryOf.set(taskId, category);
       }
 
       const buckets = new Map<string, Bucket>();

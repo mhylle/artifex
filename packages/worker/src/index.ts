@@ -179,7 +179,7 @@ export async function main(): Promise<void> {
       // Failure is swallowed. A learning pass that could not run is a missing
       // observation, never a failed mission.
       try {
-        const weakSpots = rankWeakSpots(await new LedgerEvidenceSource(ledger, ledger).evidenceFor());
+        const weakSpots = rankWeakSpots(await new LedgerEvidenceSource(ledger, ledger, assets).evidenceFor());
         if (weakSpots.length > 0) {
           await ledger.append({
             eventId: randomUUID(),

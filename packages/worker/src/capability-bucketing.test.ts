@@ -28,6 +28,15 @@ import { staff } from './agent-creator.js';
 
 const AT = '2026-07-31T09:00:00.000Z';
 
+/**
+ * A registry that knows nothing — these fixtures predate the strict-evidence
+ * ladder (`ad116ead`) and exercise rungs 1 and 3 only. An empty lookup keeps
+ * them testing exactly what they were written to test: that the recorded
+ * capability wins, and that history with none still ranks. Rung 2 has its own
+ * tests in `evidence-ladder.test.ts`.
+ */
+const NO_DESIGNS = { async findById() { return null; } };
+
 function contract(category: string): TaskContract {
   return {
     taskId: 'aaaaaaaa-0000-4000-8000-000000000001',
@@ -145,7 +154,7 @@ describe('340aa7de — the capability reaches the ledger and the ranker', () => 
           ev('gate_b.verdict_issued', 't-2', { outcome: 'fail', findings: [] }),
         ] as never;
       },
-    } as never);
+    } as never, NO_DESIGNS as never);
 
     const evidence = await source.evidenceFor();
 
@@ -174,11 +183,14 @@ describe('340aa7de — the capability reaches the ledger and the ranker', () => 
           ev('gate_b.verdict_issued', 't-1', { outcome: 'fail', findings: [] }),
         ] as never;
       },
-    } as never);
+    } as never, NO_DESIGNS as never);
 
     const evidence = await source.evidenceFor();
 
     expect(evidence, 'pre-existing history was dropped from the ranking').toHaveLength(1);
+    // NOTE: this once asserted the raw category verbatim. The bottom rung of the
+    // ladder normalises it, so the expectation is the NORMALISED name — the same
+    // string here, because the fixture's raw name was already lower case.
     expect(evidence[0]?.category).toBe('legacy work');
   });
 
@@ -207,7 +219,7 @@ describe('340aa7de — the capability reaches the ledger and the ranker', () => 
           ev('gate_b.verdict_issued', 't-1', { outcome: 'fail', findings: [] }),
         ] as never;
       },
-    } as never);
+    } as never, NO_DESIGNS as never);
 
     const evidence = await source.evidenceFor();
 
@@ -235,7 +247,7 @@ describe('340aa7de — the capability reaches the ledger and the ranker', () => 
           ev('gate_b.verdict_issued', 't-2', { outcome: 'fail', findings: [] }),
         ] as never;
       },
-    } as never);
+    } as never, NO_DESIGNS as never);
 
     expect(await source.evidenceFor()).toHaveLength(2);
   });

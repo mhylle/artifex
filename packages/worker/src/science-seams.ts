@@ -13,6 +13,7 @@
 import { BenchCandidateRunner } from './bench-runner.js';
 import type { BenchCase, CaseExecutor, CaseJudge } from './bench-runner.js';
 import { LedgerEvidenceSource } from './ledger-evidence.js';
+import type { DesignLookup } from './ledger-evidence.js';
 import type { MissionIndex, MissionReader } from './ledger-evidence.js';
 import { ScienceLoop } from './science-runner.js';
 import type { BenchSource } from './science-runner.js';
@@ -74,9 +75,12 @@ export function buildScienceLoop(deps: {
   readonly bench: BenchRepository;
   readonly executor: CaseExecutor;
   readonly judge: CaseJudge;
+  // Required, so that adding the ladder's registry rung could not leave this
+  // path silently resolving every historical task by normalisation alone.
+  readonly designs: DesignLookup;
 }): ScienceLoop {
   return new ScienceLoop({
-    evidence: new LedgerEvidenceSource(deps.index, deps.reader),
+    evidence: new LedgerEvidenceSource(deps.index, deps.reader, deps.designs),
     bench: benchSourceOver(deps.bench),
     runner: new BenchCandidateRunner(caseStoreOver(deps.bench), deps.executor, deps.judge),
   });
