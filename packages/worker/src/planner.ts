@@ -247,7 +247,30 @@ export const SubtaskCountSchema = Type.Object(
 export const SingleSubtaskSchema = Type.Object(
   {
     objective: Type.String({ minLength: 1 }),
-    category: Type.String({ minLength: 1 }),
+    /**
+     * The KIND OF WORK, described to the model rather than left to guess.
+     *
+     * This was a bare `Type.String({ minLength: 1 })`, and the measurement is
+     * what that cost: 29 designs across 27 categories, 1.07 per category. Never
+     * told what the field meant, the model answered with the most obvious
+     * reading — the subject — giving "thermodynamics", "history astronomy",
+     * "mechanical engineering". Those share no token and correctly should not,
+     * so R38's clustering could never merge them however well it worked: it
+     * merges names, and the names were answering a different question.
+     *
+     * Deliberately an abstract DISTINCTION rather than a list of permitted
+     * values. The dossier makes the taxonomy a learnable asset (R23/R38), and an
+     * enum would converge it instantly by ending the learning — the same reason
+     * this project bans example phrasings in judge prompts.
+     */
+    category: Type.String({
+      minLength: 1,
+      description:
+        'The kind of work this subtask is — the capability an agent would need, not the subject ' +
+        'matter it happens to be about. Two subtasks on different topics that call for the same ' +
+        'skill should get the same value here; two subtasks on one topic that call for different ' +
+        'skills should not.',
+    }),
     criterion: Type.String({ minLength: 1 }),
     outOfScope: Type.String({ minLength: 1 }),
     blastRadius: StringEnum(BLAST_RADII),

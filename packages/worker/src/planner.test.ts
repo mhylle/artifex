@@ -546,3 +546,80 @@ describe('R31 AC-2 — a decomposition template GUIDES the split', () => {
     expect(prompts.some((p) => /How many INDEPENDENT subtasks/.test(p))).toBe(true);
   });
 });
+
+/**
+ * Category fragmentation, traced to its cause (measured, not guessed).
+ *
+ * The live registry holds **29 designs across 27 categories — 1.07 designs per
+ * category**. R38's clustering is wired and working: `resolveCapability` merges
+ * a proposal onto a known capability when they share a token. It cannot merge
+ * what it is given, because the planner is naming SUBJECTS, not capabilities:
+ *
+ *     thermodynamics · history astronomy · mechanical engineering ·
+ *     scientific terminology · Physics/Chemistry of Writing Materials
+ *
+ * Those share no token and should not — they are genuinely different topics. But
+ * a design that writes one-sentence definitions is the SAME capability whether
+ * the subject is osmosis or entropy, and the dossier's promise is that "a
+ * thousand tasks might need twelve designs".
+ *
+ * The cause is that `SingleSubtaskSchema.category` was a bare
+ * `Type.String({ minLength: 1 })` with no description at all. The model was
+ * never told what the field means, so it filled it with the most obvious
+ * reading. Nothing downstream could recover from that: clustering merges names,
+ * and the names were answering a different question.
+ *
+ * The fix describes the field IN THE SCHEMA, which is what the constrained
+ * decoder actually shows the model — deliberately as an abstract distinction
+ * rather than a list of allowed values, because the dossier makes the taxonomy a
+ * LEARNABLE asset and a frozen enum would end that.
+ */
+describe('category fragmentation — the model is told what a category IS', () => {
+  it('the subtask schema DESCRIBES category as a kind of work, not a subject', async () => {
+    const { generator, prompts } = capturingGenerator();
+    const schemas: Array<Record<string, unknown>> = [];
+    const capturing: StructuredGenerator = {
+      async generate(input) {
+        schemas.push(input.probe.schema as Record<string, unknown>);
+        return generator.generate(input);
+      },
+    };
+
+    await plannerOn(capturing).propose({ contract: contract() });
+
+    const subtaskSchema = schemas.find(
+      (s) => (s as { $id?: string }).$id === 'SingleSubtask',
+    ) as { properties?: { category?: { description?: string } } } | undefined;
+
+    const described = subtaskSchema?.properties?.category?.description ?? '';
+    expect(described, 'the model is never told what `category` means').not.toBe('');
+    // The distinction that matters, asserted rather than assumed: the field must
+    // say it is about the WORK and not about the SUBJECT.
+    expect(described).toMatch(/kind of work|capability|skill/i);
+    expect(described).toMatch(/subject|topic|domain/i);
+    expect(prompts.length, 'the planner still ran').toBeGreaterThan(0);
+  });
+
+  it('DISTRACTOR: the description does not fix a closed vocabulary', async () => {
+    // The taxonomy is a LEARNABLE asset (R38/R23). Listing permitted categories
+    // would converge it instantly and kill the thing the dossier asks for — and
+    // it is the same mistake as putting example phrasings in a judge prompt,
+    // which this project bans for the same reason.
+    const schemas: Array<Record<string, unknown>> = [];
+    const { generator } = capturingGenerator();
+    const capturing: StructuredGenerator = {
+      async generate(input) {
+        schemas.push(input.probe.schema as Record<string, unknown>);
+        return generator.generate(input);
+      },
+    };
+
+    await plannerOn(capturing).propose({ contract: contract() });
+
+    const subtaskSchema = schemas.find((s) => (s as { $id?: string }).$id === 'SingleSubtask') as
+      | { properties?: { category?: { enum?: unknown[]; description?: string } } }
+      | undefined;
+
+    expect(subtaskSchema?.properties?.category?.enum, 'the taxonomy was frozen into an enum').toBeUndefined();
+  });
+});
