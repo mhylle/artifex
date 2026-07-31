@@ -676,3 +676,105 @@ describe('R30 AC-2 — a carried assumption escalates when it starts to matter',
     expect(result.trail.some((e) => e.type === 'mission.delivered')).toBe(true);
   });
 });
+
+/**
+ * R30 AC-2 across a RESUME — the carried assumption has to survive the boundary.
+ *
+ * The interrogation is deliberately skipped on resume, so `carriedAssumptions`
+ * was rebuilt from nothing and `loadBearingNow` ran over an empty list. Every
+ * assumption the intake dialogue carried was silently dropped the moment a
+ * mission continued — find-shape (a): the ledger records it, and the one reader
+ * that needs it later does not read it back.
+ *
+ * That matters more than it looks, because a resume is the ONLY way a mission
+ * whose intake raised a high-stakes question ever reaches a task at all. Measured
+ * over 8 trials on two requests differing only in specificity, the live
+ * interrogator produced at least one high-stakes question every single time
+ * (see defect `343c3fb8`), so "just write a request with no high-stakes
+ * ambiguity" is not a path that exists.
+ *
+ * The prior trail is a REAL trail, truncated after the last contract — exactly
+ * the state a process that died mid-mission leaves behind. Nothing is
+ * hand-authored except the two synthetic events noted in their own tests.
+ */
+describe('R30 AC-2 — a carried assumption survives a resume', () => {
+  const carried = [{ criterionId: 'm-1', subject: 'audience', question: 'Which audience is this for?', stakes: 'low' as const }];
+  const carrying = () => ({ ...seams(), interrogator: { async assess() { return { questions: carried }; } } } as never);
+
+  /** A real trail cut off after the last contract: assumptions carried, no work done. */
+  async function priorThroughContracts(): Promise<Array<Record<string, unknown>>> {
+    const full = (await runMission(mission(), carrying(), { now: () => AT })).trail as unknown as Array<
+      Record<string, unknown>
+    >;
+    const lastContract = full.map((e) => e['type']).lastIndexOf('task.contracted');
+    const sliced = full.slice(0, lastContract + 1);
+
+    // The fixture has to be capable of proving what the test claims.
+    expect(sliced.some((e) => e['type'] === 'task.contracted'), 'FIXTURE: no contract, so the run would not resume').toBe(true);
+    expect(sliced.some((e) => e['type'] === 'intake.assumption_flagged'), 'FIXTURE: nothing was carried to lose').toBe(true);
+    expect(sliced.some((e) => e['type'] === 'assumption.became_load_bearing'), 'FIXTURE: the escalation already happened').toBe(false);
+    return sliced;
+  }
+
+  it('escalates on the resumed run, from the assumption the prior trail recorded', async () => {
+    const prior = await priorThroughContracts();
+
+    const result = await runMission(mission(), carrying(), { now: () => AT, resumeFrom: prior as never });
+
+    expect(result.trail.some((e) => e.type === 'mission.resumed'), 'CONTROL: this was not a resume').toBe(true);
+    expect(result.trail.some((e) => e.type === 'task.executed'), 'CONTROL: no task ran, so nothing could become load-bearing').toBe(true);
+    const escalated = result.trail.find((e) => e.type === 'assumption.became_load_bearing');
+    expect(escalated, 'the carried assumption was dropped at the resume boundary').toBeDefined();
+    // Read BACK from the trail, not re-derived: the question has to survive intact.
+    expect(JSON.stringify(escalated?.payload)).toMatch(/Which audience is this for\?/);
+  });
+
+  it('DISTRACTOR: an assumption the prior trail already escalated is not raised twice', async () => {
+    // "Escalated at that moment" is a moment, singular. A resume that re-raised
+    // it would refill the attention queue with the item the operator has already
+    // been shown — the failure `prior.decided` exists to prevent one rung over.
+    // The ONE synthetic event in this suite: the prior escalation, cloned from
+    // the real flag event so its shape is the loop's own.
+    const prior = await priorThroughContracts();
+    const flag = prior.find((e) => e['type'] === 'intake.assumption_flagged')!;
+    prior.push({ ...flag, type: 'assumption.became_load_bearing' });
+
+    const result = await runMission(mission(), carrying(), { now: () => AT, resumeFrom: prior as never });
+
+    expect(result.trail.some((e) => e.type === 'task.executed'), 'CONTROL: no task ran, so nothing could have escalated').toBe(true);
+    expect(
+      result.trail.some((e) => e.type === 'assumption.became_load_bearing'),
+      'an assumption already on the attention queue was raised again',
+    ).toBe(false);
+  });
+
+  it('DISTRACTOR: a BLOCKING question on the prior trail is not carried as an assumption', async () => {
+    // `intake.question_raised` is the half the operator was asked to answer, not
+    // the half the dial permitted carrying. Folding both would turn a high-stakes
+    // question the requester already answered into a low-stakes assumption and
+    // escalate it — and it would pass the test above.
+    const prior = (await priorThroughContracts()).filter((e) => e['type'] !== 'intake.assumption_flagged');
+    const contract = prior.find((e) => e['type'] === 'task.contracted')!;
+    prior.push({
+      ...contract,
+      type: 'intake.question_raised',
+      payload: { criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'high', blocking: true },
+    });
+
+    const result = await runMission(mission(), carrying(), { now: () => AT, resumeFrom: prior as never });
+
+    expect(result.trail.some((e) => e.type === 'task.executed'), 'CONTROL: no task ran').toBe(true);
+    expect(
+      result.trail.some((e) => e.type === 'assumption.became_load_bearing'),
+      'a blocking question was carried as though the dial had permitted it',
+    ).toBe(false);
+  });
+
+  it('DISTRACTOR: a mission that is NOT resuming still carries from the interrogator alone', async () => {
+    // The additive half. Nothing about folding the trail may change the path
+    // that had no prior trail to fold.
+    const result = await runMission(mission(), carrying(), { now: () => AT });
+
+    expect(result.trail.some((e) => e.type === 'assumption.became_load_bearing')).toBe(true);
+  });
+});

@@ -15,7 +15,7 @@
  * never diff strings. A model call could judge the pair honestly; it would also
  * cost a call per task to answer a question the system can already answer.
  *
- * Because every intake question is raised `about` a specific criterion, and the
+ * Because every intake question names the criterion it bears on, and the
  * coverage partition already assigns each mission criterion to the tasks that
  * will satisfy it, an ambiguity about `m-1` is load-bearing exactly when a task
  * carrying `m-1` produces its outcome. No model, no string matching, and the
@@ -47,7 +47,8 @@ export interface FlaggedAssumption {
 /**
  * Which carried assumptions just became load-bearing for this task.
  *
- * `alreadyEscalated` holds the `about` keys that have been raised before.
+ * `alreadyEscalated` holds the criterion ids that have been raised before —
+ * within this run AND, since it is seeded from the prior trail, before a resume.
  * "Escalated at that moment" is a moment, singular: a second task covering the
  * same criterion must not re-raise it, or the attention queue refills with an
  * item the operator has already been shown — the same rule the escalation ladder

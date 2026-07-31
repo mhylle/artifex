@@ -397,6 +397,28 @@ interface PriorState {
    * refill with the item that was only moments ago answered.
    */
   readonly decided: ReadonlySet<string>;
+  /**
+   * Ambiguities the dial permitted carrying, read back off the trail (R30 AC-2).
+   *
+   * The interrogation is skipped on resume — re-asking is how a mission a human
+   * just answered stops again on the same question — so without this the carried
+   * assumptions were rebuilt from nothing and the load-bearing check ran over an
+   * empty list. Every assumption intake carried was dropped the instant a
+   * mission continued.
+   *
+   * Read from the trail rather than re-derived, because the trail is where they
+   * were recorded: `intake.assumption_flagged` already carries the whole
+   * question. That is invariant #1 doing its job — the substrate is the state.
+   */
+  readonly carried: FlaggedAssumption[];
+  /**
+   * Criteria whose carried assumption was ALREADY escalated before the resume.
+   *
+   * The same rule `decided` applies one rung up: "escalated at that moment" is a
+   * moment, singular, and a resume that re-raised it would refill the attention
+   * queue with an item the operator has already been shown.
+   */
+  readonly escalatedAssumptions: ReadonlySet<string>;
 }
 
 /**
@@ -416,6 +438,8 @@ function foldPriorTrail(events: readonly LedgerEventInput[]): PriorState {
   const deliverables = new Map<string, unknown>();
   const lastOutcome = new Map<string, string>();
   const decided = new Set<string>();
+  const carried: FlaggedAssumption[] = [];
+  const escalatedAssumptions = new Set<string>();
 
   for (const event of events) {
     const taskId = event.taskId;
@@ -447,6 +471,29 @@ function foldPriorTrail(events: readonly LedgerEventInput[]): PriorState {
       continue;
     }
 
+    // ONLY the flagged half. `intake.question_raised` is what the requester was
+    // asked to answer; folding that too would turn a high-stakes question the
+    // operator has already resolved into a low-stakes assumption and escalate it.
+    if (event.type === 'intake.assumption_flagged') {
+      const criterionId = event.payload['criterionId'];
+      const question = event.payload['question'];
+      const stakes = event.payload['stakes'];
+      if (typeof question === 'string' && (stakes === 'low' || stakes === 'high')) {
+        carried.push({
+          criterionId: typeof criterionId === 'string' ? criterionId : null,
+          question,
+          stakes,
+        });
+      }
+      continue;
+    }
+
+    if (event.type === 'assumption.became_load_bearing') {
+      const criterionId = event.payload['criterionId'];
+      if (typeof criterionId === 'string') escalatedAssumptions.add(criterionId);
+      continue;
+    }
+
     if (event.type === 'gate_b.verdict_issued') {
       const outcome = event.payload['outcome'];
       if (typeof outcome === 'string') lastOutcome.set(taskId, outcome);
@@ -462,7 +509,7 @@ function foldPriorTrail(events: readonly LedgerEventInput[]): PriorState {
     if (deliverable !== undefined) verified.set(taskId, deliverable);
   }
 
-  return { contracts, childrenOf, verified, decided };
+  return { contracts, childrenOf, verified, decided, carried, escalatedAssumptions };
 }
 
 /** Either a subtree's assembled deliverable, or the surrender that ended it. */
@@ -807,10 +854,16 @@ export async function runMission(
    * defined above it — hence a holder rather than a parameter. Empty for every
    * mission whose request left nothing open, which is the common case and costs
    * nothing.
+   *
+   * SEEDED from the prior trail, because the intake dialogue does not run on a
+   * resume. Without this the list was empty on exactly the path where it matters
+   * most: a resume is the only way a mission whose intake raised a high-stakes
+   * question ever reaches a task, and the live interrogator raised one in 8 of 8
+   * trials (defect `343c3fb8`).
    */
-  const carriedAssumptions: FlaggedAssumption[] = [];
-  /** `about` keys already raised, so a moment stays a moment. */
-  const assumptionsEscalated = new Set<string>();
+  const carriedAssumptions: FlaggedAssumption[] = [...prior.carried];
+  /** Criterion ids already raised, so a moment stays a moment — across a resume too. */
+  const assumptionsEscalated = new Set<string>(prior.escalatedAssumptions);
   /** The live experiment, plus where in `gateBOutcomes` its window started. */
   let liveFix:
     | { readonly hotFixId: string; readonly plan: HotFixPlan; readonly target: HotFixTarget; readonly previousValue: string; readonly from: number }
