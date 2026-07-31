@@ -236,6 +236,19 @@ export function proposableCapabilities(known: readonly string[]): string[] {
  * first), so a proposal that could join two capabilities joins the
  * better-established one — the tie-break is the system's measured history rather
  * than alphabetical luck.
+ *
+ * BOTH sides go through `capabilityOf` (defect `e34d178e`). The candidate used
+ * to be tokenised verbatim, so `Writing` never equalled `writing` and half the
+ * registry — 12 of 24 proposable categories, measured live — was unreachable for
+ * reuse. Normalising the candidate is not merely lowercasing it: the
+ * first-segment rule drops the subject a category happened to be about, so
+ * `Physics/Chemistry of Writing Materials` is compared as the capability
+ * `physics` rather than lending `writing` and `materials` to any writing task
+ * that comes along.
+ *
+ * The category is still returned VERBATIM. It is the key `bestForCategory` is
+ * queried by, so returning a normalised form would resolve onto a row and then
+ * fail to find it — reuse that resolves correctly and reuses nothing.
  */
 export function resolveCapability(proposed: string, known: readonly string[]): string {
   const capability = capabilityOf(proposed);
@@ -243,7 +256,7 @@ export function resolveCapability(proposed: string, known: readonly string[]): s
 
   const proposedTokens = tokensOf(capability);
   for (const candidate of known) {
-    const candidateTokens = tokensOf(candidate);
+    const candidateTokens = tokensOf(capabilityOf(candidate));
     if (proposedTokens.some((token) => candidateTokens.includes(token))) return candidate;
   }
   return capability;

@@ -89,6 +89,92 @@ describe('losers are down-weighted, never deleted (invariant #5)', () => {
   });
 });
 
+/**
+ * Defect `6d58e8ef` — found while measuring `e34d178e`, not by inspection.
+ *
+ * `bestForCategory` filters `active = true`; `knownCapabilities` did not. So a
+ * category whose designs are all retired was still offered to the planner as
+ * "capabilities the swarm already handles" and to `resolveCapability` as a merge
+ * target — and then staffed by asking `bestForCategory`, which returns null for
+ * it. A guaranteed no-bid for a name the system itself suggested, and the
+ * systematic-no-bid surrender signal counts those.
+ *
+ * The repository's own comment on `search` already draws the line:
+ * `bestForCategory` "answers 'who should do this work' and so must exclude the
+ * retired". `knownCapabilities` asks the same question.
+ */
+describe('knownCapabilities answers "what can be staffed", so the retired are excluded', () => {
+  it('drops a category whose only design is retired, and keeps one that can still bid', async () => {
+    const retiredOnly = 'known.retired-only';
+    const stillLive = 'known.still-live';
+    const doomed = nextId();
+    const alive = nextId();
+    await registry.upsert({ designId: doomed, category: retiredOnly, roleInstructions: 'x', capabilities: [] });
+    await registry.upsert({ designId: alive, category: stillLive, roleInstructions: 'y', capabilities: [] });
+    for (const _ of [0, 1, 2]) await registry.recordOutcome(doomed, 0.9);
+    for (const _ of [0, 1, 2]) await registry.recordOutcome(alive, 0.9);
+
+    // CONTROL: both are offered while both are active, so the exclusion below
+    // can only be the retirement and not a query that never saw them.
+    const before = await registry.knownCapabilities();
+    expect(before, 'CONTROL: the fixture never reached the query').toContain(retiredOnly);
+    expect(before).toContain(stillLive);
+
+    await registry.deactivate(doomed);
+
+    const after = await registry.knownCapabilities();
+    expect(after, 'a category no design can bid for was still offered').not.toContain(retiredOnly);
+    expect(after, 'CONTROL: the live category vanished too — this filters everything').toContain(stillLive);
+    // The pairing that matters: whatever is offered must be staffable.
+    expect(await registry.bestForCategory(retiredOnly)).toBeNull();
+    expect((await registry.bestForCategory(stillLive))?.designId).toBe(alive);
+  });
+
+  it('DISTRACTOR: a category stays while ANY design in it is active', async () => {
+    // Retirement is per-design. A capability whose first design was down-weighted
+    // and replaced is still a capability the swarm handles; excluding it would
+    // erase the whole capability the moment the ratchet retired one version.
+    const category = 'known.succeeded';
+    const predecessor = nextId();
+    const heir = nextId();
+    await registry.upsert({ designId: predecessor, category, roleInstructions: 'v1', capabilities: [] });
+    await registry.upsert({ designId: heir, category, roleInstructions: 'v2', capabilities: [] });
+    await registry.deactivate(predecessor);
+
+    expect(await registry.knownCapabilities()).toContain(category);
+  });
+
+  it('DISTRACTOR: the evidence ordering counts only observations that can still bid', async () => {
+    // The order IS the tie-break for `resolveCapability`, so it has to rank
+    // categories by the evidence available to stake a bid. Filtering in HAVING
+    // instead of WHERE would keep the category and still sum the retired
+    // design's observations — ranking a category above a rival on a track record
+    // that can no longer be hired.
+    const hollow = 'known.hollowed-out';
+    const modest = 'known.modest';
+    const retiredStar = nextId();
+    const survivor = nextId();
+    const rival = nextId();
+    await registry.upsert({ designId: retiredStar, category: hollow, roleInstructions: 'star', capabilities: [] });
+    await registry.upsert({ designId: survivor, category: hollow, roleInstructions: 'rump', capabilities: [] });
+    await registry.upsert({ designId: rival, category: modest, roleInstructions: 'rival', capabilities: [] });
+    for (const _ of Array.from({ length: 10 })) await registry.recordOutcome(retiredStar, 0.9);
+    await registry.recordOutcome(survivor, 0.9);
+    for (const _ of [0, 1, 2, 3, 4]) await registry.recordOutcome(rival, 0.9);
+
+    await registry.deactivate(retiredStar);
+
+    const known = await registry.knownCapabilities();
+    expect(known, 'CONTROL: the fixture categories are missing').toEqual(
+      expect.arrayContaining([hollow, modest]),
+    );
+    expect(
+      known.indexOf(modest),
+      'the hollowed-out category outranked a rival on evidence that cannot bid',
+    ).toBeLessThan(known.indexOf(hollow));
+  });
+});
+
 describe('the clade score is a running mean over its observations', () => {
   it('folds each outcome in incrementally', async () => {
     const designId = nextId();

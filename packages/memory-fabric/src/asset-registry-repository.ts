@@ -415,16 +415,30 @@ export class AssetRegistryRepository {
   }
 
   /**
-   * The capabilities the registry knows, best-established first (R38 AC-0).
+   * The capabilities the registry can STAFF, best-established first (R38 AC-0).
    *
    * Ordered by total observations so that a proposed category which could join
    * two capabilities joins the better-evidenced one — the tie-break is the
    * system's own measured history rather than alphabetical luck.
+   *
+   * `active = true`, mirroring `bestForCategory` (defect `6d58e8ef`). This is
+   * the same question that method answers — *who could do this work* — and
+   * without the filter a category whose designs are all retired was still shown
+   * to the planner as a capability the swarm handles and offered to
+   * `resolveCapability` as a merge target, then staffed by asking
+   * `bestForCategory`, which excludes the retired and returns null. A guaranteed
+   * no-bid for a name the system suggested itself, feeding the surrender signal
+   * that counts unserved capabilities.
+   *
+   * In WHERE rather than HAVING, so the ordering sums only observations that can
+   * still bid. A category ranked on a retired design's track record would
+   * outrank a rival on evidence no longer for hire.
    */
   async knownCapabilities(): Promise<string[]> {
     const { rows } = await this.#pool.query<{ category: string }>(
       `SELECT category
          FROM agent_design
+        WHERE active = true
         GROUP BY category
         ORDER BY SUM(observations) DESC, MIN(created_at) ASC`,
     );
