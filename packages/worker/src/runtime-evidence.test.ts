@@ -182,3 +182,66 @@ describe('R40 AC-1 — the real work seam asks the worker what it assumed', () =
     expect(out.assumptions).toEqual([]);
   });
 });
+
+/**
+ * `effortSpent` becomes a real measurement.
+ *
+ * It was a hardcoded `1`, and that one constant was load-bearing in four
+ * places: R40's effort floor (which only binds for floors >= 2, while the intake
+ * default is 1), R34's mechanical ceiling check (which could never trip), R37's
+ * budget accounting (every live pedigree reported `spent: 1` per task), and —
+ * found by driving it — the fact that no task could exceed its ceiling, so
+ * `budget_exhaustion` was unemittable and the `agent_redesign` rung unreachable
+ * (`e758f460`, `cb939996`).
+ *
+ * Derived, not invented. The model-router does not surface token usage, so the
+ * honest unit is the number of MODEL CALLS a task actually made — which is
+ * already the unit the codebase implies, since `self-critique.ts` adds its own
+ * calls to the same total.
+ */
+describe('effortSpent is measured, not assumed', () => {
+  it('counts the model calls the work seam actually made', async () => {
+    // The seam asks twice: once for the answer, once for the assumptions.
+    const gen = generatorReturning({ [ANSWER]: { answer: 'x' } });
+    const seams = createMissionSeams(gen, MODELS);
+
+    const out = await seams.work.execute({ contract: view(), restatement: 'r' });
+
+    expect(out.effortSpent).toBe(gen.schemas.length);
+    expect(out.effortSpent).toBeGreaterThan(1);
+  });
+
+  it('DISTRACTOR: a FAILED call still costs effort — a wasted call was still spent', async () => {
+    // Charging only for successful calls would make a task that burned the
+    // budget on failures look cheap, which is precisely backwards: the budget
+    // exists to bound what was SPENT, not what worked.
+    let n = 0;
+    const gen: StructuredGenerator & { schemas: unknown[]; prompts: string[] } = {
+      schemas: [], prompts: [],
+      async generate({ probe }) {
+        this.schemas.push(probe.schema);
+        n += 1;
+        if (n === 2) throw new Error('assumptions call failed');
+        return { answer: 'x' };
+      },
+    };
+    const seams = createMissionSeams(gen, MODELS);
+
+    const out = await seams.work.execute({ contract: view(), restatement: 'r' });
+
+    expect(out.effortSpent).toBe(2);
+  });
+
+  it('DISTRACTOR: effort is per TASK, not cumulative across tasks', async () => {
+    // A shared counter would make every later task in a mission look more
+    // expensive than the one before it, and the ceiling would trip on position
+    // rather than on cost.
+    const gen = generatorReturning({ [ANSWER]: { answer: 'x' } });
+    const seams = createMissionSeams(gen, MODELS);
+
+    const first = await seams.work.execute({ contract: view(), restatement: 'r' });
+    const second = await seams.work.execute({ contract: view(), restatement: 'r' });
+
+    expect(second.effortSpent).toBe(first.effortSpent);
+  });
+});

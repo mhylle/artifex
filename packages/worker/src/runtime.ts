@@ -624,39 +624,76 @@ export function createMissionSeams(
 
     work: {
       async execute({ contract }) {
+        /**
+         * Effort, MEASURED (the chain behind `e758f460` / `cb939996`).
+         *
+         * This was a hardcoded `1`, and that one constant was load-bearing in
+         * four places: R40's effort floor only binds for floors >= 2 while the
+         * intake default is 1; R34's mechanical tier compares it to the ceiling
+         * and could never trip; R37's pedigree reported `spent: 1` per task on
+         * every live mission; and no task could exceed its ceiling, so
+         * `budget_exhaustion` was unemittable and `agent_redesign` unreachable.
+         *
+         * Derived, not invented: the model-router does not surface token usage,
+         * so the honest unit is the number of MODEL CALLS this task made — the
+         * unit the codebase already implies, since `self-critique.ts` adds its
+         * own calls to the same total.
+         *
+         * Counted per EXECUTION, not per process: a shared counter would make
+         * every later task look costlier than the one before, and the ceiling
+         * would trip on position rather than on cost.
+         *
+         * A FAILED call still counts. Charging only for successes would make a
+         * task that burned its budget on failures look cheap — exactly backwards,
+         * since the budget bounds what was SPENT, not what worked.
+         */
+        let calls = 0;
+        const spend = async <T>(work: Promise<T>): Promise<T> => {
+          calls += 1;
+          return work;
+        };
         // The worker MUST be shown its acceptance criteria — they are the spec.
         // Prompting with the objective alone was the P9 bug: the planner wrote
         // criteria the worker never aimed at, and Gate B correctly failed it.
-        const out = (await gen(models.worker, AnswerSchema, [
+        const out = (await spend(gen(models.worker, AnswerSchema, [
           'Answer the task so that EVERY acceptance criterion below is satisfied.',
           '',
           `TASK: ${contract.objective}`,
           'ACCEPTANCE CRITERIA (you are graded on exactly these):',
           ...contract.acceptanceCriteria.map((c) => `  - ${c.statement}`),
-        ].join('\n'))) as { answer: string };
+        ].join('\n')))) as { answer: string };
 
         // Asked AFTER the answer exists, and about that specific answer — the
         // premises are a property of the work that was done, not of the task in
         // the abstract. Named concretely on purpose: asking for "any
         // assumptions" gets back a paraphrase of the task, while asking for the
         // questions you answered for yourself gets back what a reviewer needs.
-        const declared = (await gen(models.worker, AssumptionsSchema, [
-          'List your ASSUMPTIONS: questions the task left open that you answered for',
-          'yourself in order to produce the answer below. State them so a stranger who',
-          'watched none of the work can check them.',
-          'If the task left nothing open, return an empty list — do not invent',
-          'assumptions to fill it.',
-          '',
-          `TASK: ${contract.objective}`,
-          `THE ANSWER YOU GAVE: ${out.answer}`,
-        ].join('\n'))) as { assumptions?: string[] };
+        // A failure here loses a NICETY, not the work — the answer is already in
+        // hand. `AssumptionsSchema` has always said so; the code did not, and a
+        // throwing elicitation took the whole execution down with it. The call
+        // is still CHARGED, because it was still spent.
+        let declared: { assumptions?: string[] } = {};
+        try {
+          declared = (await spend(gen(models.worker, AssumptionsSchema, [
+            'List your ASSUMPTIONS: questions the task left open that you answered for',
+            'yourself in order to produce the answer below. State them so a stranger who',
+            'watched none of the work can check them.',
+            'If the task left nothing open, return an empty list — do not invent',
+            'assumptions to fill it.',
+            '',
+            `TASK: ${contract.objective}`,
+            `THE ANSWER YOU GAVE: ${out.answer}`,
+          ].join('\n')))) as { assumptions?: string[] };
+        } catch {
+          declared = {};
+        }
 
         return {
           deliverable: { answer: out.answer },
           actions: [],
           consulted: [],
           assumptions: declared.assumptions ?? [],
-          effortSpent: 1,
+          effortSpent: calls,
         };
       },
     },
