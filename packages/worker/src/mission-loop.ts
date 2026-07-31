@@ -1492,6 +1492,12 @@ export async function runMission(
         const tier = Math.min(manifest.logicalTier + tierBump, FRONTIER_TIER) as LogicalTier;
         record(child.taskId, 'staffing', 'agent.staffed', 'agent_creator', {
           designId: manifest.designId,
+          // WHICH capability the planner's raw category resolved to (defect
+          // `340aa7de`). The event recorded which DESIGN ran and not what kind
+          // of work it was, so the weak-spot ranker had to fall back to the raw
+          // `task.contracted` name — re-splitting buckets that staffing had
+          // already merged.
+          capability: manifest.category,
           // The version, not just the design: a clade score attributes
           // performance to a lineage, and "which version was this" is the join key.
           version: manifest.version,

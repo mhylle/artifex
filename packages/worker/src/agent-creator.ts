@@ -368,7 +368,18 @@ export async function staff(options: StaffOptions): Promise<CapabilityManifest> 
     manifestId: contract.taskId,
     designId: design.designId,
     version: design.version,
-    category: contract.category,
+    // The RESOLVED capability, not the planner's raw phrasing (defect
+    // `340aa7de`). `resolveCapability` ran twenty lines above and its answer was
+    // then thrown away here, so every consumer of the manifest saw the invented
+    // name and the clustering may as well not have happened.
+    //
+    // Measured cost against the live ledger: 31 raw categories over the same
+    // tasks that staffed 22 resolved capabilities. `scientific terminology`
+    // alone absorbed five raw names — which the weak-spot ranker then re-split
+    // into five buckets of one observation each, while the registry held one
+    // design with ten. That is why weak spots report `observations: 1` and why
+    // R29's budget-outlier trigger has never fired.
+    category: capability,
     roleInstructions: design.roleInstructions,
     capabilities: design.capabilities,
     // Never wider than the contract already grants — the manifest cannot

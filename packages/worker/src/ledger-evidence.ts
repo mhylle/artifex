@@ -78,12 +78,43 @@ export class LedgerEvidenceSource {
       const categoryOf = new Map<string, string>();
       const ceilingOf = new Map<string, number>();
       for (const event of events) {
-        if (event.type !== 'task.contracted' || event.taskId === null) continue;
-        const category = event.payload['category'];
-        if (typeof category === 'string') categoryOf.set(event.taskId, category);
-        const contract = event.payload['contract'] as { budget?: { ceiling?: unknown } } | undefined;
-        const ceiling = contract?.budget?.ceiling;
-        if (typeof ceiling === 'number') ceilingOf.set(event.taskId, ceiling);
+        if (event.taskId === null) continue;
+
+        if (event.type === 'task.contracted') {
+          // The planner's RAW phrasing — a fallback, not the preference. Kept
+          // because thousands of historical events predate the capability
+          // field, and dropping them would empty the ranking to improve its
+          // resolution: all the evidence traded for cleaner buckets.
+          const category = event.payload['category'];
+          // The `!has` guard is an EQUIVALENT mutant under current ordering —
+          // removing it changes nothing, because replay is ordered by `seq` and
+          // `task.contracted` always precedes `agent.staffed` for a task, so the
+          // capability set below always wins anyway. Kept as a statement of
+          // precedence rather than a reliance on arrival order: if a future
+          // event ever re-contracts a task after staffing, the resolved
+          // capability must still not be overwritten by a raw name.
+          if (typeof category === 'string' && !categoryOf.has(event.taskId)) {
+            categoryOf.set(event.taskId, category);
+          }
+          const contract = event.payload['contract'] as { budget?: { ceiling?: unknown } } | undefined;
+          const ceiling = contract?.budget?.ceiling;
+          if (typeof ceiling === 'number') ceilingOf.set(event.taskId, ceiling);
+          continue;
+        }
+
+        // The RESOLVED capability wins wherever it exists (defect `340aa7de`).
+        // `staff()` merges the planner's invented name onto a known capability;
+        // bucketing on the raw name re-splits what it merged. Measured: 31 raw
+        // categories over tasks that staffed 22 capabilities, with one
+        // capability absorbing five raw names — five buckets of one observation
+        // where the registry held one design with ten, which is why every weak
+        // spot looked like a singleton.
+        if (event.type === 'agent.staffed') {
+          const capability = event.payload['capability'];
+          if (typeof capability === 'string' && capability.length > 0) {
+            categoryOf.set(event.taskId, capability);
+          }
+        }
       }
 
       const buckets = new Map<string, Bucket>();
