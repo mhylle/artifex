@@ -64,13 +64,16 @@ const ANSWER = 'WorkerAnswer';
 function generatorReturning(replies: {
   answers?: string[];
   toolRequest?: { useTool: boolean; toolId?: string; text?: string };
-}): StructuredGenerator & { prompts: string[] } {
+}): StructuredGenerator & { prompts: string[]; schemas: unknown[] } {
   const prompts: string[] = [];
+  const schemas: unknown[] = [];
   let answered = 0;
   return {
     prompts,
+    schemas,
     async generate({ probe }: { probe: { schema: unknown; prompt: string } }) {
       prompts.push(probe.prompt);
+      schemas.push(probe.schema);
       const schema = probe.schema as { $id?: string; properties?: Record<string, unknown> };
       if (schema.$id === ANSWER) {
         const answer = replies.answers?.[answered] ?? 'a lever is a rigid bar';
@@ -211,5 +214,55 @@ describe('R13 AC-0 — an agent acts, and the trail carries what it did', () => 
     // broker's own test. What matters here is that the seam never bypasses it.
     expect(appended.some((e) => e.type === 'action.invoked' || e.type === 'action.denied')).toBe(true);
     expect(out.deliverable).toBeDefined();
+  });
+});
+
+describe('defect a08e6fee — the agent chooses WHETHER to measure, never WHAT', () => {
+  it('measures the draft, whatever the model asks for', async () => {
+    // Measured over five live invocations before this: two supplied something
+    // that could not settle any criterion — the draft *including hallucinated
+    // counts*, and the literal string "Caption and Summary combined." in place
+    // of the content — while three passed draft-like content. A first reading of
+    // three of those calls said "zero for three"; the fuller sample says two in
+    // five, and the smaller number is the one recorded.
+    //
+    // The rule does not rest on the rate: the agent has no reason to get this
+    // input right, and one that picks its own measurement subject can pick a
+    // flattering one.
+    const { appended, invoker } = realBroker();
+    const gen = generatorReturning({
+      answers: ['a lever is a bar'],
+      // A model still trying to name its own subject, which is what they did.
+      toolRequest: { useTool: true, toolId: 'text.count', text: 'Caption and Summary combined.' } as never,
+    });
+    const seams = createMissionSeams(gen, MODELS, undefined, undefined, undefined, undefined, undefined, undefined, undefined, invoker);
+
+    await seams.work.execute({
+      contract: view(grantsFor('medium')), restatement: 'r', agentId: 'design-1', occurredAt: AT,
+    });
+
+    const invoked = appended.find((e) => e.type === 'action.invoked');
+    expect(invoked?.payload['arguments'], 'the model chose the measurement subject').toEqual({
+      text: 'a lever is a bar',
+    });
+  });
+
+  it('DISTRACTOR: the model cannot supply a subject — the field is gone from its schema', async () => {
+    // Structural, not merely ignored. A field the model can still fill is a
+    // field it will fill, and the next reader would reasonably wire it back up.
+    // Asserting the SHAPE the model is handed is what makes the rule survive.
+    const { invoker } = realBroker();
+    const gen = generatorReturning({ toolRequest: { useTool: false } });
+    const seams = createMissionSeams(gen, MODELS, undefined, undefined, undefined, undefined, undefined, undefined, undefined, invoker);
+
+    await seams.work.execute({
+      contract: view(grantsFor('medium')), restatement: 'r', agentId: 'design-1', occurredAt: AT,
+    });
+
+    const request = gen.schemas.find(
+      (s) => (s as { properties?: Record<string, unknown> }).properties?.['useTool'] !== undefined,
+    ) as { properties: Record<string, unknown> } | undefined;
+    expect(request, 'CONTROL: the agent was never offered a tool at all').toBeDefined();
+    expect(Object.keys(request!.properties)).toEqual(['useTool', 'toolId']);
   });
 });

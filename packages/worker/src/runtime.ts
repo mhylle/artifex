@@ -592,7 +592,6 @@ const ToolRequestSchema = Type.Object(
   {
     useTool: Type.Boolean({ description: 'True only if running a tool would change what you submit.' }),
     toolId: Type.Optional(Type.String({ description: 'Which tool to run; omit when useTool is false.' })),
-    text: Type.Optional(Type.String({ description: 'The text to run the tool over; defaults to your draft answer.' })),
   },
   { additionalProperties: false },
 );
@@ -827,19 +826,39 @@ export function createMissionSeams(
               '',
               `YOUR DRAFT ANSWER: ${out.answer}`,
               '',
-              'Set useTool false if no tool would change what you submit.',
-            ].join('\n')))) as { useTool?: boolean; toolId?: string; text?: string };
+              'The tool runs over the draft above. Set useTool false if no tool would',
+              'change what you submit.',
+            ].join('\n')))) as { useTool?: boolean; toolId?: string };
 
             if (ask.useTool === true && typeof ask.toolId === 'string') {
               // Through the broker, always. An agent that called the tool
               // directly would produce an unlogged side effect, which is the one
               // thing invariant #1 does not permit — and the reason this is a
               // broker rather than a library.
+              // The agent decides WHETHER to measure; the system decides WHAT is
+              // measured (defect `a08e6fee`).
+              //
+              // The model used to supply the text. Measured over five live
+              // invocations: two supplied something that could not settle any
+              // criterion — once its own draft *including the counts it had
+              // hallucinated*, once the literal string "Caption and Summary
+              // combined." in place of the content — and the other three passed
+              // draft-like content. A first reading of only three of those calls
+              // said "zero for three"; the fuller sample says two in five, and
+              // the smaller number is recorded here rather than the tidier one.
+              //
+              // Two in five is still a failure rate for an input the agent has
+              // no reason to get right, and the argument for removing it does not
+              // rest on the rate. It is the same principle as the tier policy,
+              // which computes a model rather than letting the agent pick one: an
+              // agent that chooses its own measurement subject can choose a
+              // flattering one. Removing the field makes that structural — it
+              // cannot pass the wrong string if it cannot pass a string.
               const record = await tools.invoke({
                 agentId,
                 contract,
                 toolId: ask.toolId,
-                args: { text: ask.text ?? out.answer },
+                args: { text: out.answer },
                 occurredAt,
               });
               actionRecords.push(record);
