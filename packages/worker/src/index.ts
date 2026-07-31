@@ -20,6 +20,7 @@ import { runMission } from './mission-loop.js';
 import { LedgerEvidenceSource } from './ledger-evidence.js';
 import { rankWeakSpots } from './science-loop.js';
 import { casesFromTrail } from './bench-producer.js';
+import { evaluatePetition } from './sealed-evaluation.js';
 import { petitionFromWeakSpots, petitionRefusal } from './petition.js';
 import { ProposalEmitter } from './proposal-emitter.js';
 import { buildWorkerSeams } from './worker-seams.js';
@@ -244,11 +245,73 @@ export async function main(): Promise<void> {
         if (petition !== null) {
           const refusal = petitionRefusal(petition);
           if (refusal === null) {
+            // ---- evaluated on the SEALED bench (R29 AC-0) -------------------
+            // The criterion's second clause: a petition is judged against the
+            // slice the learner never sees, "rather than any slice the learner
+            // could have optimized against". The spend a case ran at is not on
+            // the case — it is on the ledger — so each case's source mission is
+            // replayed to find it, memoised because sibling cases share one.
+            const spentByTask = new Map<string, number>();
+            const replayed = new Set<string>();
+            const sealed = await bench.list({ slice: 'sealed' });
+            for (const bankedCase of sealed) {
+              if (replayed.has(bankedCase.sourceMissionId)) continue;
+              replayed.add(bankedCase.sourceMissionId);
+              for (const past of await ledger
+                .replay({ missionId: bankedCase.sourceMissionId })
+                .catch(() => [])) {
+                if (past.type !== 'task.executed' || past.taskId === null) continue;
+                const spent = past.payload['effortSpent'];
+                if (typeof spent === 'number') spentByTask.set(past.taskId, spent);
+              }
+            }
+
+            // Not caught: `evaluateOnSealedBench` throws when handed an open
+            // case, and that refusal is the point of the clause.
+            const sealedVerdict = await evaluatePetition(
+              { title: petition.title, category: weakSpots[0]?.category ?? '' },
+              {
+                async sealedCases() {
+                  return sealed.map((c) => ({
+                    caseId: c.caseId, slice: c.slice, capability: c.capability,
+                    contract: c.contract, verifiedOutcome: c.verifiedOutcome,
+                    effortSpent: spentByTask.get(c.sourceTaskId),
+                  }));
+                },
+              },
+            );
+            console.log(
+              `  sealed-bench verdict: ${sealedVerdict.verdict} ` +
+                `(${sealedVerdict.supported}/${sealedVerdict.evaluated} case(s))`,
+            );
+
             const emitter = new ProposalEmitter(
               { append: (event) => ledger.append(event) },
               { newId: () => randomUUID(), now: () => new Date().toISOString() },
             );
             const filed = await emitter.propose(petition);
+
+            // The verdict is appended as its own event rather than folded into
+            // the proposal: the proposal is what the learner ARGUED, and the
+            // evaluation is what the sealed bench ANSWERED. Collapsing them
+            // would let a reader mistake the learner's own filing for a
+            // judgement made against evidence it never chose.
+            await ledger.append({
+              eventId: randomUUID(),
+              missionId: contract.missionId,
+              taskId: null,
+              family: 'learning',
+              type: 'learning.petition_evaluated',
+              actor: { kind: 'learning_agent', id: 'learning_agent', displayName: 'Learning Agent' },
+              payload: {
+                petitionId: filed.eventId,
+                verdict: sealedVerdict.verdict,
+                evaluated: sealedVerdict.evaluated,
+                supported: sealedVerdict.supported,
+                slice: 'sealed',
+              },
+              occurredAt: new Date().toISOString(),
+            });
 
             // ---- and it waits for a HUMAN (R29 AC-1) ------------------------
             // Recorded as an attention item so the petition reaches the queue an

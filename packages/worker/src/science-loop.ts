@@ -53,7 +53,13 @@ export interface WeakSpot {
  * same mission.
  */
 const POOR_PASS_RATE = 0.75;
-const NEAR_CEILING = 0.9;
+/**
+ * Exported so the sealed-bench evaluation scores a case against the SAME bar the
+ * ranking used to raise the petition. A second copy of 0.9 would let the two
+ * drift, and a petition argued at one threshold and judged at another is the
+ * two-sites-keying-on-different-versions shape this repo keeps finding.
+ */
+export const NEAR_CEILING = 0.9;
 
 /**
  * Rank weak spots across a mission history (R27 AC-0).
