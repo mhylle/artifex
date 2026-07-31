@@ -48,8 +48,8 @@ const mission = () => ({
 
 /** Replies per probe, and records the schemas so the SHAPE can be asserted. */
 function generatorReturning(replies: {
-  open?: { questions: Array<{ about: string; question: string }> };
-  stakes?: { verdicts: Array<{ about: string; stakes: 'low' | 'high' }> };
+  open?: { questions: Array<{ criterionId: string; subject: string; question: string }> };
+  stakes?: { verdicts: Array<{ index: number; stakes: 'low' | 'high' }> };
 }): StructuredGenerator & { schemas: Array<Record<string, unknown>>; prompts: string[] } {
   const schemas: Array<Record<string, unknown>> = [];
   const prompts: string[] = [];
@@ -85,15 +85,15 @@ describe('bf766244 — what is open and what it costs are asked separately', () 
         items?: { properties?: Record<string, unknown> };
       };
       expect(Object.keys(props.items?.properties ?? {}), 'stakes rode along with the questions').toEqual(
-        ['about', 'question'],
+        ['criterionId', 'subject', 'question'],
       );
     });
   });
 
   it('attaches the stakes verdict from the SECOND call to the question', async () => {
     const gen = generatorReturning({
-      open: { questions: [{ about: 'm-1', question: 'Which season?' }] },
-      stakes: { verdicts: [{ about: 'm-1', stakes: 'low' }] },
+      open: { questions: [{ criterionId: 'm-1', subject: 'season', question: 'Which season?' }] },
+      stakes: { verdicts: [{ index: 0, stakes: 'low' }] },
     });
 
     const out = await seamsWith(gen).interrogator!.assess({ mission: mission() });
@@ -108,7 +108,7 @@ describe('bf766244 — what is open and what it costs are asked separately', () 
     // would be the system assuming away something nobody classified — which is
     // exactly what AC-1 forbids. Blocking is recoverable; silence is not.
     const gen = generatorReturning({
-      open: { questions: [{ about: 'm-1', question: 'Which season?' }] },
+      open: { questions: [{ criterionId: 'm-1', subject: 'season', question: 'Which season?' }] },
       stakes: { verdicts: [] },
     });
 
@@ -136,8 +136,8 @@ describe('bf766244 — what is open and what it costs are asked separately', () 
     // The seam must be able to carry either, or `low` is a name with no
     // behaviour however the prompt is worded.
     const gen = generatorReturning({
-      open: { questions: [{ about: 'm-1', question: 'A?' }, { about: 'm-2', question: 'B?' }] },
-      stakes: { verdicts: [{ about: 'm-1', stakes: 'low' }, { about: 'm-2', stakes: 'high' }] },
+      open: { questions: [{ criterionId: 'm-1', subject: 'a', question: 'A?' }, { criterionId: 'm-2', subject: 'b', question: 'B?' }] },
+      stakes: { verdicts: [{ index: 0, stakes: 'low' }, { index: 1, stakes: 'high' }] },
     });
 
     const out = await seamsWith(gen).interrogator!.assess({ mission: mission() });
@@ -166,5 +166,116 @@ describe('bf766244 — what is open and what it costs are asked separately', () 
     expect(openPrompt, 'CONTROL: the open-questions probe never ran').toMatch(/more than one way/i);
     expect(openPrompt).not.toMatch(/empty list/i);
     expect(openPrompt).not.toMatch(/do not invent/i);
+  });
+});
+
+describe('ddcaa17d — a question carries a RESOLVED criterion id, or none at all', () => {
+  it('asks for the criterion as its own field, separate from the human-readable subject', async () => {
+    // The schema is the judgement. `about` was described as "the criterion id,
+    // OR the name of the field", permitting two key spaces while loadBearingNow
+    // handled one; the model took the option the description offered, and every
+    // carried assumption came back unmatchable.
+    const gen = generatorReturning({});
+    await seamsWith(gen).interrogator!.assess({ mission: mission() });
+
+    const openSchema = gen.schemas.find((s) => (s['properties'] as Record<string, unknown>)?.['questions']);
+    const items = ((openSchema!['properties'] as Record<string, unknown>)['questions'] as {
+      items?: { properties?: Record<string, unknown> };
+    }).items;
+    expect(Object.keys(items?.properties ?? {})).toEqual(['criterionId', 'subject', 'question']);
+  });
+
+  it('resolves a real criterion id and keeps it', async () => {
+    const gen = generatorReturning({
+      open: { questions: [{ criterionId: 'm-1', subject: 'colour', question: 'Which shade?' }] },
+      stakes: { verdicts: [{ index: 0, stakes: 'low' }] },
+    });
+
+    const out = await seamsWith(gen).interrogator!.assess({ mission: mission() });
+
+    expect(out.questions[0]?.criterionId).toBe('m-1');
+    expect(out.questions[0]?.subject).toBe('colour');
+  });
+
+  it('DISTRACTOR: an INVENTED criterion id resolves to null, and the question survives', async () => {
+    // Measured before building: with one criterion the model returned a real id
+    // 15 times in 16; with two criteria only 8 of 17, the rest labelled
+    // "general", "Scope_Note" and the like — genuinely about the request as a
+    // whole rather than one criterion.
+    //
+    // Forcing those onto a criterion would be false precision, and dropping them
+    // would lose a real ambiguity. So the question survives with no criterion,
+    // and simply never becomes load-bearing.
+    const gen = generatorReturning({
+      open: { questions: [{ criterionId: 'general', subject: 'scope', question: 'How broad?' }] },
+      stakes: { verdicts: [{ index: 0, stakes: 'low' }] },
+    });
+
+    const out = await seamsWith(gen).interrogator!.assess({ mission: mission() });
+
+    expect(out.questions, 'an unresolvable question was dropped').toHaveLength(1);
+    expect(out.questions[0]?.criterionId, 'an invented id was accepted as real').toBeNull();
+    expect(out.questions[0]?.question).toBe('How broad?');
+  });
+
+  it('DISTRACTOR: the stakes verdict still attaches when the criterion is unresolvable', async () => {
+    // The two calls key on the model's own label, which is the only thing both
+    // sides of that exchange share. Resolution against the contract happens
+    // after, so an unresolvable question keeps its stakes and can still be
+    // carried rather than blocking.
+    const gen = generatorReturning({
+      open: { questions: [{ criterionId: 'general', subject: 'scope', question: 'How broad?' }] },
+      stakes: { verdicts: [{ index: 0, stakes: 'low' }] },
+    });
+
+    const out = await seamsWith(gen).interrogator!.assess({ mission: mission() });
+
+    expect(out.questions[0]?.stakes).toBe('low');
+  });
+});
+
+describe('the stakes exchange is keyed per QUESTION, not per criterion', () => {
+  it('gives two questions on the SAME criterion their own verdicts', () => {
+    // Found live, in code this iteration introduced. Resolving `criterionId`
+    // made every question about one criterion share a key, so the verdict map
+    // collapsed and all but one defaulted to `high`. Measured: 16 questions
+    // raised across three missions, every one `high`, every one `m-1`, and
+    // `intake.assumption_flagged` did not move.
+    //
+    // Find-shape (k) — two sites keying on different versions of the same
+    // thing — in new code, one iteration after the same shape was fixed
+    // elsewhere. A criterion is not an identifier for a question.
+    const gen = generatorReturning({
+      open: {
+        questions: [
+          { criterionId: 'm-1', subject: 'shade', question: 'Which shade?' },
+          { criterionId: 'm-1', subject: 'medium', question: 'Print or screen?' },
+        ],
+      },
+      stakes: { verdicts: [{ index: 0, stakes: 'low' }, { index: 1, stakes: 'high' }] },
+    });
+
+    return seamsWith(gen).interrogator!.assess({ mission: mission() }).then((out) => {
+      expect(out.questions.map((q) => q.stakes), 'both questions collapsed onto one verdict').toEqual(
+        ['low', 'high'],
+      );
+    });
+  });
+
+  it('DISTRACTOR: the stakes schema asks by INDEX, so identity needs no judgement', async () => {
+    // The schema is the judgement. Asking the model to re-state which question
+    // it is rating invites it to answer with a label, and labels are not unique.
+    // An index is unique by construction.
+    const gen = generatorReturning({
+      open: { questions: [{ criterionId: 'm-1', subject: 's', question: 'Q?' }] },
+    });
+    await seamsWith(gen).interrogator!.assess({ mission: mission() });
+
+    const stakesSchema = gen.schemas.find((sc) => (sc['properties'] as Record<string, unknown>)?.['verdicts']);
+    expect(stakesSchema, 'CONTROL: the stakes probe never ran').toBeDefined();
+    const items = ((stakesSchema!['properties'] as Record<string, unknown>)['verdicts'] as {
+      items?: { properties?: Record<string, unknown> };
+    }).items;
+    expect(Object.keys(items?.properties ?? {})).toEqual(['index', 'stakes']);
   });
 });

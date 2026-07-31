@@ -31,8 +31,15 @@
 
 /** A low-stakes ambiguity the dial permitted carrying into the run. */
 export interface FlaggedAssumption {
-  /** The criterion or field the question was raised about. */
-  readonly about: string;
+  /**
+   * The criterion this assumption bears on, or null when it is about the
+   * request as a whole (defect `ddcaa17d`).
+   *
+   * A null can never become load-bearing, and that is correct rather than a
+   * gap: the trigger is "a task is graded on this", and no task is graded on a
+   * whole-request ambiguity. It is still recorded and still visible.
+   */
+  readonly criterionId: string | null;
   readonly question: string;
   readonly stakes: 'low' | 'high';
 }
@@ -53,6 +60,8 @@ export function loadBearingNow(
 ): FlaggedAssumption[] {
   return flagged.filter(
     (assumption) =>
-      !alreadyEscalated.has(assumption.about) && taskCriterionIds.includes(assumption.about),
+      assumption.criterionId !== null &&
+      !alreadyEscalated.has(assumption.criterionId) &&
+      taskCriterionIds.includes(assumption.criterionId),
   );
 }

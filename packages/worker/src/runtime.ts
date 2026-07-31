@@ -653,8 +653,20 @@ const IntakeQuestionsSchema = Type.Object(
     questions: Type.Array(
       Type.Object(
         {
-          about: Type.String({
-            description: 'The criterion id, or the name of the field, this question is about.',
+          // ONE key space, not two (defect `ddcaa17d`). This was `about`,
+          // described as "the criterion id, OR the name of the field" — and a
+          // description offering two alternatives produces both. The model
+          // answered with phrases like "cover" while `loadBearingNow` matched
+          // criterion ids, so no carried assumption could ever become
+          // load-bearing.
+          criterionId: Type.String({
+            description:
+              'Which listed success criterion this question bears on. Must be one of the criterion ' +
+              'ids shown in SUCCESS CRITERIA below, copied exactly. Use the word general if the ' +
+              'question is about the request as a whole rather than one criterion.',
+          }),
+          subject: Type.String({
+            description: 'The word or phrase in the request that is unclear.',
           }),
           question: Type.String({
             description: 'The question to put to the requester, answerable in a sentence.',
@@ -690,7 +702,9 @@ const IntakeStakesSchema = Type.Object(
     verdicts: Type.Array(
       Type.Object(
         {
-          about: Type.String({ description: 'The `about` value of the question being rated.' }),
+          index: Type.Integer({
+            description: 'The number of the open detail being rated, exactly as listed below.',
+          }),
           stakes: Type.Union([Type.Literal('low'), Type.Literal('high')], {
             description:
               'high if guessing wrong would change what gets built or delivered; low if the work is ' +
@@ -892,7 +906,9 @@ export function createMissionSeams(
           'reasonable person could read in more than one way, however small.',
           '',
           brief,
-        ].join('\n'))) as { questions?: Array<{ about: string; question: string }> };
+        ].join('\n'))) as {
+          questions?: Array<{ criterionId: string; subject: string; question: string }>;
+        };
 
         const asked = open.questions ?? [];
         if (asked.length === 0) return { questions: [] };
@@ -907,18 +923,40 @@ export function createMissionSeams(
           brief,
           '',
           'OPEN DETAILS:',
-          ...asked.map((q) => `  [${q.about}] ${q.question}`),
-        ].join('\n'))) as { verdicts?: Array<{ about: string; stakes: 'low' | 'high' }> };
+          ...asked.map((q, i) => `  ${i}. ${q.question}`),
+        ].join('\n'))) as { verdicts?: Array<{ index: number; stakes: 'low' | 'high' }> };
 
-        const verdictFor = new Map((rated.verdicts ?? []).map((v) => [v.about, v.stakes]));
+        // Keyed on the model's OWN label, which is the only thing both sides of
+        // that exchange share. Resolution against the contract happens after, so
+        // a question the contract cannot place still keeps its stakes.
+        // Keyed by POSITION, unique by construction. This was keyed on the
+        // question's criterion id, and once resolution made every question about
+        // one criterion share that id, the verdicts collapsed onto one entry and
+        // the rest defaulted to high — 16 questions raised live, every one high,
+        // and not one assumption carried. A criterion is not an identifier for a
+        // question.
+        const verdictFor = new Map((rated.verdicts ?? []).map((v) => [v.index, v.stakes]));
+        const realIds = new Set(m.acceptanceCriteria.map((c) => c.criterionId));
 
         // An unrated question defaults to HIGH, which is the safe direction: a
         // question nobody classified must not be carried as a low-stakes
         // assumption, because that is the system assuming away something it
         // never judged — precisely what AC-1 forbids. Blocking is recoverable;
         // silence is not.
+        // An id the contract does not have becomes NULL rather than being
+        // forced onto a criterion or dropped. Measured before building: with one
+        // criterion the model returned a real id 15 times in 16; with two, only
+        // 8 of 17, the rest labelled "general" or "Scope_Note" — genuinely about
+        // the request as a whole. Forcing those onto a criterion is false
+        // precision; dropping them loses a real ambiguity. So they are raised
+        // and carried like any other, and simply never become load-bearing.
         return {
-          questions: asked.map((q) => ({ ...q, stakes: verdictFor.get(q.about) ?? 'high' })),
+          questions: asked.map((q, i) => ({
+            criterionId: realIds.has(q.criterionId) ? q.criterionId : null,
+            subject: q.subject,
+            question: q.question,
+            stakes: verdictFor.get(i) ?? 'high',
+          })),
         };
       },
     },

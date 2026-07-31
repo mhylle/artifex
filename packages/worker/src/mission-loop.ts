@@ -1845,9 +1845,9 @@ export async function runMission(
           child.acceptanceCriteria.map((c) => c.criterionId),
           assumptionsEscalated,
         )) {
-          assumptionsEscalated.add(assumption.about);
+          assumptionsEscalated.add(assumption.criterionId!);
           record(child.taskId, 'escalation', 'assumption.became_load_bearing', 'orchestrator', {
-            about: assumption.about,
+            criterionId: assumption.criterionId,
             question: assumption.question,
             objective: child.objective,
             detail: 'carried into the run as a low-stakes ambiguity; this task is graded on it',
@@ -1856,7 +1856,7 @@ export async function runMission(
             objective: child.objective,
             rung: 'assumption_became_load_bearing',
             autonomyDial: mission.autonomyDial,
-            findings: [`[${assumption.about}] ${assumption.question}`],
+            findings: [`[${assumption.criterionId}] ${assumption.question}`],
           });
         }
 
@@ -2262,12 +2262,18 @@ export async function runMission(
     // silently" is discharged.
     for (const question of triaged.blocking) {
       record(mission.taskId, 'contract', 'intake.question_raised', 'orchestrator', {
-        about: question.about, question: question.question, stakes: question.stakes, blocking: true,
+        criterionId: question.criterionId, subject: question.subject,
+        question: question.question, stakes: question.stakes, blocking: true,
       });
     }
     for (const question of triaged.flagged) {
       record(mission.taskId, 'contract', 'intake.assumption_flagged', 'orchestrator', {
-        about: question.about, question: question.question, stakes: question.stakes, blocking: false,
+        criterionId: question.criterionId, subject: question.subject,
+        question: question.question, stakes: question.stakes, blocking: false,
+        // Recorded rather than silent: a null criterion means this ambiguity can
+        // never become load-bearing, and an operator reading the trail should
+        // see that stated rather than infer it from an escalation that never comes.
+        tiedToCriterion: question.criterionId !== null,
       });
       // Carried into the run so it can be escalated the moment it matters
       // (R30 AC-2). A flag nobody reads later is the "mechanism with no fuel"
@@ -2283,11 +2289,11 @@ export async function runMission(
         objective: mission.objective,
         rung: 'intake_clarification',
         autonomyDial: mission.autonomyDial,
-        findings: triaged.blocking.map((q) => `[${q.about}] ${q.question}`),
+        findings: triaged.blocking.map((q) => `[${q.criterionId ?? q.subject}] ${q.question}`),
       });
       return surrender(
         'the intake dialogue has unanswered questions',
-        triaged.blocking.map((q) => `[${q.about}] ${q.question}`),
+        triaged.blocking.map((q) => `[${q.criterionId ?? q.subject}] ${q.question}`),
       );
     }
   }

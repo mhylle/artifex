@@ -26,8 +26,11 @@ import { describe, expect, it } from 'vitest';
 import { loadBearingNow } from './load-bearing.js';
 import type { FlaggedAssumption } from './load-bearing.js';
 
-const flagged = (about: string, question = 'Which audience?'): FlaggedAssumption => ({
-  about,
+// Updated for defect `ddcaa17d`: the key field is `criterionId`, resolved
+// against the contract, and null means "about the request as a whole". The
+// fixture drove the old field name; every expectation below is unchanged.
+const flagged = (criterionId: string | null, question = 'Which audience?'): FlaggedAssumption => ({
+  criterionId,
   question,
   stakes: 'low',
 });
@@ -37,7 +40,7 @@ describe('R30 AC-2 — which carried assumptions just became load-bearing', () =
     const now = loadBearingNow([flagged('m-1')], ['m-1'], new Set());
 
     expect(now).toHaveLength(1);
-    expect(now[0]?.about).toBe('m-1');
+    expect(now[0]?.criterionId).toBe('m-1');
   });
 
   it('DISTRACTOR: stays silent for a task that carries a DIFFERENT criterion', () => {
@@ -81,5 +84,18 @@ describe('R30 AC-2 — which carried assumptions just became load-bearing', () =
 
     expect(now).toHaveLength(2);
     expect(now.map((a) => a.question)).toEqual(['Which audience?', 'How formal?']);
+  });
+
+  it('DISTRACTOR: an assumption with NO criterion never fires, whatever the task carries', () => {
+    // Null means "about the request as a whole" (defect `ddcaa17d`), and no task
+    // is graded on the request as a whole. Measured: with two criteria, roughly
+    // half the ambiguities a model raises are of this kind, so this is the
+    // common case rather than an edge one.
+    //
+    // Both sides asserted, because a rule that treated null as a wildcard would
+    // fire on every task and a rule that dropped nulls earlier would never reach
+    // here at all.
+    expect(loadBearingNow([flagged(null)], ['m-1'], new Set())).toEqual([]);
+    expect(loadBearingNow([flagged(null), flagged('m-1')], ['m-1'], new Set())).toHaveLength(1);
   });
 });

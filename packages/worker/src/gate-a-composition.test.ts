@@ -482,7 +482,7 @@ describe('340aa7de — the loop feeds the planner known capabilities', () => {
  * producer gets its test in the same iteration.
  */
 describe('R30 — the intake dialogue runs before anything is decomposed', () => {
-  const interrogator = (questions: Array<{ about: string; question: string; stakes: 'low' | 'high' }>) => ({
+  const interrogator = (questions: Array<{ criterionId: string | null; subject: string; question: string; stakes: 'low' | 'high' }>) => ({
     calls: [] as unknown[],
     seam: {
       async assess(input: unknown) {
@@ -500,7 +500,7 @@ describe('R30 — the intake dialogue runs before anything is decomposed', () =>
     interrogatorCalls = [];
     const result = await runMission(
       mission(),
-      { ...seams(), interrogator: interrogator([{ about: 'm-1', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+      { ...seams(), interrogator: interrogator([{ criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'high' }]).seam } as never,
       { now: () => AT },
     );
 
@@ -519,7 +519,7 @@ describe('R30 — the intake dialogue runs before anything is decomposed', () =>
     interrogatorCalls = [];
     const result = await runMission(
       mission(),
-      { ...seams(), interrogator: interrogator([{ about: 'm-1', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+      { ...seams(), interrogator: interrogator([{ criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'high' }]).seam } as never,
       { now: () => AT },
     );
 
@@ -536,7 +536,7 @@ describe('R30 — the intake dialogue runs before anything is decomposed', () =>
     interrogatorCalls = [];
     const result = await runMission(
       mission(),
-      { ...seams(), interrogator: interrogator([{ about: 'm-1', question: 'Which audience?', stakes: 'low' }]).seam } as never,
+      { ...seams(), interrogator: interrogator([{ criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'low' }]).seam } as never,
       { now: () => AT },
     );
 
@@ -578,7 +578,7 @@ describe('R30 — the intake dialogue runs before anything is decomposed', () =>
 
     await runMission(
       mission(),
-      { ...seams(), interrogator: interrogator([{ about: 'm-1', question: 'Which audience?', stakes: 'high' }]).seam } as never,
+      { ...seams(), interrogator: interrogator([{ criterionId: 'm-1', subject: 'audience', question: 'Which audience?', stakes: 'high' }]).seam } as never,
       { now: () => AT, resumeFrom: prior as never },
     );
 
@@ -613,7 +613,7 @@ describe('R30 — the intake dialogue runs before anything is decomposed', () =>
  */
 describe('R30 AC-2 — a carried assumption escalates when it starts to matter', () => {
   /** A mission whose dial permits carrying a low-stakes ambiguity. */
-  const carried = [{ about: 'm-1', question: 'Which audience is this for?', stakes: 'low' as const }];
+  const carried = [{ criterionId: 'm-1', subject: 'audience', question: 'Which audience is this for?', stakes: 'low' as const }];
 
   it('escalates at the TASK that carries the criterion, before the mission ends', async () => {
     const result = await runMission(
@@ -658,7 +658,7 @@ describe('R30 AC-2 — a carried assumption escalates when it starts to matter',
         ...seams(),
         interrogator: {
           async assess() {
-            return { questions: [{ about: 'm-9', question: 'Unrelated?', stakes: 'low' as const }] };
+            return { questions: [{ criterionId: 'm-9', subject: 'x', question: 'Unrelated?', stakes: 'low' as const }] };
           },
         },
       } as never,

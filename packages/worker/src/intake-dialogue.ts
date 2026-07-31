@@ -27,8 +27,18 @@ import type { AutonomyDial } from '@artifex/shared-types';
 
 /** One thing the request left open, and how much it costs to guess wrong. */
 export interface IntakeQuestion {
-  /** Which criterion or field it is about, so the requester can answer it. */
-  readonly about: string;
+  /**
+   * The criterion this question bears on, resolved against the contract, or
+   * null when it is about the request as a whole (defect `ddcaa17d`).
+   *
+   * Null is a real answer rather than a failure: measured over two-criterion
+   * requests, roughly half the ambiguities a model raises are about the request
+   * as a whole. Such a question is still raised and still carried — it simply
+   * never becomes load-bearing, because no task is graded on it.
+   */
+  readonly criterionId: string | null;
+  /** The word or phrase that is unclear, so the requester can see what is meant. */
+  readonly subject: string;
   readonly question: string;
   /**
    * `high` when guessing wrong would change what gets built or delivered;
