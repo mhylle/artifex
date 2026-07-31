@@ -212,3 +212,144 @@ describe('R28 AC-2 — no validation harness, no permanence', () => {
     expect(result.outcome).toBe('adopted');
   });
 });
+
+/**
+ * R28 AC-0, the DECISION half — defect `e4b171c1`.
+ *
+ * `cladeScoreFor` was correct, thoroughly tested, and called by NOTHING. The
+ * ninth "name in the vocabulary with no behaviour" this project has found.
+ * `bestForCategory` — the one place a design's standing decides anything —
+ * filtered and ordered on the design's OWN `clade_score` column, so the clade
+ * walk existed beside the decision rather than inside it.
+ *
+ * That is not a cosmetic gap. AC-0 reads: "when its promotion is CONSIDERED,
+ * then the DECISION uses a clade score aggregating how its whole lineage
+ * performed — not the outcome of one lucky audition." A query nobody calls
+ * considers nothing.
+ *
+ * Measured on the live database before the fix: the first redesigned child ever
+ * produced (`6934528b`, parent `6e25f754`) carried `clade_score NULL,
+ * observations 0` and was filtered out of every bid — while the walk over its
+ * real lineage returned `score 0.452` across `42` observations.
+ *
+ * ON DISCOUNTING BY GENERATION (ADR-0012): an inherited score is used at FULL
+ * weight, with no decay term. The observation weighting already IS the discount,
+ * and it is derived from evidence rather than chosen: a child with one run
+ * barely moves a parent's thirty-run mean, and as the child earns its own record
+ * the mean shifts toward it in proportion to the evidence behind it. A
+ * generation-distance factor would be a constant with nothing behind it.
+ */
+describe('R28 AC-0 — the DECISION uses the clade, not the design own column', () => {
+  it('refuses the lucky audition: a flattering short record loses to a better lineage', async () => {
+    // The criterion's own words, made into a discriminator. `lucky` has a
+    // perfect 3-run audition on top of a lineage that has performed badly 30
+    // times; `steady` has a merely decent record and no ancestors.
+    //
+    // Judged on the OWN column, `lucky` wins outright at 1.0 vs 0.5.
+    // Judged on the CLADE, `lucky` is (0.2*30 + 1.0*3)/33 = 0.27 and loses.
+    const category = 'clade.decision.lucky';
+    const poorLine = await design({ category, runs: Array.from({ length: 30 }, () => ({ score: 0.2, effort: 5 })) });
+    const lucky = await design({
+      category, parentDesignId: poorLine,
+      runs: [{ score: 1, effort: 5 }, { score: 1, effort: 5 }, { score: 1, effort: 5 }],
+    });
+    const steady = await design({
+      category,
+      runs: [{ score: 0.5, effort: 5 }, { score: 0.5, effort: 5 }, { score: 0.5, effort: 5 }, { score: 0.5, effort: 5 }],
+    });
+
+    const winner = await registry.bestForCategory(category);
+
+    expect(winner?.designId, 'the lucky audition was promoted over the better lineage').toBe(steady);
+    expect(winner?.designId).not.toBe(lucky);
+  });
+
+  it('a strong lineage carries a design whose own short record understates it', async () => {
+    // The same rule in the direction that PRESERVES a design rather than
+    // rejecting one. `heir`'s own 3 runs read 0.7; its lineage reads
+    // (0.95*30 + 0.7*3)/33 = 0.927 and beats an unrelated 0.8.
+    //
+    // The ancestor is RETIRED, and that is load-bearing rather than decoration.
+    // A first version left it active, and the test passed before any fix — the
+    // ancestor simply won on its own 0.95 column and the heir's lineage was
+    // never consulted. Retiring it removes it from the bid while leaving its
+    // record in the lineage, so the heir can only win by inheriting. Fixed at
+    // the fixture, which was the thing that was wrong.
+    const category = 'clade.decision.heir';
+    const strongLine = await design({ category, runs: Array.from({ length: 30 }, () => ({ score: 0.95, effort: 5 })) });
+    await registry.deactivate(strongLine);
+    const heir = await design({
+      category, parentDesignId: strongLine,
+      runs: [{ score: 0.7, effort: 5 }, { score: 0.7, effort: 5 }, { score: 0.7, effort: 5 }],
+    });
+    const unrelated = await design({
+      category,
+      runs: [{ score: 0.8, effort: 5 }, { score: 0.8, effort: 5 }, { score: 0.8, effort: 5 }, { score: 0.8, effort: 5 }],
+    });
+
+    const winner = await registry.bestForCategory(category);
+
+    expect(winner?.designId, 'the lineage was ignored and the plain 0.8 won').toBe(heir);
+    expect(winner?.designId).not.toBe(unrelated);
+  });
+
+  it('an UNPROVEN child becomes eligible on its ancestry — the live case', async () => {
+    // Exactly the shape the real database produced: zero own observations, no
+    // own score, one proven parent. Before the fix this design could never be
+    // bid at all, so the redesign the escalation ladder had just produced was
+    // dead on arrival.
+    //
+    // The parent is retired here for the same reason as above — a first version
+    // asserted only "not null", which the still-active parent satisfied on its
+    // own column, proving nothing about the child. With the incumbent retired
+    // the child is the ONLY candidate, so a non-null answer can only mean it
+    // became eligible on inherited evidence.
+    const category = 'clade.decision.unproven';
+    const proven = await design({ category, runs: Array.from({ length: 10 }, () => ({ score: 0.6, effort: 5 })) });
+    await registry.deactivate(proven);
+    const fresh = await design({ category, parentDesignId: proven });
+
+    expect((await registry.findById(fresh))?.observations, 'fixture is wrong — the child must be unproven').toBe(0);
+    expect((await registry.cladeScoreFor(fresh)).observations).toBe(10);
+
+    const winner = await registry.bestForCategory(category);
+    expect(winner?.designId, 'a design with a 10-run ancestry was treated as having no record').toBe(fresh);
+  });
+
+  it('DISTRACTOR: an unproven child does NOT displace its own proven parent', async () => {
+    // The risk the previous test creates. Child and parent share one lineage, so
+    // their clade scores are IDENTICAL and the order is a tie — and a tie broken
+    // the wrong way would let every redesign instantly evict the incumbent it
+    // was derived from, without ever running. Inherited standing gets a design
+    // into the room; its own record wins the seat.
+    const category = 'clade.decision.incumbent';
+    const proven = await design({ category, runs: Array.from({ length: 10 }, () => ({ score: 0.6, effort: 5 })) });
+    const fresh = await design({ category, parentDesignId: proven });
+
+    const winner = await registry.bestForCategory(category);
+
+    expect(winner?.designId, 'an unrun redesign evicted the design it was derived from').toBe(proven);
+    expect(winner?.designId).not.toBe(fresh);
+  });
+
+  it('DISTRACTOR: the evidence bar still bites — a thin LINEAGE is still a no-bid', async () => {
+    // Aggregating over ancestors must not become a way to clear a bar nobody
+    // earned. Two designs with one run each are still two runs, not proof.
+    const category = 'clade.decision.thin';
+    const root = await design({ category, runs: [{ score: 0.9, effort: 5 }] });
+    await design({ category, parentDesignId: root, runs: [{ score: 0.9, effort: 5 }] });
+
+    expect(await registry.bestForCategory(category), 'a 2-observation lineage cleared a 3-observation bar').toBeNull();
+  });
+
+  it('DISTRACTOR: an INACTIVE design is still never bid, whatever its lineage says', async () => {
+    // Down-weighting is how this project retires a design (never delete). If the
+    // lineage rewrite dropped the `active` filter, a retired design would come
+    // back through the front door carrying its ancestors' record.
+    const category = 'clade.decision.retired';
+    const good = await design({ category, runs: Array.from({ length: 10 }, () => ({ score: 0.95, effort: 5 })) });
+    await registry.deactivate(good);
+
+    expect(await registry.bestForCategory(category), 'a retired design was bid again').toBeNull();
+  });
+});

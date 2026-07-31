@@ -136,16 +136,59 @@ export class AssetRegistryRepository {
   /**
    * The best *earned* design for a category, or null — a no-bid.
    *
-   * `minObservations` is the evidence bar. Below it a design is not "bad", it is
-   * *unproven*, and treating unproven as proven is how a lucky first run gets
-   * promoted into a permanent default.
+   * Ranked on the **clade**, not on the design's own column (R28 AC-0, defect
+   * `e4b171c1`). "Promotion tracks the performance of a design's whole lineage,
+   * not one lucky audition" — so the figure the decision reads has to be the
+   * lineage aggregate. Ranking on the own column meant a design with a perfect
+   * three-run audition outranked one whose line had performed better across
+   * thirty, which is the criterion inverted.
+   *
+   * `minObservations` is the evidence bar, and it now counts the LINEAGE's
+   * observations for the same reason. Below it a design is not "bad", it is
+   * *unproven* — but a design derived from a proven parent is not unproven, and
+   * excluding it is what left the escalation ladder's redesigns unbiddable.
+   *
+   * No generation-distance decay (ADR-0012). The observation weighting already
+   * is the discount and it is derived rather than chosen: a child's single run
+   * barely moves a parent's thirty-run mean, and the mean shifts toward the
+   * child exactly as fast as it earns evidence.
+   *
+   * Ties break on the design's OWN observations. Child and parent share one
+   * lineage, so their clade scores are identical by construction; without this
+   * an unrun redesign could evict the incumbent it was derived from.
    */
   async bestForCategory(category: string, minObservations = 3): Promise<AgentDesign | null> {
     const { rows } = await this.#pool.query<DesignRow>(
-      `SELECT ${RETURNED} FROM agent_design
-        WHERE category = $1 AND active = true
-          AND clade_score IS NOT NULL AND observations >= $2
-        ORDER BY clade_score DESC, observations DESC
+      // The same walk as `cladeScoreFor`, run for every candidate at once and
+      // carrying `root` so each row folds back to the design it belongs to.
+      // `seen` is per-branch, so a cycle still terminates.
+      `WITH RECURSIVE lineage(root, design_id, parent_design_id, clade_score, observations, seen) AS (
+         SELECT d.design_id, d.design_id, d.parent_design_id, d.clade_score, d.observations,
+                ARRAY[d.design_id]
+           FROM agent_design d
+          WHERE d.category = $1 AND d.active = true
+         UNION ALL
+         SELECT l.root, p.design_id, p.parent_design_id, p.clade_score, p.observations,
+                l.seen || p.design_id
+           FROM agent_design p
+           JOIN lineage l ON p.design_id = l.parent_design_id
+          WHERE NOT p.design_id = ANY(l.seen)
+       ),
+       clade AS (
+         SELECT root,
+                SUM(clade_score * observations) / NULLIF(SUM(observations), 0) AS score,
+                COALESCE(SUM(observations), 0)                                 AS observations
+           FROM lineage
+          GROUP BY root
+       )
+       SELECT d.design_id, d.category, d.version, d.role_instructions, d.capabilities,
+              d.clade_score, d.observations, d.active, d.parent_design_id, d.mean_effort,
+              d.validation_harness
+         FROM agent_design d
+         JOIN clade c ON c.root = d.design_id
+        WHERE d.category = $1 AND d.active = true
+          AND c.score IS NOT NULL AND c.observations >= $2
+        ORDER BY c.score DESC, d.observations DESC
         LIMIT 1`,
       [category, minObservations],
     );
