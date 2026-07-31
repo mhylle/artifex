@@ -74,6 +74,17 @@ export interface Planner {
      * to accumulate evidence — which requires being able to be wrong.
      */
     readonly templateRecipe?: string;
+    /**
+     * Capabilities the registry already holds (R38, defect `340aa7de`).
+     *
+     * Shown so the model can REUSE a name rather than coin one. `staff()` has
+     * had this list since R38 — but by staffing time the name is already
+     * invented, and clustering can only merge what shares a token. Measured
+     * cost of that ordering: 1.07 designs per category.
+     *
+     * A suggestion, never a constraint; the taxonomy stays open.
+     */
+    readonly knownCapabilities?: readonly string[];
   }): Promise<DecompositionProposal>;
 }
 
@@ -132,12 +143,15 @@ export async function decompose(
     readonly rejectedBecause?: readonly string[];
     /** A learned recipe for splitting this kind of work (R31 AC-2). */
     readonly templateRecipe?: string;
+    /** Capabilities the registry already holds, so names converge (R38). */
+    readonly knownCapabilities?: readonly string[];
   },
 ): Promise<TaskContract[]> {
   const proposal = await planner.propose({
     contract: parent,
     ...(options?.rejectedBecause === undefined ? {} : { rejectedBecause: options.rejectedBecause }),
     ...(options?.templateRecipe === undefined ? {} : { templateRecipe: options.templateRecipe }),
+    ...(options?.knownCapabilities === undefined ? {} : { knownCapabilities: options.knownCapabilities }),
   });
 
   if (proposal.subtasks.length === 0) {

@@ -1111,9 +1111,18 @@ export async function runMission(
         });
       }
 
+      // What the registry already handles, shown to the PLANNER (defect
+      // `340aa7de`). `staff()` has had this list since R38, but by staffing time
+      // the name is already coined and clustering can only merge what shares a
+      // token — measured cost of that ordering: 1.07 designs per category.
+      // Failure is swallowed: naming guidance is an improvement, not a gate.
+      const known = await seams.registry.knownCapabilities?.().catch(() => []) ?? [];
+
       try {
-        children = await decompose(parent, seams.planner,
-          template === null ? undefined : { templateRecipe: template.recipe });
+        children = await decompose(parent, seams.planner, {
+          ...(template === null ? {} : { templateRecipe: template.recipe }),
+          ...(known.length === 0 ? {} : { knownCapabilities: known }),
+        });
       } catch (error) {
         return fail('decomposition failed', [describe(error)]);
       }

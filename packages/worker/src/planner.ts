@@ -374,7 +374,7 @@ export function createStepwisePlanner(options: ModelSeamOptions): Planner {
     })) as T;
 
   return {
-    async propose({ contract, rejectedBecause, templateRecipe }) {
+    async propose({ contract, rejectedBecause, templateRecipe, knownCapabilities }) {
       // Both of the seam's optional inputs reach the MODEL here, and neither did
       // before. `rejectedBecause` was declared, documented, passed by the loop —
       // and destructured away, so every re-split in the deployed system
@@ -502,6 +502,22 @@ export function createStepwisePlanner(options: ModelSeamOptions): Planner {
             `SUBTASK: ${objective}`,
             `PART OF: ${contract.objective}`,
             `SIBLINGS (do not do their work): ${accepted.filter((o) => o !== objective).join('; ') || '(none)'}`,
+            // Shown ONLY in this probe, which is where `category` is answered.
+            // Leaking it into the count probe would let a long registry inflate
+            // or deflate the split — how many subtasks there are and what they
+            // are CALLED are separate questions.
+            //
+            // A SUGGESTION, never a constraint. The taxonomy is a learnable
+            // asset (R23/R38); "must be one of" would converge it instantly and
+            // permanently, and nothing genuinely new could ever enter.
+            ...(knownCapabilities === undefined || knownCapabilities.length === 0
+              ? []
+              : [
+                  ``,
+                  `Capabilities the swarm already handles: ${knownCapabilities.join('; ')}.`,
+                  `Reuse one of those as the category if this subtask needs the same kind of work.`,
+                  `If none of these fit, name a new capability — a different kind of work deserves a different name.`,
+                ]),
           ].join('\n'),
         );
 

@@ -623,3 +623,80 @@ describe('category fragmentation — the model is told what a category IS', () =
     expect(subtaskSchema?.properties?.category?.enum, 'the taxonomy was frozen into an enum').toBeUndefined();
   });
 });
+
+/**
+ * `340aa7de` — the planner is shown what capabilities already exist.
+ *
+ * Describing the `category` field was necessary and LIVE-VERIFIED INSUFFICIENT:
+ * two missions on different subjects needing the same capability still produced
+ * "Biology/Chemistry", "Science / Biology Content Creation", "Economic
+ * Definition", "Economic Literacy". The tier-1 model does not honour a field
+ * description strongly enough on its own.
+ *
+ * `knownCapabilities()` has existed since R38 and is passed to `staff()` at
+ * STAFFING time — by which point the name is already invented and clustering can
+ * only merge what shares a token. Showing the same list at PLANNING time lets
+ * the model reuse a name instead of coining one.
+ *
+ * It must remain a SUGGESTION. An enum, or a prompt demanding one of the listed
+ * values, would converge the taxonomy instantly by ending the learning R23/R38
+ * exist for — the same reason this project bans example phrasings in judge
+ * prompts. The model must stay free to name something genuinely new.
+ */
+describe('340aa7de — known capabilities reach the planner', () => {
+  it('puts the existing capabilities in the prompt', async () => {
+    const { generator, prompts } = capturingGenerator();
+
+    await plannerOn(generator).propose({
+      contract: contract(),
+      knownCapabilities: ['defining terms', 'comparing options'],
+    });
+
+    const all = prompts.join('\n');
+    expect(all, 'the planner invents names without ever seeing what exists').toMatch(/defining terms/);
+    expect(all).toMatch(/comparing options/);
+  });
+
+  it('DISTRACTOR: the prompt does not REQUIRE one of the listed values', async () => {
+    // The taxonomy is open and learnable. A prompt that said "choose one of the
+    // following" would converge it instantly and permanently — a frozen list is
+    // not a learned one, and nothing new could ever enter.
+    const { generator, prompts } = capturingGenerator();
+
+    await plannerOn(generator).propose({
+      contract: contract(),
+      knownCapabilities: ['defining terms'],
+    });
+
+    const all = prompts.join('\n');
+    expect(all, 'the taxonomy was closed').not.toMatch(/must be one of|choose one of the following|only these/i);
+    // …and it says so positively: a new capability is explicitly allowed.
+    expect(all).toMatch(/new|different|none of these|does not fit/i);
+  });
+
+  it('DISTRACTOR: with NO known capabilities the prompt gains nothing', async () => {
+    // A cold registry is the ordinary state of a young system. Printing an empty
+    // list would tell the model there are no capabilities, which is a different
+    // claim from telling it nothing.
+    const { generator, prompts } = capturingGenerator();
+
+    await plannerOn(generator).propose({ contract: contract(), knownCapabilities: [] });
+
+    expect(prompts.join('\n')).not.toMatch(/already handles|capabilities the swarm/i);
+  });
+
+  it('DISTRACTOR: the count probe is unaffected — this guides naming, not splitting', async () => {
+    // How many subtasks there are and what they are CALLED are separate
+    // questions. Leaking the capability list into the count probe would let a
+    // long registry inflate or deflate the split.
+    const { generator, prompts } = capturingGenerator();
+
+    await plannerOn(generator).propose({
+      contract: contract(),
+      knownCapabilities: ['defining terms', 'comparing options', 'summarising'],
+    });
+
+    const countPrompt = prompts.find((p) => /How many INDEPENDENT subtasks/.test(p)) ?? '';
+    expect(countPrompt, 'the capability list leaked into the count probe').not.toMatch(/defining terms/);
+  });
+});

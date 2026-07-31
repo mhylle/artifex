@@ -282,3 +282,58 @@ describe('R31 AC-2 — a template guides the split and accumulates evidence', ()
     expect(without.trail.some((e) => e.type === 'decomposition.template_used')).toBe(false);
   });
 });
+
+/**
+ * `340aa7de` in the loop — the planner is really shown the registry.
+ *
+ * `planner.test.ts` proves the prompt carries the list; it cannot see whether
+ * anything supplies one. That gap has produced fifteen dead mechanisms here, so
+ * the producer gets its test in the same iteration.
+ */
+describe('340aa7de — the loop feeds the planner known capabilities', () => {
+  function recordingPlanner(base: MissionSeams) {
+    const seen: Array<{ knownCapabilities?: readonly string[] }> = [];
+    return {
+      seen,
+      seams: {
+        ...base,
+        registry: {
+          async bestForCategory() { return null; },
+          async knownCapabilities() { return ['defining terms', 'comparing options']; },
+        },
+        planner: {
+          async propose(input: { knownCapabilities?: readonly string[] }) {
+            seen.push(input);
+            return base.planner.propose(input as never);
+          },
+        },
+      } as MissionSeams,
+    };
+  }
+
+  it('passes what the registry holds into the split', async () => {
+    const p = recordingPlanner(seams());
+
+    await runMission(mission(), p.seams, { now: () => AT });
+
+    expect(p.seen[0]?.knownCapabilities, 'the planner names capabilities without seeing what exists')
+      .toEqual(['defining terms', 'comparing options']);
+  });
+
+  it('DISTRACTOR: a registry that cannot answer does not block the split', async () => {
+    // Naming guidance is an improvement, not a gate. A registry outage must
+    // cost a slightly worse taxonomy, never a mission.
+    const base = seams();
+    const broken = {
+      ...base,
+      registry: {
+        async bestForCategory() { return null; },
+        async knownCapabilities() { throw new Error('registry unavailable'); },
+      },
+    } as MissionSeams;
+
+    const result = await runMission(mission(), broken, { now: () => AT });
+
+    expect(result.trail.some((e) => e.type === 'task.contracted'), 'the split never happened').toBe(true);
+  });
+});
