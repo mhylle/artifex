@@ -114,6 +114,10 @@ describe('MissionControl — intake (R14)', () => {
     fixture = TestBed.createComponent(MissionControl);
     component = fixture.componentInstance;
     feed = TestBed.inject(LedgerFeed);
+    // The intake form lives behind the 'New' tab since the left pane was
+    // tabbed. What these tests prove is unchanged; the form just has to be on
+    // screen for its validation messages to be readable.
+    component.sidePane.set('new');
     fixture.detectChanges();
   });
 
@@ -203,6 +207,8 @@ describe('MissionControl — fleet rail (R21)', () => {
     component = fixture.componentInstance;
     feed = TestBed.inject(LedgerFeed);
     fleet = TestBed.inject(Fleet);
+    // The rail lives behind the 'Missions' tab since the left pane was tabbed.
+    component.sidePane.set('fleet');
   });
 
   it('AC-0: lists every mission with its status, and shows fleet totals', () => {
@@ -230,6 +236,8 @@ describe('MissionControl — fleet rail (R21)', () => {
         waitingSince: '2026-07-30T09:00:00.000Z',
       },
     ]);
+    // These two assert on the QUEUE, which is its own tab now.
+    component.sidePane.set('queue');
     fixture.detectChanges();
 
     expect(fleet.needingAttention()).toBe(1);
@@ -246,6 +254,7 @@ describe('MissionControl — fleet rail (R21)', () => {
     // a decision that does not exist.
     fleet.missions.set(SUMMARIES);
     fleet.attention.set([]);
+    component.sidePane.set('queue');
     fixture.detectChanges();
 
     expect(fleet.needingAttention()).toBe(0);
@@ -1279,5 +1288,83 @@ describe('MissionControl — a node kept whole by the gate (R31)', () => {
     const text = fixture.nativeElement.textContent as string;
     expect(text).toContain('Thing one.');
     expect(text).not.toMatch(/kept whole/i);
+  });
+});
+
+/**
+ * The left pane is a set of tabs, not one long column.
+ *
+ * Measured after the two-pane restructure: with 11 blocked missions each
+ * showing an expanded answer form, the queue was **4,714px tall** and the
+ * mission rail began at 4,729px in a pane 732px high. The rail was reachable
+ * only by scrolling roughly six screens — which is how the owner came to ask
+ * for "a list of the missions in the ui" about a UI that already had one.
+ *
+ * Reachability is the thing this project keeps getting wrong, so it is what
+ * these assert: each pane is one click away, and no pane can bury another.
+ */
+describe('MissionControl — the left pane is tabbed (R21)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let fleet: Fleet;
+
+  const MISSIONS = [
+    { missionId: 'm-1', objective: 'Explain heat pumps.', status: 'running' as const, eventCount: 7, escalations: 0, agentsStaffed: 1, tasksToday: 1, lastEventAt: '2026-08-01T09:00:00.000Z' },
+    { missionId: 'm-2', objective: 'Explain solar panels.', status: 'delivered' as const, eventCount: 9, escalations: 0, agentsStaffed: 1, tasksToday: 0, lastEventAt: '2026-08-01T08:00:00.000Z' },
+  ];
+  const WAITING = {
+    missionId: 'm-3', taskId: 't-3', objective: 'Blocked on a question.', rung: 'intake_clarification',
+    autonomyDial: 'checkpointed', findings: ['which audience?'], acceptanceCriteria: [],
+    waitingSince: '2026-08-01T09:00:00.000Z',
+  };
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    fleet = TestBed.inject(Fleet);
+    fleet.missions.set(MISSIONS);
+    fleet.attention.set([WAITING]);
+    fixture.detectChanges();
+  });
+
+  function tab(label: string): HTMLButtonElement | undefined {
+    return Array.from(
+      fixture.nativeElement.querySelectorAll('.pane-tabs button') as NodeListOf<HTMLButtonElement>,
+    ).find((b) => b.textContent?.toLowerCase().includes(label));
+  }
+
+  it('offers a Missions tab that reveals the rail', () => {
+    expect(tab('missions'), 'no Missions tab — the rail is only reachable by scrolling').toBeDefined();
+
+    tab('missions')!.click();
+    fixture.detectChanges();
+
+    const objectives = Array.from(
+      fixture.nativeElement.querySelectorAll('.rail .objective') as NodeListOf<HTMLElement>,
+    ).map((e) => e.textContent?.trim());
+    expect(objectives).toContain('Explain heat pumps.');
+    expect(objectives).toContain('Explain solar panels.');
+  });
+
+  it('shows only one pane at a time, so neither can bury the other', () => {
+    // The failure being fixed: both rendered at once, and the taller one pushed
+    // the other off the bottom of a 732px pane.
+    tab('missions')!.click();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.queue'), 'the queue is still rendered behind the rail').toBeFalsy();
+    expect(fixture.nativeElement.querySelector('.fleet')).toBeTruthy();
+  });
+
+  it('opens on what is blocked, because that is what needs a decision', () => {
+    expect(fixture.nativeElement.querySelector('.queue'), 'the pane did not open on the queue').toBeTruthy();
+    expect(fixture.nativeElement.querySelector('.fleet')).toBeFalsy();
+  });
+
+  it('DISTRACTOR: each tab carries its own count, so the rail is findable without opening it', () => {
+    expect(tab('missions')?.textContent).toContain('2');
+    expect(tab('needs you')?.textContent).toContain('1');
   });
 });

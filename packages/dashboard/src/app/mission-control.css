@@ -45,7 +45,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 
 .fleet h2 { font-size: .9rem; margin: 0 0 .6rem; display: flex; flex-wrap: wrap; gap: .75rem; align-items: baseline; }
 .totals { font-weight: 400; color: #666; font-size: .8rem; }
-.rail { list-style: none; padding: 0; margin: 0; display: grid; gap: .35rem; }
+/* minmax(0,1fr): a grid track defaults to min-content and a long objective
+   would otherwise widen the whole pane past its column. */
+.rail { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: .35rem; }
 .rail button { display: flex; min-width: 0; gap: .6rem; align-items: center; width: 100%; text-align: left; padding: .5rem .7rem; border: 1px solid #eee; border-radius: 6px; background: #fff; cursor: pointer; font: inherit; }
 .rail button:hover { border-color: #5a78c8; }
 .rail .selected button { border-color: #5a78c8; background: #f5f8ff; }
@@ -156,5 +158,13 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .group-head { margin: 0 0 .3rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: #666; }
 .group .count { font-size: .72rem; color: #888; }
 .group .disclosure { margin-top: 0; text-transform: uppercase; letter-spacing: .05em; font-size: .72rem; }
-.rail button .objective { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .85rem; }
+/* min-width:0 or flex:1 refuses to shrink below its text and the count is clipped. */
+.rail button .objective { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .85rem; }
 .queue .empty, .fleet .empty { color: #666; font-size: .85rem; }
+
+/* Tabs, because stacking the queue above the rail buried the rail six screens down. */
+.pane-tabs { display: flex; gap: .25rem; }
+.pane-tabs button { flex: 1; padding: .35rem .5rem; font-size: .78rem; background: #fff; border: 1px solid #d8d8d8; }
+.pane-tabs button.active { background: #eef2fb; border-color: #5a78c8; color: #33477d; font-weight: 600; }
+.tab-count { font-size: .7rem; color: #666; }
+.pane-tabs button.active .tab-count { color: #33477d; }

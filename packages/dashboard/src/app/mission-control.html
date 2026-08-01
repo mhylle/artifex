@@ -14,6 +14,17 @@
 
 <div class="workspace">
 <aside class="side">
+<nav class="pane-tabs" aria-label="left pane">
+  <button type="button" [class.active]="sidePane() === 'queue'" (click)="sidePane.set('queue')">
+    Needs you <span class="tab-count">{{ triaged().blocking.length }}</span>
+  </button>
+  <button type="button" [class.active]="sidePane() === 'fleet'" (click)="sidePane.set('fleet')">
+    Missions <span class="tab-count">{{ fleet.total() }}</span>
+  </button>
+  <button type="button" [class.active]="sidePane() === 'new'" (click)="sidePane.set('new')">New</button>
+</nav>
+
+@if (sidePane() === 'new') {
 <form class="intake" (ngSubmit)="submit()">
   <label for="objective">New mission</label>
   <textarea
@@ -48,8 +59,9 @@
     <p class="error" role="alert">{{ message }}</p>
   }
 </form>
+}
 
-@if (scope().attentionQueue) {
+@if (scope().attentionQueue && sidePane() === 'queue') {
 <section class="queue" aria-label="attention queue">
   <h2>
     Needs you
@@ -144,6 +156,7 @@
 </section>
 }
 
+@if (sidePane() === 'fleet') {
 <section class="fleet">
   <h2>
     {{ scope().missions === 'all' ? 'Fleet' : 'Your mission' }}
@@ -208,6 +221,7 @@
     }
   }
 </section>
+}
 </aside>
 
 <main class="main">

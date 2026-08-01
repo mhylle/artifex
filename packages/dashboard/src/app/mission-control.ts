@@ -54,6 +54,19 @@ export class MissionControl implements OnInit {
   readonly answers = signal<Record<string, readonly string[]>>({});
   /** The out-of-band petitions, behind a disclosure. Closed by default. */
   readonly showAdvisory = signal(false);
+
+  /**
+   * Which of the left pane's tabs is showing.
+   *
+   * Tabs rather than one column, because stacking them did not work: with 11
+   * blocked missions each showing an expanded answer form the queue was 4,714px
+   * tall, and the mission rail began at 4,729px in a pane 732px high. The rail
+   * existed and was reachable only by scrolling six screens, which is
+   * indistinguishable from not being there.
+   *
+   * Opens on the queue: what is blocked needs a decision, the rest is browsing.
+   */
+  readonly sidePane = signal<'queue' | 'fleet' | 'new'>('queue');
   /** Which collapsed rail groups the operator has opened. */
   readonly openGroups = signal<Record<string, boolean>>({});
 
