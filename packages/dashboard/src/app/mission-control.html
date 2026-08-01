@@ -12,6 +12,8 @@
   </div>
 </header>
 
+<div class="workspace">
+<aside class="side">
 <form class="intake" (ngSubmit)="submit()">
   <label for="objective">New mission</label>
   <textarea
@@ -47,78 +49,168 @@
   }
 </form>
 
-<section class="fleet">
+@if (scope().attentionQueue) {
+<section class="queue" aria-label="attention queue">
   <h2>
-    {{ scope().missions === 'all' ? 'Fleet' : 'Your mission' }}
-    @if (scope().missions === 'all') {
-      <span class="totals">
-        {{ fleet.total() }} missions · {{ fleet.running() }} running · {{ fleet.agentsActive() }} agents · {{ fleet.tasksToday() }} tasks today
-        @if (fleet.needingAttention(); as waiting) {
-          <span class="attention">⚠ {{ waiting }} need a human</span>
-        }
-      </span>
-    } @else {
-      <span class="totals">
-        Pick the mission you requested. Identity is out of scope until the security boundary is
-        lifted, so this stands in for &ldquo;yours&rdquo;.
-      </span>
-    }
+    Needs you
+    <span class="totals">{{ triaged().blocking.length }}</span>
   </h2>
 
-  @if (fleet.error(); as message) {
-    <p class="error" role="alert">{{ message }}</p>
-  }
-
-  <ul class="rail">
-    @for (mission of fleet.missions(); track mission.missionId) {
-      <li [attr.data-status]="mission.status" [class.selected]="mission.missionId === missionId()">
-        <button type="button" (click)="select(mission.missionId)">
-          <span class="badge">{{ mission.status }}</span>
-          <span class="objective">{{ mission.objective || mission.missionId }}</span>
-          <span class="count">{{ mission.eventCount }} events</span>
-          @if (mission.escalations) { <span class="esc">↑{{ mission.escalations }}</span> }
-        </button>
-      </li>
-    } @empty {
-      @if (!fleet.error()) {
-        <li class="empty">No missions yet — start one below.</li>
-      }
-    }
-  </ul>
-</section>
-
-@if (scope().attentionQueue) {
-<section class="attention" aria-label="attention queue">
-  <h2>Needs a human <span class="totals">{{ fleet.needingAttention() }} waiting</span></h2>
-  <ul>
-    @for (item of fleet.attention(); track item.taskId) {
-      <li>
+  <ul class="items">
+    @for (item of triaged().blocking; track item.taskId) {
+      <li [attr.data-rung]="item.rung">
         <p class="objective">{{ item.objective || item.taskId }}</p>
         <p class="why">
           <span class="badge">{{ item.rung }}</span>
           @if (item.autonomyDial) { <span class="dial">dial: {{ item.autonomyDial }}</span> }
-          <button type="button" (click)="select(item.missionId)">Open mission</button>
-          <button type="button" (click)="decide(item, 'approve')">Approve</button>
-          <button type="button" (click)="decide(item, 'reject')">Reject</button>
+          <button type="button" class="link" (click)="select(item.missionId)">Open mission</button>
         </p>
+
         @if (item.acceptanceCriteria.length) {
           <ul class="criteria">
             @for (c of item.acceptanceCriteria; track c.criterionId) { <li>{{ c.statement }}</li> }
           </ul>
         }
-        @if (item.findings.length) {
-          <ul class="findings">
-            @for (f of item.findings; track f) { <li>{{ f }}</li> }
-          </ul>
+
+        <!--
+          The answer channel. The queue used to render these findings and offer
+          only Approve and Reject, so the one thing the mission was waiting for
+          had nowhere to go. Each question gets its own box; the answers travel
+          in `note`, which is what the runtime already records verbatim.
+        -->
+        @if (item.findings.length && can('decide')) {
+          <ol class="questions">
+            @for (finding of item.findings; track $index) {
+              <li>
+                <label [attr.for]="item.taskId + '-a' + $index">{{ finding }}</label>
+                <textarea
+                  [id]="item.taskId + '-a' + $index"
+                  rows="2"
+                  placeholder="Your answer…"
+                  [ngModel]="answerAt(item.taskId, $index)"
+                  (ngModelChange)="setAnswer(item.taskId, $index, $event)"
+                  [ngModelOptions]="{ standalone: true }"
+                ></textarea>
+              </li>
+            }
+          </ol>
+          <p class="actions">
+            <button type="button" class="primary" [disabled]="!hasAnswers(item)" (click)="sendAnswers(item)">
+              Send answers &amp; resume
+            </button>
+            <button type="button" (click)="decide(item, 'approve')">Proceed without answering</button>
+            <button type="button" (click)="decide(item, 'reject')">Reject</button>
+          </p>
+        } @else if (can('decide')) {
+          <p class="actions">
+            <button type="button" (click)="decide(item, 'approve')">Approve</button>
+            <button type="button" (click)="decide(item, 'reject')">Reject</button>
+          </p>
         }
       </li>
     } @empty {
       <li class="empty">Nothing is waiting on you.</li>
     }
   </ul>
+
+  <!--
+    Out-of-band petitions (R29), behind a disclosure. 49 of 61 live items were
+    these, and they buried the 9 missions that were actually stopped. Collapsed,
+    never hidden: the ledger records them and the queue must not pretend it does not.
+  -->
+  @if (triaged().advisory.length) {
+    <button type="button" class="disclosure" (click)="showAdvisory.set(!showAdvisory())">
+      {{ showAdvisory() ? '▾' : '▸' }}
+      {{ triaged().advisory.length }} advisory — nothing is blocked on these
+    </button>
+    @if (showAdvisory()) {
+      <ul class="items advisory">
+        @for (item of triaged().advisory; track item.taskId) {
+          <li [attr.data-rung]="item.rung">
+            <p class="objective">{{ item.objective || item.taskId }}</p>
+            <p class="why">
+              <span class="badge">{{ item.rung }}</span>
+              <button type="button" class="link" (click)="select(item.missionId)">Open mission</button>
+              @if (can('decide')) {
+                <button type="button" (click)="decide(item, 'approve')">Approve</button>
+                <button type="button" (click)="decide(item, 'reject')">Reject</button>
+              }
+            </p>
+          </li>
+        }
+      </ul>
+    }
+  }
 </section>
 }
 
+<section class="fleet">
+  <h2>
+    {{ scope().missions === 'all' ? 'Fleet' : 'Your mission' }}
+    @if (scope().missions === 'all') {
+      <span class="totals">
+        {{ fleet.total() }} · {{ fleet.running() }} running · {{ fleet.agentsActive() }} agents
+      </span>
+    }
+  </h2>
+
+  @if (scope().missions === 'all') {
+    <input
+      type="search"
+      class="rail-search"
+      placeholder="Search objective or id…"
+      aria-label="search missions"
+      [ngModel]="search()"
+      (ngModelChange)="search.set($event)"
+      [ngModelOptions]="{ standalone: true }"
+    />
+  } @else {
+    <p class="hint">
+      Pick the mission you requested. Identity is out of scope until the security boundary is
+      lifted, so this stands in for &ldquo;yours&rdquo;.
+    </p>
+  }
+
+  @if (fleet.error(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  }
+
+  @for (group of missionGroups(); track group.status) {
+    <div class="group" [attr.data-status]="group.status">
+      @if (group.collapsed) {
+        <button type="button" class="disclosure" (click)="toggleGroup(group.status)">
+          {{ isGroupOpen(group.status, true) ? '▾' : '▸' }}
+          {{ group.status }} <span class="count">{{ group.missions.length }}</span>
+        </button>
+      } @else {
+        <p class="group-head">{{ group.status }} <span class="count">{{ group.missions.length }}</span></p>
+      }
+
+      @if (isGroupOpen(group.status, group.collapsed)) {
+        <ul class="rail">
+          @for (mission of group.missions; track mission.missionId) {
+            <li [attr.data-status]="mission.status" [class.selected]="mission.missionId === missionId()">
+              <button type="button" (click)="select(mission.missionId)">
+                <span class="objective">{{ mission.objective || mission.missionId }}</span>
+                <span class="count">{{ mission.eventCount }}</span>
+                @if (mission.escalations) { <span class="esc">↑{{ mission.escalations }}</span> }
+              </button>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  } @empty {
+    @if (!fleet.error()) {
+      <p class="empty">
+        @if (search().trim().length) { No mission matches “{{ search() }}”. } @else { No missions yet — start one below. }
+      </p>
+    }
+  }
+</section>
+</aside>
+
+<main class="main">
 @if (audience() === 'requester') {
   <section class="requester" aria-label="requester view">
     <h2>{{ requesterView().objective || 'Your mission' }}</h2>
@@ -418,3 +510,6 @@
 } @else {
   <p class="empty">Watch a mission to see its trail.</p>
 }
+
+</main>
+</div>

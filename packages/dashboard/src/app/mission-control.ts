@@ -15,7 +15,10 @@ import { CanvasNode } from './canvas-node';
 import { Cockpit } from './cockpit';
 import type { CockpitAction } from './cockpit';
 import { buildRequesterView } from './requester-view';
+import { answerNote, partitionAttention } from './attention-queue';
 import { Fleet } from './fleet';
+import type { AttentionItem } from './fleet';
+import { groupMissions } from './fleet-groups';
 import { Inspector } from './inspector';
 import { LensPanels } from './lens-panels';
 import type { LensName } from './lens-panels';
@@ -40,6 +43,43 @@ export class MissionControl implements OnInit {
   readonly #cockpit = inject(Cockpit);
 
   readonly missionId = signal('');
+
+  /**
+   * Rail search, and the answers being drafted in the queue.
+   *
+   * Both are properties of *looking and typing*, never facts about a mission —
+   * so they live here and touch no projection (invariant #1).
+   */
+  readonly search = signal('');
+  readonly answers = signal<Record<string, readonly string[]>>({});
+  /** The out-of-band petitions, behind a disclosure. Closed by default. */
+  readonly showAdvisory = signal(false);
+  /** Which collapsed rail groups the operator has opened. */
+  readonly openGroups = signal<Record<string, boolean>>({});
+
+  /**
+   * The rail, grouped and filtered (R21).
+   *
+   * 170 missions in one flat list, 26 of them abandoned and most titled with a
+   * raw UUID, is how a live mission got buried under yesterday's corpses.
+   */
+  readonly missionGroups = computed(() => groupMissions(this.fleet.missions(), this.search()));
+
+  /**
+   * The queue, split by whether anything is stopped behind it (R18).
+   *
+   * Measured live: 61 items, 49 of them out-of-band amendment petitions. The
+   * operator's own blocked mission was one row among them.
+   */
+  readonly triaged = computed(() => partitionAttention(this.fleet.attention()));
+
+  isGroupOpen(status: string, collapsed: boolean): boolean {
+    return collapsed ? (this.openGroups()[status] ?? false) : true;
+  }
+
+  toggleGroup(status: string): void {
+    this.openGroups.update((all) => ({ ...all, [status]: !(all[status] ?? false) }));
+  }
 
   /** The draft an operator is authoring. Cleared once the mission is accepted. */
   readonly objective = signal('');
@@ -266,6 +306,58 @@ export class MissionControl implements OnInit {
     if (!this.can('decide')) return;
     await this.#send({ missionId: item.missionId, taskId: item.taskId, action: 'decide', decision });
     await this.fleet.refresh();
+  }
+
+  /**
+   * Answer the questions an item is actually asking, and resume.
+   *
+   * The gap this closes: the queue rendered the questions and offered only
+   * Approve and Reject, so the one thing the mission was waiting for — the
+   * answer — had nowhere to go. Approve meant "run anyway with the ambiguity
+   * unresolved"; neither button answered anything. Observed on mission
+   * `5ed04265`, which asked three load-bearing questions and sat surrendered.
+   *
+   * The answers travel in `note`, which is the field the runtime already
+   * records verbatim on `operator.decided`. Nothing parses it, by design
+   * (ADR-0023) — this is for the human who opens the trail later.
+   */
+  async sendAnswers(item: AttentionItem): Promise<void> {
+    if (!this.can('decide')) return;
+    const note = answerNote(item.findings, this.answersFor(item.taskId));
+    // An empty note would record a ruling that answered nothing while clearing
+    // the block — exactly the blind approval this control exists to replace.
+    if (note === '') return;
+    await this.#send({
+      missionId: item.missionId,
+      taskId: item.taskId,
+      action: 'decide',
+      decision: 'approve',
+      note,
+    });
+    this.answers.update((all) => ({ ...all, [item.taskId]: [] }));
+    await this.fleet.refresh();
+  }
+
+  /** The draft answers for one queue item, indexed by question position. */
+  answersFor(taskId: string): readonly string[] {
+    return this.answers()[taskId] ?? [];
+  }
+
+  answerAt(taskId: string, index: number): string {
+    return this.answersFor(taskId)[index] ?? '';
+  }
+
+  setAnswer(taskId: string, index: number, value: string): void {
+    this.answers.update((all) => {
+      const next = [...(all[taskId] ?? [])];
+      next[index] = value;
+      return { ...all, [taskId]: next };
+    });
+  }
+
+  /** Has the operator written anything worth sending for this item? */
+  hasAnswers(item: AttentionItem): boolean {
+    return answerNote(item.findings, this.answersFor(item.taskId)) !== '';
   }
 
   async turnDial(): Promise<void> {

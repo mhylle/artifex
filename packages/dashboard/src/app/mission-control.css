@@ -1,4 +1,39 @@
-:host { display: block; font-family: system-ui, sans-serif; padding: 1.5rem; max-width: 60rem; margin: 0 auto; }
+/*
+  Two panes, each scrolling on its own. This was one 60rem column, so the rail
+  of 170 missions, the 61-item queue, the canvas and the cockpit rendered as a
+  single 62,000-character scroll. Left = what needs a decision, right = what
+  you are looking at. `min-height: 0` is load-bearing: without it a grid child
+  will not shrink below its content and the panes grow the page instead.
+*/
+:host {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+  font-family: system-ui, sans-serif;
+  padding: 1rem 1.25rem;
+  gap: .75rem;
+  box-sizing: border-box;
+}
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(24rem, 30rem) minmax(0, 1fr);
+  gap: 1rem;
+  min-height: 0;
+}
+.side, .main { overflow-y: auto; overflow-x: hidden; min-height: 0; display: flex; flex-direction: column; gap: .9rem; padding-right: .25rem; }
+.side { border-right: 1px solid #ececec; }
+/* What is blocked comes before what is finished, and before starting more. */
+.side .queue { order: 1; } .side .fleet { order: 2; } .side .intake { order: 3; }
+
+/* Narrow: one column, scrolling as a whole rather than two nested traps. */
+@media (max-width: 60rem) {
+  :host { height: auto; }
+  .workspace { grid-template-columns: 1fr; }
+  .side, .main { overflow: visible; }
+  .side { border-right: none; }
+}
+/* Every panel is the same card; stated once instead of seven times. */
+.fleet, .intake, .mission, .cockpit, .requester, .scrubber, .queue { border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
 header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; }
 h1 { font-size: 1.25rem; margin: 0; }
 .watch { display: flex; gap: .5rem; align-items: center; }
@@ -7,27 +42,25 @@ button { padding: .4rem .9rem; border-radius: 4px; border: 1px solid #5a78c8; ba
 button:disabled { opacity: .5; cursor: not-allowed; }
 .dot { width: .6rem; height: .6rem; border-radius: 50%; background: #bbb; }
 .dot.live { background: #2e9e5b; }
-.fleet { margin-top: 1.25rem; border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
+
 .fleet h2 { font-size: .9rem; margin: 0 0 .6rem; display: flex; flex-wrap: wrap; gap: .75rem; align-items: baseline; }
 .totals { font-weight: 400; color: #666; font-size: .8rem; }
-.attention { color: #9c2b23; margin-left: .5rem; }
 .rail { list-style: none; padding: 0; margin: 0; display: grid; gap: .35rem; }
-.rail button { display: flex; gap: .6rem; align-items: center; width: 100%; text-align: left; padding: .5rem .7rem; border: 1px solid #eee; border-radius: 6px; background: #fff; cursor: pointer; font: inherit; }
+.rail button { display: flex; min-width: 0; gap: .6rem; align-items: center; width: 100%; text-align: left; padding: .5rem .7rem; border: 1px solid #eee; border-radius: 6px; background: #fff; cursor: pointer; font: inherit; }
 .rail button:hover { border-color: #5a78c8; }
 .rail .selected button { border-color: #5a78c8; background: #f5f8ff; }
 .rail .count { font-size: .75rem; color: #666; }
-.intake { margin-top: 1.25rem; display: grid; gap: .5rem; border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
+.intake { display: grid; gap: .5rem; }
 .intake label { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; }
 .intake textarea { padding: .5rem .6rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; resize: vertical; }
 .intake button { justify-self: start; }
 .error { margin: 0; color: #9c2b23; background: #fcecec; border-radius: 4px; padding: .5rem .7rem; }
-.mission { margin-top: 1.5rem; border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
+
 .meta { display: flex; gap: .75rem; align-items: center; color: #666; font-size: .85rem; }
 .badge { text-transform: uppercase; font-size: .7rem; letter-spacing: .04em; padding: .15rem .45rem; border-radius: 3px; background: #eef2fb; color: #33477d; }
 [data-status='surrendered'] .badge, li[data-status='failed'] .badge { background: #fcecec; color: #9c2b23; }
 [data-status='delivered'] .badge, li[data-status='verified'] .badge { background: #e8f6ed; color: #1f6b40; }
-/* Abandoned is grey, not red: nothing went wrong with the work, the process
-   running it died. Colouring it like a surrender would imply a decision. */
+/* Abandoned is grey, not red: the work was fine, the process died. */
 [data-status='abandoned'] .badge { background: #eee; color: #666; }
 .blockers { background: #fcecec; border-radius: 4px; padding: .6rem 1.2rem; color: #9c2b23; }
 .tasks { list-style: none; padding: 0; display: grid; gap: .4rem; }
@@ -42,28 +75,19 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .zoom button { padding: .15rem .5rem; font-size: .8rem; }
 .zoom .level { font-size: .72rem; color: #666; min-width: 2.6rem; text-align: right; }
 .canvas { list-style: none; padding: 0; margin: 0; }
-.cockpit { margin-top: 1rem; border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
+
 .cockpit h3 { margin: 0 0 .6rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; }
 .cockpit .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .5rem; }
 .cockpit label { font-size: .78rem; color: #666; }
 .cockpit input, .cockpit select { padding: .3rem .5rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
 .cockpit input[type='number'] { width: 5rem; }
 .cockpit .hint { font-size: .72rem; color: #888; }
-.attention { margin-top: 1.25rem; border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
-.attention h2 { font-size: .9rem; margin: 0 0 .6rem; display: flex; gap: .75rem; align-items: baseline; }
-.attention > ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }
-.attention > ul > li { border: 1px solid #eee; border-left: 3px solid #a8700f; border-radius: 6px; padding: .6rem .8rem; }
-.attention .objective { margin: 0 0 .3rem; font-weight: 500; }
-.attention .why { margin: 0; display: flex; gap: .5rem; align-items: center; font-size: .78rem; }
-.attention .dial { color: #666; }
-.attention .criteria, .attention .findings { margin: .4rem 0 0; padding-left: 1.1rem; font-size: .78rem; }
-.attention .findings { color: #9c2b23; }
 .lenses { display: flex; flex-wrap: wrap; gap: .3rem; margin: .9rem 0 .2rem; }
 .lenses button { padding: .25rem .7rem; font-size: .78rem; text-transform: capitalize; background: #fff; border: 1px solid #d8d8d8; }
 .lenses button.active { background: #eef2fb; border-color: #5a78c8; color: #33477d; font-weight: 500; }
 
 /* Time travel (R20) — the scrubber and the compare panel. */
-.scrubber { margin: .75rem 0; border: 1px solid #e2e2e2; border-radius: 8px; padding: .7rem .9rem; }
+.scrubber { padding: .7rem .9rem; }
 .scrubber.past { border-color: #b98b3a; background: #fdf8ee; }
 .scrubber .track { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
 .scrubber label { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; }
@@ -84,7 +108,6 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .audience-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; }
 .watch select { padding: .4rem .5rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
 
-.requester { margin-top: 1.25rem; border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
 .requester h2 { font-size: 1rem; margin: 0 0 .4rem; }
 .requester h3 { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; margin: .9rem 0 .35rem; }
 .requester .meta { margin: 0; display: flex; flex-wrap: wrap; gap: .75rem; align-items: baseline; font-size: .8rem; color: #666; }
@@ -103,3 +126,35 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .kept-whole .headline { margin: 0 0 .3rem; font-weight: 600; font-size: .88rem; color: #8a5a10; }
 .kept-whole .why { margin: 0 0 .4rem; font-size: .84rem; color: #444; }
 .kept-whole .hint { margin: 0; font-size: .78rem; color: #777; }
+
+/* ---- the queue: what has stopped, vs what merely wants reading ---- */
+
+.queue h2 { font-size: .9rem; margin: 0 0 .6rem; display: flex; gap: .5rem; align-items: baseline; }
+.queue h2 .totals { background: #fcecec; color: #9c2b23; border-radius: 999px; padding: .05rem .5rem; font-size: .75rem; }
+.queue .items { list-style: none; padding: 0; margin: 0; display: grid; gap: .7rem; }
+.queue .items > li { border: 1px solid #eee; border-radius: 6px; padding: .6rem .7rem; background: #fff; }
+.queue .objective { margin: 0 0 .35rem; font-weight: 600; font-size: .9rem; }
+.queue .why { margin: 0; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; font-size: .8rem; }
+.queue .criteria { margin: .5rem 0 0; padding-left: 1.1rem; font-size: .82rem; color: #444; }
+
+/* One box per question: the queue used to show these with no way to answer. */
+.questions { margin: .6rem 0 0; padding-left: 1.2rem; display: grid; gap: .55rem; }
+.questions label { display: block; font-size: .82rem; line-height: 1.35; margin-bottom: .25rem; }
+.questions textarea { width: 100%; box-sizing: border-box; padding: .4rem .5rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; font-size: .85rem; resize: vertical; }
+.actions { margin: .6rem 0 0; display: flex; flex-wrap: wrap; gap: .4rem; }
+.actions .primary { background: #5a78c8; border-color: #5a78c8; color: #fff; font-weight: 600; }
+.actions .primary:disabled { background: #eef2fb; color: #33477d; font-weight: 400; }
+.link { background: none; border: none; color: #33477d; text-decoration: underline; padding: 0 .2rem; cursor: pointer; font: inherit; font-size: .8rem; }
+
+.disclosure { display: block; width: 100%; text-align: left; margin-top: .7rem; background: #fafafa; border: 1px dashed #ddd; color: #666; font-size: .8rem; }
+.advisory > li { background: #fafafa; }
+
+/* ---- the rail, grouped ---- */
+.rail-search { min-width: 0; width: 100%; box-sizing: border-box; font-size: .85rem; }
+.hint { margin: 0; font-size: .8rem; color: #666; }
+.group { margin-top: .6rem; }
+.group-head { margin: 0 0 .3rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: #666; }
+.group .count { font-size: .72rem; color: #888; }
+.group .disclosure { margin-top: 0; text-transform: uppercase; letter-spacing: .05em; font-size: .72rem; }
+.rail button .objective { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .85rem; }
+.queue .empty, .fleet .empty { color: #666; font-size: .85rem; }

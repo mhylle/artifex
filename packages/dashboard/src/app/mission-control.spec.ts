@@ -603,14 +603,20 @@ describe('MissionControl — deciding an attention item (R18)', () => {
     fixture.detectChanges();
   });
 
-  it('AC-2: an Approve button is rendered on the item and sends the decision', async () => {
-    const buttons = Array.from(
-      fixture.nativeElement.querySelectorAll('.attention button') as NodeListOf<HTMLButtonElement>,
-    );
-    const approve = buttons.find((b) => b.textContent?.trim() === 'Approve');
-    expect(approve, 'no Approve button on the attention item').toBeDefined();
+  function queueButtons(): HTMLButtonElement[] {
+    return Array.from(fixture.nativeElement.querySelectorAll('.queue button') as NodeListOf<HTMLButtonElement>);
+  }
 
-    approve!.click();
+  it('AC-2: the operator can approve the item without answering, and the decision is sent', async () => {
+    // Renamed and rewritten in place. This asserted a button labelled
+    // "Approve"; an item that asks questions now labels that path "Proceed
+    // without answering", because approving an item you have not answered is a
+    // different act from answering it. What the test PROVES is unchanged: the
+    // queue can send an approve decision for the right task.
+    const proceed = queueButtons().find((b) => b.textContent?.trim() === 'Proceed without answering');
+    expect(proceed, 'no way to approve the item without answering').toBeDefined();
+
+    proceed!.click();
     await fixture.whenStable();
 
     expect(sent[0]?.action).toBe('decide');
@@ -620,13 +626,48 @@ describe('MissionControl — deciding an attention item (R18)', () => {
   });
 
   it('DISTRACTOR: Reject sends a different decision, not the same one', async () => {
-    const buttons = Array.from(
-      fixture.nativeElement.querySelectorAll('.attention button') as NodeListOf<HTMLButtonElement>,
-    );
-    buttons.find((b) => b.textContent?.trim() === 'Reject')!.click();
+    queueButtons().find((b) => b.textContent?.trim() === 'Reject')!.click();
     await fixture.whenStable();
 
     expect(sent[0]?.decision).toBe('reject');
+  });
+
+  it('AC-2: the answer an operator types reaches the runtime as the note', async () => {
+    // The gap that made mission 5ed04265 unrecoverable from the UI: the queue
+    // rendered the questions and offered only Approve and Reject, so the answer
+    // had nowhere to go. One box per finding; the answers travel in `note`.
+    const boxes = Array.from(
+      fixture.nativeElement.querySelectorAll('.questions textarea') as NodeListOf<HTMLTextAreaElement>,
+    );
+    expect(boxes, 'no answer box was rendered for the question the item is asking').toHaveLength(1);
+
+    boxes[0]!.value = 'Use the parish census.';
+    boxes[0]!.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const send = queueButtons().find((b) => b.textContent?.includes('Send answers'));
+    expect(send?.disabled, 'the send button stayed disabled after an answer was typed').toBe(false);
+    send!.click();
+    await fixture.whenStable();
+
+    expect(sent[0]?.action).toBe('decide');
+    expect(sent[0]?.decision).toBe('approve');
+    expect(sent[0]?.note).toContain('no census exists');
+    expect(sent[0]?.note).toContain('Use the parish census.');
+  });
+
+  it('DISTRACTOR: with nothing typed, the send button is disabled and sends nothing', async () => {
+    // An empty note would clear the block while answering nothing — exactly the
+    // blind approval this control exists to replace. The "proceed anyway" path
+    // is still there, but it says what it is.
+    const send = queueButtons().find((b) => b.textContent?.includes('Send answers'));
+
+    expect(send?.disabled).toBe(true);
+    send!.click();
+    await fixture.whenStable();
+
+    expect(sent).toHaveLength(0);
   });
 });
 
@@ -983,7 +1024,9 @@ describe('MissionControl — audience scoping (R22)', () => {
     for (const lens of ['canvas', 'workforce', 'timeline', 'learning', 'ledger']) {
       expect(labels, `operator cannot reach the "${lens}" lens`).toContain(lens);
     }
-    expect(fixture.nativeElement.querySelector('section.attention')).toBeTruthy();
+    // `section.attention` became `section.queue` when the queue was split into
+    // what is blocked and what is merely advisory. Same reachability claim.
+    expect(fixture.nativeElement.querySelector('section.queue')).toBeTruthy();
     expect(fixture.nativeElement.querySelectorAll('.cockpit button').length).toBeGreaterThan(0);
   });
 
