@@ -67,6 +67,44 @@ export class MissionControl implements OnInit {
    * Opens on the queue: what is blocked needs a decision, the rest is browsing.
    */
   readonly sidePane = signal<'queue' | 'fleet' | 'new'>('queue');
+
+  /** The surrendered mission this draft is retrying, if any (R37 AC-2). */
+  readonly retryOf = signal<string | null>(null);
+
+  /**
+   * Load a surrendered mission back into the intake form to be restated.
+   *
+   * The gap this closes, reported by the owner: a mission that surrenders at
+   * Gate A records no `escalation.awaiting_human` — unlike an intake block — so
+   * it reaches no attention queue, and the cockpit offered nothing that
+   * addressed it. It "just seems to have stopped".
+   *
+   * Approving would be theatre. You cannot approve past a criterion that no
+   * verification could meet; the dossier's own remedy is *"relax or restate"*.
+   * So this reopens what was asked, for editing, and carries `priorMissionId`
+   * so the control plane pins the prior blockers into the new contract where
+   * the planner and every worker will see them.
+   */
+  retryMission(): void {
+    const intake = this.visibleEvents().find((e) => e.type === 'mission.intake_accepted');
+    const contract = intake?.payload['contract'] as
+      | { objective?: unknown; acceptanceCriteria?: unknown; boundaries?: { outOfScope?: unknown } }
+      | undefined;
+    if (contract === undefined) return;
+
+    const criteria = Array.isArray(contract.acceptanceCriteria) ? contract.acceptanceCriteria : [];
+    const outOfScope = Array.isArray(contract.boundaries?.outOfScope) ? contract.boundaries.outOfScope : [];
+
+    this.objective.set(typeof contract.objective === 'string' ? contract.objective : '');
+    this.criteriaText.set(
+      criteria.map((c) => String((c as { statement?: unknown }).statement ?? '')).join('\n'),
+    );
+    this.outOfScopeText.set(outOfScope.map(String).join('\n'));
+    this.retryOf.set(this.missionId());
+    // Opened for EDITING rather than sent. Resubmitting the same words would
+    // fail the same gate for the same reason.
+    this.sidePane.set('new');
+  }
   /** Which collapsed rail groups the operator has opened. */
   readonly openGroups = signal<Record<string, boolean>>({});
 
@@ -478,10 +516,12 @@ export class MissionControl implements OnInit {
     this.error.set(null);
     this.submitting.set(true);
     try {
+      const retrying = this.retryOf();
       const missionId = await this.#intake.submit({
         objective,
         successCriteria,
         outOfScope: toLines(this.outOfScopeText()),
+        ...(retrying === null ? {} : { priorMissionId: retrying }),
       });
 
       // Watching is the point: an operator who starts a mission should not then
@@ -491,6 +531,9 @@ export class MissionControl implements OnInit {
       this.objective.set('');
       this.criteriaText.set('');
       this.outOfScopeText.set('');
+      // Cleared with the rest of the draft: a retry is one mission, not a mode.
+      // Left set, every later mission would inherit a dead mission's blockers.
+      this.retryOf.set(null);
     } catch (cause: unknown) {
       // Surfaced rather than swallowed — a silent failure is indistinguishable
       // from a control plane that is simply down.

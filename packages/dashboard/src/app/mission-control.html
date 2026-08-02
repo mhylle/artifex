@@ -405,6 +405,19 @@
       </ul>
     }
 
+    <!--
+      A surrendered mission used to be a dead end: a Gate A rejection records no
+      `escalation.awaiting_human`, so it reaches no attention queue and the
+      cockpit offered nothing that addressed it. Restating is the actual remedy
+      — the dossier says so — and the retry carries the prior blockers with it.
+    -->
+    @if (tree.status === 'surrendered' && can('decide')) {
+      <p class="retry">
+        <button type="button" class="primary" (click)="retryMission()">Retry with what we learned</button>
+        <span class="hint">Reopens what you asked, for editing. The new mission inherits these blockers, so it starts from them instead of rediscovering them.</span>
+      </p>
+    }
+
     <nav class="lenses" aria-label="lenses">
       @for (name of scope().lenses; track name) {
         <button type="button" [class.active]="activeLens() === name" (click)="lens.set(name)">{{ name }}</button>

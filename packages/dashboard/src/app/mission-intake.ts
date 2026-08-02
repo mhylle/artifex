@@ -19,6 +19,19 @@ export interface MissionDraft {
   readonly objective: string;
   readonly successCriteria: readonly string[];
   readonly outOfScope: readonly string[];
+  /**
+   * The surrendered mission this one is retrying (R37 AC-2).
+   *
+   * The control plane reads that mission's surrender dossier off the trail and
+   * pins its `whatItWouldTake` into the new contract as `pinnedDecisions`,
+   * which every child inherits — so the planner and each worker start from what
+   * the last attempt learned rather than rediscovering the same blocker.
+   *
+   * Optional because most missions are not retries. It was supported end to end
+   * by the API and sent by nothing until the owner hit a surrendered mission
+   * with no way forward.
+   */
+  readonly priorMissionId?: string;
 }
 
 /**
@@ -67,6 +80,10 @@ export class MissionIntake {
         objective: draft.objective,
         successCriteria: [...draft.successCriteria],
         outOfScope: [...draft.outOfScope],
+        // Omitted entirely when absent rather than sent as null: the control
+        // plane checks `typeof === 'string'`, and a null would read as a
+        // requester quoting a mission that does not exist.
+        ...(draft.priorMissionId === undefined ? {} : { priorMissionId: draft.priorMissionId }),
         ...INTAKE_DEFAULTS,
       }),
     );

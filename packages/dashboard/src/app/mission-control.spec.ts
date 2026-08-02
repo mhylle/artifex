@@ -1368,3 +1368,123 @@ describe('MissionControl — the left pane is tabbed (R21)', () => {
     expect(tab('needs you')?.textContent).toContain('1');
   });
 });
+
+/**
+ * A surrendered mission must have a way forward (R37 AC-2).
+ *
+ * Reported by the owner: a mission "says surrendered but there is no actions
+ * for me on it and it just seems to have stopped". It had: no attention item —
+ * a Gate A rejection surrenders without recording `escalation.awaiting_human`,
+ * unlike an intake block — and no cockpit action that addressed it.
+ *
+ * The recovery mechanism already existed and had never been called from
+ * anywhere. `POST /missions` accepts `priorMissionId`, reads the surrender
+ * dossier back off the trail, and pins its `whatItWouldTake` into the new
+ * contract as `pinnedDecisions`, which every child inherits — so the planner
+ * and each worker start from what the last attempt learned instead of
+ * rediscovering it. Find-shape (l): a correct mechanism with no production
+ * caller, which this project has now found six times.
+ *
+ * Approving a surrender would be theatre — you cannot approve your way past a
+ * criterion no verification could meet. Restating it is the actual remedy, and
+ * the dossier says so in those words.
+ */
+describe('MissionControl — retrying a surrendered mission (R37 AC-2)', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let component: MissionControl;
+  let feed: LedgerFeed;
+  let submitted: MissionDraft[];
+
+  const CONTRACT = {
+    objective: 'Come up with algorithms for stem cell research',
+    acceptanceCriteria: [{ criterionId: 'm-1', statement: '3 algorithms and a report' }],
+    boundaries: { outOfScope: ['clinical trials'] },
+  };
+
+  function surrenderedTrail(): LedgerEventView[] {
+    return [
+      ev(1, 'mission.intake_accepted', MISSION, { contract: CONTRACT }),
+      ev(2, 'mission.started', MISSION, { objective: CONTRACT.objective }),
+      ev(3, 'mission.surrendered', MISSION, {
+        reason: 'Gate A rejected the decomposition',
+        blockers: ['Criterion ac-1 is not testable as written'],
+      }),
+    ];
+  }
+
+  beforeEach(async () => {
+    submitted = [];
+    const stub: Pick<MissionIntake, 'submit'> = {
+      async submit(draft: MissionDraft) { submitted.push(draft); return 'm-retry'; },
+    };
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting(), { provide: MissionIntake, useValue: stub }],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    component = fixture.componentInstance;
+    feed = TestBed.inject(LedgerFeed);
+    component.missionId.set(MISSION);
+    feed.events.set(surrenderedTrail());
+    fixture.detectChanges();
+  });
+
+  function retryButton(): HTMLButtonElement | undefined {
+    return Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
+      .find((b) => b.textContent?.includes('Retry with what we learned'));
+  }
+
+  it('offers a retry on a surrendered mission, pre-filled with what was asked', () => {
+    expect(retryButton(), 'a surrendered mission offered no way forward').toBeDefined();
+
+    retryButton()!.click();
+    fixture.detectChanges();
+
+    expect(component.objective()).toBe(CONTRACT.objective);
+    expect(component.criteriaText()).toBe('3 algorithms and a report');
+    expect(component.outOfScopeText()).toBe('clinical trials');
+    // Opened for EDITING, not sent: the remedy is to restate the criterion, so
+    // resubmitting it unchanged would fail Gate A exactly as before.
+    expect(submitted, 'the retry was sent without letting the requester change anything').toHaveLength(0);
+    expect(component.sidePane()).toBe('new');
+  });
+
+  it('carries priorMissionId, so the dossier is pinned into the new contract', async () => {
+    // The half that makes a retry worth more than retyping: without this the
+    // new mission starts blind and rediscovers the same blocker.
+    retryButton()!.click();
+    fixture.detectChanges();
+
+    await component.submit();
+
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]?.priorMissionId).toBe(MISSION);
+  });
+
+  it('DISTRACTOR: a DELIVERED mission offers no retry', () => {
+    // A mission that succeeded has nothing to learn from and no dossier to
+    // carry; offering a retry would invite pointless re-running.
+    feed.events.set([
+      ev(1, 'mission.intake_accepted', MISSION, { contract: CONTRACT }),
+      ev(2, 'mission.delivered', MISSION, {}),
+    ]);
+    fixture.detectChanges();
+
+    expect(retryButton()).toBeUndefined();
+  });
+
+  it('DISTRACTOR: a fresh mission started afterwards does NOT still carry the prior id', async () => {
+    // `priorMissionId` is a property of one retry, not a sticky mode. Left set,
+    // every later mission would inherit a dead mission's blockers.
+    retryButton()!.click();
+    fixture.detectChanges();
+    await component.submit();
+
+    component.objective.set('Something unrelated');
+    component.criteriaText.set('States one fact.');
+    await component.submit();
+
+    expect(submitted).toHaveLength(2);
+    expect(submitted[1]?.priorMissionId, 'the prior id leaked into an unrelated mission').toBeUndefined();
+  });
+});
