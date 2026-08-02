@@ -216,7 +216,10 @@
   } @empty {
     @if (!fleet.error()) {
       <p class="empty">
-        @if (search().trim().length) { No mission matches “{{ search() }}”. } @else { No missions yet — start one below. }
+        <!-- "below" was true until the pane was tabbed; the form is on New now. -->
+        @if (search().trim().length) { No mission matches “{{ search() }}”. } @else {
+          No missions yet — <button type="button" class="link" (click)="sidePane.set('new')">start one</button>.
+        }
       </p>
     }
   }
