@@ -34,12 +34,15 @@ describe('scopeFor — who sees what', () => {
     }
   });
 
-  it('the requester is scoped to their own mission and to the three things intake promised them', () => {
+  it('the requester is scoped to their own mission and to what intake promised them', () => {
     const scope = scopeFor('requester');
 
     expect(scope.missions).toBe('own');
-    // Answer questions, approve budget extensions, adjust their own dial.
-    expect([...scope.actions].sort()).toEqual(['decide', 'grant_budget', 'turn_dial']);
+    // Answer questions, approve budget extensions, adjust their own dial — and
+    // restate what they asked for. `restate` was added when a surrendered
+    // mission proved to have no way forward (R41): it changes WHAT was asked,
+    // which is the requester's own contract, not the operator's machinery.
+    expect([...scope.actions].sort()).toEqual(['decide', 'grant_budget', 'restate', 'turn_dial']);
   });
 
   it('DISTRACTOR: the requester may not steer the machinery — only their own mission', () => {
@@ -292,5 +295,36 @@ describe('R22 AC-1 — assumptions reach the requester once the ledger carries t
     ] as never);
 
     expect(view.assumptions).toEqual(['A.', 'B.']);
+  });
+});
+
+/**
+ * Who may restate a mission (R22, R41).
+ *
+ * The distinction this file already draws: a requester gets "the three powers
+ * intake promised them" and NOT pause/cancel/annotate, because those are
+ * controls over *how* the work is done and that is the operator's
+ * accountability.
+ *
+ * Restating the success criteria is not how — it is *what was asked*, which is
+ * the requester's own contract and arguably more theirs than the operator's. So
+ * both may. An observer may not: they could otherwise steer the system they are
+ * measuring, and the measurement would be of their own influence.
+ */
+describe('R22 — restating is scoped to the people whose contract it is', () => {
+  it('the operator and the requester may restate', () => {
+    expect(mayAct('operator', 'restate')).toBe(true);
+    expect(mayAct('requester', 'restate')).toBe(true);
+  });
+
+  it('DISTRACTOR: an observer may not — read-only means read-only', () => {
+    expect(mayAct('observer', 'restate')).toBe(false);
+  });
+
+  it('DISTRACTOR: a requester still may not pause or cancel', () => {
+    // The line this sits next to must not move: restating is about WHAT is
+    // asked; pausing is about HOW the work runs.
+    expect(mayAct('requester', 'pause')).toBe(false);
+    expect(mayAct('requester', 'cancel')).toBe(false);
   });
 });

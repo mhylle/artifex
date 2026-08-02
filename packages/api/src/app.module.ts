@@ -101,7 +101,26 @@ function connectionString(): string {
             if (contract === undefined || contract === null) {
               throw new Error(`mission ${missionId} has no recorded contract to resume from`);
             }
-            await queue.enqueue({ missionId, contract: contract as never });
+
+            /**
+             * The LAST restatement wins (R41).
+             *
+             * The ledger is append-only, so an operator restating a mission
+             * does not rewrite the intake event — the amendment is appended and
+             * applied here. Same rule the fleet projection uses for status
+             * (ADR-0024): the most recent statement is the true one.
+             *
+             * Merged over the commissioned contract rather than replacing it,
+             * because a restatement names the criteria and must not silently
+             * blank the budget, boundaries or dial the mission was started with.
+             */
+            const restated = [...trail].reverse().find((e) => e.type === 'operator.restated');
+            const amendment = restated === undefined ? {} : restated.payload;
+
+            await queue.enqueue({
+              missionId,
+              contract: { ...(contract as Record<string, unknown>), ...amendment } as never,
+            });
           },
         }),
       inject: [LEDGER_SINK, LEDGER_READER, INTAKE_CLOCK, MISSION_QUEUE],

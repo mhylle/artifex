@@ -912,3 +912,89 @@ describe('R30 AC-2 — a carried assumption survives a resume', () => {
     expect(result.trail.some((e) => e.type === 'assumption.became_load_bearing')).toBe(true);
   });
 });
+
+/**
+ * Restating a mission continues it — it does not start a new one (R41, R37 AC-2).
+ *
+ * The owner's correction, and the right one: "it should not create a new
+ * mission. we should be using the same mission, but continuing with what we
+ * learned. creating a new mission is a waste and gives us too many missions."
+ *
+ * A retry that minted a fresh mission id split one piece of work across two
+ * trails, and left the fleet growing by one row every time a specification
+ * needed a word changed. The ledger is append-only and already the checkpoint
+ * a mission resumes from — so a restatement is another event on the SAME trail.
+ *
+ * The subtlety that makes this more than an event: on resume the loop recovers
+ * the prior task tree and does NOT re-plan. That is right for a mission that
+ * was merely interrupted, and wrong for one whose specification just changed —
+ * the plan was built to satisfy criteria that no longer exist, and Gate A would
+ * reject it for the same reason a second time. So a restatement invalidates the
+ * plan that preceded it.
+ */
+describe('R41 — a restatement continues the same mission and re-plans it', () => {
+  const AMENDED = [{ criterionId: 'm-1', statement: 'Lists exactly three named algorithms.' }];
+
+  /** A real trail: contracted work, then the operator restating the criteria. */
+  async function trailWithRestatement(): Promise<Array<Record<string, unknown>>> {
+    const trail = (await runMission(mission(), seams(), { now: () => AT })).trail as unknown as Array<
+      Record<string, unknown>
+    >;
+    expect(trail.some((e) => e['type'] === 'task.contracted'), 'FIXTURE: no plan to invalidate').toBe(true);
+
+    const started = trail.find((e) => e['type'] === 'mission.started')!;
+    return [
+      ...trail,
+      { ...started, type: 'operator.restated', taskId: MISSION_ID, payload: { acceptanceCriteria: AMENDED } },
+    ];
+  }
+
+  it('re-plans after a restatement instead of resuming a plan built for the old criteria', async () => {
+    const prior = await trailWithRestatement();
+    const contractedBefore = prior.filter((e) => e['type'] === 'task.contracted').length;
+
+    const result = await runMission(mission(), seams(), { now: () => AT, resumeFrom: prior as never });
+
+    // Fresh contracts, because the plan that preceded the restatement was built
+    // to satisfy criteria that no longer exist.
+    expect(
+      result.trail.filter((e) => e.type === 'task.contracted').length,
+      'the restated mission reused the plan Gate A had already rejected',
+    ).toBeGreaterThan(0);
+    expect(contractedBefore, 'CONTROL: the prior trail had no contracts, so nothing was invalidated').toBeGreaterThan(0);
+  });
+
+  it('DISTRACTOR: without a restatement, a resumed mission still reuses its plan', async () => {
+    // The additive half. Re-planning every resume would throw away verified work
+    // and make R41 pointless — a mission interrupted mid-flight must continue,
+    // not start over.
+    const prior = (await runMission(mission(), seams(), { now: () => AT })).trail;
+
+    const result = await runMission(mission(), seams(), { now: () => AT, resumeFrom: prior as never });
+
+    expect(
+      result.trail.some((e) => e.type === 'task.contracted'),
+      'a plain resume re-contracted work it had already done',
+    ).toBe(false);
+  });
+
+  it('DISTRACTOR: a restatement does not discard the operator answers that preceded it', async () => {
+    // `decided` is what clears the intake block (ADR-0023). Wiping it along with
+    // the plan would send a restated mission straight back to the question the
+    // operator has already answered.
+    const prior = await trailWithRestatement();
+    const started = prior.find((e) => e['type'] === 'mission.started')!;
+    prior.splice(1, 0, { ...started, type: 'operator.decided', taskId: MISSION_ID, payload: { decision: 'approve' } });
+
+    let asked = 0;
+    const result = await runMission(
+      mission(),
+      { ...seams(), interrogator: { async assess() { asked += 1; return { questions: [{ criterionId: 'm-1', subject: 'x', question: 'Which audience?', stakes: 'high' as const }] }; } } } as never,
+      { now: () => AT, resumeFrom: prior as never },
+    );
+
+    expect(asked, 'CONTROL: the interrogator was never consulted, so the block was not tested').toBe(0);
+
+    expect(result.trail.some((e) => e.type === 'task.contracted'), 'the restated mission stopped at an answered question').toBe(true);
+  });
+});

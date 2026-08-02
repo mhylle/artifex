@@ -225,3 +225,105 @@ describe('R18 AC-2 — deciding re-enqueues the mission so the task proceeds', (
     expect(appended).toHaveLength(1);
   });
 });
+
+/**
+ * Restating a mission amends its contract and continues it (R41, R37 AC-2).
+ *
+ * The owner's correction: a retry that minted a new mission id split one piece
+ * of work across two trails and grew the fleet by a row every time a criterion
+ * needed a word changed. A restatement is another event on the SAME trail.
+ *
+ * The ledger is append-only, so the amendment does not rewrite the intake
+ * event — it is appended, and the contract handed to the runtime is the intake
+ * contract with the LAST restatement applied. That is the same rule the fleet
+ * projection uses for status (ADR-0024): the most recent statement wins.
+ */
+describe('R41 — restating amends the contract and continues the same mission', () => {
+  const ORIGINAL = {
+    taskId: MISSION, missionId: MISSION, objective: 'Come up with algorithms',
+    acceptanceCriteria: [{ criterionId: 'm-1', statement: 'Completeness and accuracy' }],
+  };
+
+  function harness(trail: Array<Record<string, unknown>>) {
+    const appended: Array<Record<string, unknown>> = [];
+    const enqueued: Array<{ missionId: string; contract: Record<string, unknown> }> = [];
+    const sink: LedgerSink = { async append(event) { appended.push(event as Record<string, unknown>); return event; } };
+    const reader = {
+      async replay() { return [...trail, ...appended] as never; },
+      async listMissions() { return []; },
+      async listAttentionItems() { return []; },
+    };
+    const service = new CockpitService(
+      sink, reader, { now: () => AT, newId: () => TASK },
+      {
+        async resume(missionId: string) {
+          // Mirrors app.module's resumer: read the trail, build the contract.
+          const events = await reader.replay();
+          const intake = (events as unknown as Array<Record<string, unknown>>)
+            .find((e) => e['type'] === 'mission.intake_accepted');
+          const restated = [...(events as unknown as Array<Record<string, unknown>>)]
+            .reverse().find((e) => e['type'] === 'operator.restated');
+          const base = (intake?.['payload'] as { contract?: Record<string, unknown> })?.contract ?? {};
+          const amendment = (restated?.['payload'] ?? {}) as Record<string, unknown>;
+          enqueued.push({ missionId, contract: { ...base, ...amendment } });
+        },
+      },
+    );
+    return { service, appended, enqueued };
+  }
+
+  const withIntake = (): Array<Record<string, unknown>> => [
+    { type: 'mission.intake_accepted', payload: { contract: ORIGINAL } },
+  ];
+
+  it('records the restatement and re-enqueues the SAME mission id', async () => {
+    const { service, appended, enqueued } = harness(withIntake());
+
+    await service.act({
+      missionId: MISSION, taskId: MISSION, action: 'restate', operator: 'op',
+      acceptanceCriteria: [{ criterionId: 'm-1', statement: 'Lists exactly three named algorithms.' }],
+    });
+
+    expect((appended[0] as { type: string }).type).toBe('operator.restated');
+    expect(enqueued.map((e) => e.missionId), 'a restatement started a different mission').toEqual([MISSION]);
+  });
+
+  it('the contract the runtime receives carries the NEW criteria, not the old', async () => {
+    // The half that makes it a restatement rather than a retry: without it the
+    // mission resumes against the specification that already failed.
+    const { service, enqueued } = harness(withIntake());
+
+    await service.act({
+      missionId: MISSION, taskId: MISSION, action: 'restate', operator: 'op',
+      acceptanceCriteria: [{ criterionId: 'm-1', statement: 'Lists exactly three named algorithms.' }],
+    });
+
+    const criteria = enqueued[0]?.contract['acceptanceCriteria'] as Array<{ statement: string }>;
+    expect(criteria[0]?.statement).toBe('Lists exactly three named algorithms.');
+  });
+
+  it('DISTRACTOR: what the restatement does NOT mention is inherited, not dropped', () => {
+    // A restatement names the criteria; it must not silently blank the
+    // objective, budget or boundaries the mission was commissioned with.
+    const { service, enqueued } = harness(withIntake());
+
+    return service.act({
+      missionId: MISSION, taskId: MISSION, action: 'restate', operator: 'op',
+      acceptanceCriteria: [{ criterionId: 'm-1', statement: 'Lists three.' }],
+    }).then(() => {
+      expect(enqueued[0]?.contract['objective']).toBe('Come up with algorithms');
+      expect(enqueued[0]?.contract['missionId']).toBe(MISSION);
+    });
+  });
+
+  it('DISTRACTOR: a restatement with no criteria is refused rather than blanking the contract', async () => {
+    // A mission with no acceptance criteria cannot be graded (invariant #2), and
+    // an empty array would be accepted silently by a naive spread.
+    const { service, appended } = harness(withIntake());
+
+    await expect(
+      service.act({ missionId: MISSION, taskId: MISSION, action: 'restate', operator: 'op', acceptanceCriteria: [] }),
+    ).rejects.toThrow();
+    expect(appended, 'an ungradeable restatement reached the ledger').toHaveLength(0);
+  });
+});

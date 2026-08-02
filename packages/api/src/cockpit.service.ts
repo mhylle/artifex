@@ -25,7 +25,8 @@ export type CockpitAction =
   | 'grant_budget'
   | 'turn_dial'
   | 'annotate'
-  | 'decide';
+  | 'decide'
+  | 'restate';
 
 export interface CockpitRequest {
   readonly missionId: string;
@@ -38,6 +39,16 @@ export interface CockpitRequest {
   readonly note?: string;
   /** For `decide`: what the human concluded about a waiting item. */
   readonly decision?: 'approve' | 'reject';
+  /**
+   * For `restate`: the criteria this mission should now be graded against.
+   *
+   * A mission whose specification cannot be verified is not fixed by running it
+   * again — the surrender dossier says so in its own words ("relax or restate").
+   * Amending it on the same trail keeps one piece of work as one mission.
+   */
+  readonly acceptanceCriteria?: readonly { criterionId: string; statement: string }[];
+  /** For `restate`: an amended objective, when the wording itself was the problem. */
+  readonly objective?: string;
 }
 
 export type ControlState = 'run' | 'paused' | 'cancelled';
@@ -72,6 +83,9 @@ const SHAPE: Record<CockpitAction, { type: string; family: LedgerEventInput['fam
   // because the runtime must be able to tell "a human has ruled on this" from
   // "a human wrote something down" — only the first unblocks a task.
   decide: { type: 'operator.decided', family: 'decision' },
+  // `contract`, not `decision`: this CHANGES what the work is graded against,
+  // which is a contract event in the taxonomy rather than a ruling about one.
+  restate: { type: 'operator.restated', family: 'contract' },
 };
 
 @Injectable()
@@ -111,7 +125,9 @@ export class CockpitService {
 
     // Only a DECISION unblocks. Re-enqueuing on every action would restart
     // missions the operator has just paused or cancelled.
-    if (request.action === 'decide' && this.resumer !== undefined) {
+    // A restatement unblocks for the same reason a decision does: the runtime
+    // resumes by replaying the trail, and only replays when a job arrives.
+    if ((request.action === 'decide' || request.action === 'restate') && this.resumer !== undefined) {
       try {
         await this.resumer.resume(request.missionId);
       } catch {
@@ -168,6 +184,30 @@ export class CockpitService {
           throw new BadRequestException('a budget grant needs a positive amount');
         }
         return { amount: request.amount, unit: 'effort-units' };
+      }
+      case 'restate': {
+        // Invariant #2: no work without a contract, and a contract is what the
+        // work is graded against. A restatement with nothing to grade against
+        // would leave the mission ungradeable — worse than the untestable
+        // criterion it was meant to replace.
+        const criteria = request.acceptanceCriteria ?? [];
+        if (criteria.length === 0) {
+          throw new BadRequestException(
+            'restating a mission needs at least one acceptance criterion — a mission nobody can grade is not a mission',
+          );
+        }
+        if (criteria.some((c) => c.statement.trim().length === 0)) {
+          throw new BadRequestException('an acceptance criterion cannot be blank');
+        }
+        return {
+          acceptanceCriteria: criteria.map((c) => ({ ...c })),
+          // Only when it actually changed. Recording `objective: undefined`
+          // would spread over the commissioned objective and blank it.
+          ...(request.objective === undefined || request.objective.trim().length === 0
+            ? {}
+            : { objective: request.objective.trim() }),
+          ...(request.note === undefined ? {} : { note: request.note }),
+        };
       }
       case 'turn_dial': {
         if (request.autonomyDial === undefined) {

@@ -466,6 +466,27 @@ function foldPriorTrail(events: readonly LedgerEventInput[]): PriorState {
       continue;
     }
 
+    /**
+     * The operator restated the mission (R41). The plan that preceded this was
+     * built to satisfy criteria that no longer exist, so it is discarded and
+     * the mission re-plans on the same trail.
+     *
+     * Without this, a restated mission resumes the very plan Gate A rejected
+     * and is rejected again for the same reason — the specification changed and
+     * nothing acted on it.
+     *
+     * What is NOT discarded: `decided`, `carried` and `escalatedAssumptions`.
+     * Those record what a human already answered, and wiping them would send a
+     * restated mission back to a question the operator has settled.
+     */
+    if (event.type === 'operator.restated') {
+      contracts.clear();
+      childrenOf.clear();
+      deliverables.clear();
+      lastOutcome.clear();
+      continue;
+    }
+
     if (event.type === 'operator.decided') {
       // A REJECTION is an answer, but it is not permission to continue.
       //

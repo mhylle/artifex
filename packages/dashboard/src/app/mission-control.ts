@@ -68,42 +68,72 @@ export class MissionControl implements OnInit {
    */
   readonly sidePane = signal<'queue' | 'fleet' | 'new'>('queue');
 
-  /** The surrendered mission this draft is retrying, if any (R37 AC-2). */
-  readonly retryOf = signal<string | null>(null);
+  /**
+   * The criteria an operator is restating, one per line (R41).
+   *
+   * Null until they type: the box shows the contract's own criteria, so the
+   * thing being edited is the thing that failed.
+   */
+  readonly restatedCriteria = signal<string | null>(null);
+
+  /** The mission's criteria, from the contract it was commissioned with. */
+  readonly missionCriteria = computed<readonly { criterionId: string; statement: string }[]>(() => {
+    const intake = this.visibleEvents().find((e) => e.type === 'mission.intake_accepted');
+    const contract = intake?.payload['contract'] as { acceptanceCriteria?: unknown } | undefined;
+    const criteria = contract?.acceptanceCriteria;
+    if (!Array.isArray(criteria)) return [];
+    return criteria.map((c) => ({
+      criterionId: String((c as { criterionId?: unknown }).criterionId ?? ''),
+      statement: String((c as { statement?: unknown }).statement ?? ''),
+    }));
+  });
+
+  /** What is in the box: the draft if edited, else what the mission was graded against. */
+  readonly criteriaDraft = computed(() => {
+    const draft = this.restatedCriteria();
+    return draft === null ? this.missionCriteria().map((c) => c.statement).join('\n') : draft;
+  });
+
+  /** Is there anything gradeable to send? Invariant #2. */
+  canRestate(): boolean {
+    return toLines(this.criteriaDraft()).length > 0;
+  }
 
   /**
-   * Load a surrendered mission back into the intake form to be restated.
+   * Restate the mission and let it continue (R41).
    *
    * The gap this closes, reported by the owner: a mission that surrenders at
-   * Gate A records no `escalation.awaiting_human` — unlike an intake block — so
-   * it reaches no attention queue, and the cockpit offered nothing that
-   * addressed it. It "just seems to have stopped".
+   * Gate A records no escalation.awaiting_human, so it reaches no attention
+   * queue and the cockpit offered nothing that addressed it. It "just seems to
+   * have stopped".
    *
-   * Approving would be theatre. You cannot approve past a criterion that no
-   * verification could meet; the dossier's own remedy is *"relax or restate"*.
-   * So this reopens what was asked, for editing, and carries `priorMissionId`
-   * so the control plane pins the prior blockers into the new contract where
-   * the planner and every worker will see them.
+   * Approving would be theatre — you cannot approve past a criterion that no
+   * verification could meet, and the dossier's own remedy is "relax or
+   * restate". The first version of this started a NEW mission carrying the
+   * prior id; the owner corrected it, rightly: one piece of work became two
+   * trails and the fleet grew a row for every reworded criterion. The
+   * amendment now lands on the SAME trail and the mission continues.
+   *
+   * Existing criterion IDS are preserved. The coverage partition traces a
+   * mission criterion to the task holding it by exactly that id, so renumbering
+   * would quietly make the restated criterion a different one.
    */
-  retryMission(): void {
-    const intake = this.visibleEvents().find((e) => e.type === 'mission.intake_accepted');
-    const contract = intake?.payload['contract'] as
-      | { objective?: unknown; acceptanceCriteria?: unknown; boundaries?: { outOfScope?: unknown } }
-      | undefined;
-    if (contract === undefined) return;
+  async restate(): Promise<void> {
+    const missionId = this.missionId();
+    if (missionId.length === 0 || !this.can('decide')) return;
 
-    const criteria = Array.isArray(contract.acceptanceCriteria) ? contract.acceptanceCriteria : [];
-    const outOfScope = Array.isArray(contract.boundaries?.outOfScope) ? contract.boundaries.outOfScope : [];
+    const statements = toLines(this.criteriaDraft());
+    if (statements.length === 0) return;
 
-    this.objective.set(typeof contract.objective === 'string' ? contract.objective : '');
-    this.criteriaText.set(
-      criteria.map((c) => String((c as { statement?: unknown }).statement ?? '')).join('\n'),
-    );
-    this.outOfScopeText.set(outOfScope.map(String).join('\n'));
-    this.retryOf.set(this.missionId());
-    // Opened for EDITING rather than sent. Resubmitting the same words would
-    // fail the same gate for the same reason.
-    this.sidePane.set('new');
+    const existing = this.missionCriteria();
+    const acceptanceCriteria = statements.map((statement, i) => ({
+      criterionId: existing[i]?.criterionId ?? `m-${i + 1}`,
+      statement,
+    }));
+
+    await this.#send({ missionId, taskId: missionId, action: 'restate', acceptanceCriteria });
+    this.restatedCriteria.set(null);
+    await this.fleet.refresh();
   }
   /** Which collapsed rail groups the operator has opened. */
   readonly openGroups = signal<Record<string, boolean>>({});
@@ -516,12 +546,10 @@ export class MissionControl implements OnInit {
     this.error.set(null);
     this.submitting.set(true);
     try {
-      const retrying = this.retryOf();
       const missionId = await this.#intake.submit({
         objective,
         successCriteria,
         outOfScope: toLines(this.outOfScopeText()),
-        ...(retrying === null ? {} : { priorMissionId: retrying }),
       });
 
       // Watching is the point: an operator who starts a mission should not then
@@ -531,9 +559,6 @@ export class MissionControl implements OnInit {
       this.objective.set('');
       this.criteriaText.set('');
       this.outOfScopeText.set('');
-      // Cleared with the rest of the draft: a retry is one mission, not a mode.
-      // Left set, every later mission would inherit a dead mission's blockers.
-      this.retryOf.set(null);
     } catch (cause: unknown) {
       // Surfaced rather than swallowed — a silent failure is indistinguishable
       // from a control plane that is simply down.

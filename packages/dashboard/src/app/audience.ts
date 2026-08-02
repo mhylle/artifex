@@ -18,7 +18,9 @@ import type { LensName } from './lens-panels';
 export type Audience = 'operator' | 'requester' | 'observer';
 
 export type CockpitAction =
-  | 'pause' | 'resume' | 'cancel' | 'grant_budget' | 'turn_dial' | 'annotate' | 'decide';
+  | 'pause' | 'resume' | 'cancel' | 'grant_budget' | 'turn_dial' | 'annotate' | 'decide'
+  /** Amend what the mission is graded against, and let it continue (R41). */
+  | 'restate';
 
 export interface AudienceScope {
   /** Whether the mission rail spans the fleet or just this audience's own mission. */
@@ -37,7 +39,7 @@ const SCOPES: Readonly<Record<Audience, AudienceScope>> = {
     lenses: ALL_LENSES,
     rawLedger: true,
     attentionQueue: true,
-    actions: ['pause', 'resume', 'cancel', 'grant_budget', 'turn_dial', 'annotate', 'decide'],
+    actions: ['pause', 'resume', 'cancel', 'grant_budget', 'turn_dial', 'annotate', 'decide', 'restate'],
   },
 
   /**
@@ -47,13 +49,16 @@ const SCOPES: Readonly<Record<Audience, AudienceScope>> = {
    * Not pause/cancel/annotate. Those are controls over *how* the work is done,
    * which is the operator's accountability — a requester who could cancel a
    * task would be reaching past their contract into the execution.
+   *
+   * Restating IS theirs, by that same line: it changes *what was asked*, which
+   * is the requester's own contract rather than the operator's machinery.
    */
   requester: {
     missions: 'own',
     lenses: [],
     rawLedger: false,
     attentionQueue: false,
-    actions: ['decide', 'grant_budget', 'turn_dial'],
+    actions: ['decide', 'grant_budget', 'turn_dial', 'restate'],
   },
 
   /**

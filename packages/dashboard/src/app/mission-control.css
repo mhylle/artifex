@@ -168,5 +168,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .pane-tabs button.active { background: #eef2fb; border-color: #5a78c8; color: #33477d; font-weight: 600; }
 .tab-count { font-size: .7rem; color: #666; }
 .pane-tabs button.active .tab-count { color: #33477d; }
-.retry { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; margin: .6rem 0 0; }
-.retry .hint { font-size: .78rem; color: #666; flex: 1; min-width: 14rem; }
+.restate { margin: .8rem 0 0; border: 1px solid #e2e2e2; border-radius: 8px; padding: .8rem; }
+.restate h3 { margin: 0 0 .3rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; }
+.restate .hint { margin: 0 0 .5rem; font-size: .78rem; color: #666; }
+.restate label { display: block; font-size: .75rem; color: #666; margin-bottom: .25rem; }
+.restate textarea { width: 100%; box-sizing: border-box; padding: .45rem .55rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; font-size: .85rem; resize: vertical; }

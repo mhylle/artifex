@@ -412,10 +412,26 @@
       — the dossier says so — and the retry carries the prior blockers with it.
     -->
     @if (tree.status === 'surrendered' && can('decide')) {
-      <p class="retry">
-        <button type="button" class="primary" (click)="retryMission()">Retry with what we learned</button>
-        <span class="hint">Reopens what you asked, for editing. The new mission inherits these blockers, so it starts from them instead of rediscovering them.</span>
-      </p>
+      <section class="restate">
+        <h3>Restate and continue</h3>
+        <p class="hint">
+          These are the criteria this mission is graded against. Edit them and it continues on the
+          same trail — same mission, carrying everything it has already learned.
+        </p>
+        <label for="restated">Success criteria — one per line</label>
+        <textarea
+          id="restated"
+          rows="4"
+          [ngModel]="criteriaDraft()"
+          (ngModelChange)="restatedCriteria.set($event)"
+          [ngModelOptions]="{ standalone: true }"
+        ></textarea>
+        <p class="actions">
+          <button type="button" class="primary" [disabled]="!canRestate()" (click)="restate()">
+            Restate &amp; continue
+          </button>
+        </p>
+      </section>
     }
 
     <nav class="lenses" aria-label="lenses">

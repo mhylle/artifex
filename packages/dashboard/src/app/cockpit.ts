@@ -9,7 +9,10 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
-export type CockpitAction = 'pause' | 'resume' | 'cancel' | 'grant_budget' | 'turn_dial' | 'annotate' | 'decide';
+export type CockpitAction =
+  | 'pause' | 'resume' | 'cancel' | 'grant_budget' | 'turn_dial' | 'annotate' | 'decide'
+  /** Amend what the mission is graded against, and continue it (R41). */
+  | 'restate';
 
 export interface CockpitCommand {
   readonly missionId: string;
@@ -19,6 +22,14 @@ export interface CockpitCommand {
   readonly autonomyDial?: 'autonomous' | 'checkpointed' | 'supervised';
   readonly note?: string;
   readonly decision?: 'approve' | 'reject';
+  /**
+   * For `restate`: the criteria the mission should now be graded against.
+   *
+   * The same mission continues on the same trail — a restatement is an
+   * amendment, not a new commission. Creating a fresh mission for a reworded
+   * criterion splits one piece of work across two trails.
+   */
+  readonly acceptanceCriteria?: readonly { criterionId: string; statement: string }[];
 }
 
 /**
