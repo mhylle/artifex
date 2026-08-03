@@ -38,3 +38,33 @@ Nor is there a CJK filter. "Reject a heading containing Han characters" is the s
 The mechanism is proven — the schema carries the description, the prompt carries the question, and the channel provably fails a verdict when a flag arrives. Whether a real tier-2 reviewer *raises* the flag on corrupt output is unobserved.
 
 **What those failed attempts did establish**, and it is worth more than the failure: **the bounce loop is now the dominant failure mode on this task.** Three consecutive bounces, two re-contractings by the `Clarifier`, and no convergence — the clarity judge keeps rejecting its own rewritten contract. That is a different problem from the one being fixed here, it is reproducible, and it is the next thing to measure.
+
+---
+
+## Addendum — both halves now proven live, and the second fault
+
+The bound above ("proven by test, not live") no longer holds, and the reason it did not is itself the second fault.
+
+**The bounce loop never let the work happen.** Measured before fixing: three bounces raised **disjoint** objections, so the Clarifier was addressing each one and the judge produced a different one — `GEOGRAPHICAL_LOCATION` on a report-writing task, then "on what basis three are chosen", then "the word *unique* is subjective". Gate A already bounds this shape (one re-split, then stop, *"the alternative is an unbounded loop"*); the bounce path had no bound. Find-shape (b) again.
+
+**Rule adopted: an objection that cannot survive one clarification is not evidence about the contract.** The measured false-bounce rate is 17–58% and is *not monotonic in model size* — 9B best, 12B worst — so the ladder's own remedy of escalating a tier makes a false bounce **likelier**. The bypass is explicit, and `task.bounce_overruled` records the objection with the reason it was set aside; a judge overruled without a trace would be the system quietly deciding it knows better.
+
+Live, on the same mission that had exhausted its ladder without executing:
+
+    task.bounced → task.recontracted → agent.staffed → task.executed
+    gate_b.verdict_issued → agent.staffed → task.bounce_overruled → task.executed
+
+It worked twice and was judged twice. Two mutants, both killed: a bound that never trips, and a bypass from the first attempt.
+
+**And with the work finally reaching the reviewer, the red-flag fix proved itself:**
+
+    GATE B: fail
+      redFlags: ["The deliverable is NOT fully usable. The 'sections' part of
+                 the JSON object is truncated/incomplete."]
+      finding:  "Discarded despite technically passing … A structurally
+                 suspicious output is refused rather than accepted on its own
+                 account of itself."
+
+That exact class of output previously returned `pass, findings: [], redFlags: []`.
+
+**What is still not fixed, and was never the target.** The corruption itself — truncated sections, CJK headings — is the known structured-output runaway `8b7e9e95`, and widening the answer schema with `sections` is implicated in its reaching a field the operator reads as a title. The system now *catches* it rather than shipping it, which is the difference between a wrong answer and a wrong answer presented as a delivery. Making the model stop producing it is a separate problem.

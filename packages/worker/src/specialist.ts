@@ -74,7 +74,13 @@ export interface SpecialistWork {
 
 export type SpecialistOutcome =
   | { readonly kind: 'bounced'; readonly restatement: string; readonly ambiguities: readonly string[] }
-  | { readonly kind: 'delivered'; readonly restatement: string; readonly bundle: EvidenceBundle };
+  | {
+      readonly kind: 'delivered';
+      readonly restatement: string;
+      readonly bundle: EvidenceBundle;
+      /** Objections raised but set aside because the gate was bypassed (R36). */
+      readonly overruled?: readonly string[];
+    };
 
 export async function runSpecialist(input: {
   readonly contract: WorkerContractView;
@@ -89,6 +95,20 @@ export async function runSpecialist(input: {
   readonly consulted?: EvidenceBundle['consulted'];
   /** Why the previous attempt was rejected, carried to the work seam (R36). */
   readonly priorFindings?: readonly string[];
+  /**
+   * Do the work even if the clarity judge objects (R36).
+   *
+   * Set only after a bounce has already been answered by a clarification and
+   * the judge has come back with a DIFFERENT objection. An objection that
+   * cannot survive one rewrite is a fresh opinion, not a persistent defect, and
+   * the measured false-bounce rate is 17-58% depending on model.
+   *
+   * Explicit rather than achieved by passing a judge that always agrees: the
+   * decision to overrule belongs on the trail and in the caller, not hidden in
+   * a stub. The judge still runs, and its objection is still returned, so
+   * nothing is suppressed — only the refusal to work is.
+   */
+  readonly bypassClarityGate?: boolean;
 }): Promise<SpecialistOutcome> {
   const { contract, agentId, judge, work, bundleId, producedAt } = input;
 
@@ -106,9 +126,13 @@ export async function runSpecialist(input: {
 
   const { restatement, ambiguities } = await judge.assess({ contract });
 
-  if (ambiguities.length > 0) {
+  if (ambiguities.length > 0 && input.bypassClarityGate !== true) {
     // Bouncing does no work. "Bounce but try anyway" is just guessing with a
     // disclaimer attached, and the disclaimer is not what the parent needs.
+    //
+    // The bypass is not that. It is the caller saying this objection has
+    // already been answered once and replaced with a different one, so it is no
+    // longer evidence about the contract — see `bypassClarityGate`.
     return { kind: 'bounced', restatement, ambiguities: [...ambiguities] };
   }
 
@@ -120,6 +144,9 @@ export async function runSpecialist(input: {
   return {
     kind: 'delivered',
     restatement,
+    // Carried so the caller can record WHAT it overruled. The judge still ran
+    // and still objected; only the refusal to work was set aside.
+    ...(ambiguities.length > 0 ? { overruled: [...ambiguities] } : {}),
     bundle: {
       bundleId,
       taskId: contract.taskId,

@@ -1608,6 +1608,16 @@ export async function runMission(
        * the same sentence about the same problem one level down.
        */
       let priorFindings: readonly string[] = [];
+      /**
+       * How many times this contract has been rewritten after a bounce (R36).
+       *
+       * Gate A already bounds exactly this shape — one re-split, then stop,
+       * "the alternative is an unbounded loop". The bounce path had no bound,
+       * and a live task bounced three times on three DISJOINT objections (one
+       * of them `GEOGRAPHICAL_LOCATION`, on a report-writing task) before
+       * exhausting its ladder without ever executing.
+       */
+      let clarifications = 0;
 
       for (let attempt = 0; attempt < maxAttempts && !settled; attempt += 1) {
         if (spent >= effectiveCeiling) {
@@ -1746,7 +1756,26 @@ export async function runMission(
             priorKnowledge: context.payload,
             consulted: context.consulted,
             priorFindings,
+            // The contract has already been rewritten once with these
+            // objections in hand. A further one is a new opinion, not a
+            // persistent defect.
+            bypassClarityGate: clarifications >= 1,
           });
+
+          // A judge overruled without a trace would be the system quietly
+          // deciding it knows better. The objection stays on the trail with the
+          // reason it was set aside, so an operator reading the mission can
+          // disagree with the call.
+          if (clarifications >= 1 && outcome.kind !== 'bounced' && outcome.overruled !== undefined) {
+            record(child.taskId, 'decision', 'task.bounce_overruled', 'orchestrator', {
+              objective: child.objective,
+              ambiguities: outcome.overruled,
+              detail:
+                'The contract was already rewritten once with an earlier objection in hand, and the ' +
+                'clarity judge returned a different one. An objection that cannot survive a rewrite is ' +
+                'a fresh opinion rather than a persistent defect, so the work proceeded. Gate B still decides.',
+            });
+          }
         } catch (error) {
           // Retry the same tier first. Only a repeated failure is evidence of a
           // problem the ladder can actually remedy.
@@ -1818,6 +1847,7 @@ export async function runMission(
                   ? {}
                   : { acceptanceCriteria: [...rewritten.acceptanceCriteria] }),
               };
+              clarifications += 1;
               record(child.taskId, 'decision', 'task.recontracted', 'orchestrator', {
                 objective: child.objective, reason: 'rewritten after a bounce',
               });

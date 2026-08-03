@@ -1118,3 +1118,106 @@ describe('R36 — a retry is told why the last attempt was rejected', () => {
     for (const findings of seen) expect(findings).toEqual([]);
   });
 });
+
+/**
+ * The bounce loop is bounded (R36, defect found 2026-08-03).
+ *
+ * Measured on a live task that bounced three times and exhausted its ladder
+ * without ever executing. The three objections were DISJOINT — the Clarifier
+ * addressed each and the judge produced a different one:
+ *
+ *   1. "named algorithms" is ambiguous; GEOGRAPHICAL_LOCATION — "does not
+ *      specify where these computational work must be demonstrated"; TIME_LIMITS
+ *   2. scope of "computational algorithm"; on what basis three are selected;
+ *      how word count is verified
+ *   3. the word "unique" is subjective
+ *
+ * `GEOGRAPHICAL_LOCATION` on a report-writing task is not a specification
+ * defect. This is the documented false-bounce rate (17–58% depending on model,
+ * and NOT monotonic in model size — 9B is best, 12B worst), which means the
+ * ladder's own remedy of escalating a tier makes it likelier, not less.
+ *
+ * Gate A already bounds exactly this: one re-split, then stop, because "the
+ * alternative is an unbounded loop". The bounce path had no such bound — the
+ * same rule at one site and not its sibling, find-shape (b).
+ *
+ * The rule adopted: **an objection that cannot survive one clarification is not
+ * evidence about the contract.** The Clarifier had the objections in hand and
+ * rewrote the spec; a fresh, unrelated complaint is a new opinion, not a
+ * persistent defect. Work proceeds — and Gate B, which is untouched, remains
+ * the gate that decides whether the output is any good.
+ */
+describe('R36 — a bounce that survives clarification stops blocking the work', () => {
+  function alwaysBounces(): { seams: MissionSeams; executed: number[] } {
+    const base = seams();
+    const executed: number[] = [];
+    let assessments = 0;
+    return {
+      executed,
+      seams: {
+        ...base,
+        clarityJudge: {
+          async assess() {
+            assessments += 1;
+            // A different objection every time, exactly as measured.
+            return { restatement: 'r', ambiguities: [`objection number ${assessments}`] };
+          },
+        },
+        clarifier: {
+          async clarify({ contract }) {
+            return { objective: `${contract.objective} (clarified)`, acceptanceCriteria: null };
+          },
+        },
+        work: {
+          async execute() {
+            executed.push(1);
+            return { deliverable: { answer: 'x' }, actions: [], consulted: [], assumptions: [], effortSpent: 2 };
+          },
+        },
+      } as MissionSeams,
+    };
+  }
+
+  it('does the work rather than bouncing for ever', async () => {
+    const { seams: s, executed } = alwaysBounces();
+
+    const result = await runMission(mission(), s, { now: () => AT });
+
+    expect(executed.length, 'the task never executed — it bounced until the ladder ran out').toBeGreaterThan(0);
+    expect(result.trail.some((e) => e.type === 'task.executed')).toBe(true);
+  });
+
+  it('records that it proceeded, and why — the objection is not silently dropped', async () => {
+    // A judge overruled without a trace would be the system quietly deciding it
+    // knows better. The objection stays on the trail with the reason it was
+    // set aside, so an operator reading the mission can disagree.
+    const { seams: s } = alwaysBounces();
+
+    const result = await runMission(mission(), s, { now: () => AT });
+
+    const overruled = result.trail.find((e) => e.type === 'task.bounce_overruled');
+    expect(overruled, 'the work proceeded past a bounce with nothing on the trail saying so').toBeDefined();
+    expect(JSON.stringify(overruled?.payload)).toMatch(/objection number/);
+  });
+
+  it('DISTRACTOR: the FIRST bounce still clarifies rather than being overruled', async () => {
+    // The bounce is doing its job the first time: the spec really may be
+    // unclear, and rewriting it is the cheap fix. Only a bounce that survives
+    // that rewrite is treated as noise.
+    const { seams: s } = alwaysBounces();
+
+    const result = await runMission(mission(), s, { now: () => AT });
+
+    const order = result.trail.map((e) => e.type);
+    expect(order.indexOf('task.recontracted'), 'the contract was never clarified at all').toBeGreaterThan(-1);
+    expect(order.indexOf('task.recontracted')).toBeLessThan(order.indexOf('task.bounce_overruled'));
+  });
+
+  it('DISTRACTOR: a task that never bounces is untouched', async () => {
+    const result = await runMission(mission(), seams(), { now: () => AT });
+
+    expect(result.trail.some((e) => e.type === 'task.bounced')).toBe(false);
+    expect(result.trail.some((e) => e.type === 'task.bounce_overruled')).toBe(false);
+    expect(result.outcome).toBe('delivered');
+  });
+});
