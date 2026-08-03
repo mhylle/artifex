@@ -53,7 +53,18 @@ interface TaskFacts {
  */
 export function casesFromTrail(
   trail: readonly TrailEvent[],
-  options: { readonly sealedSoFar: ReadonlyMap<string, number> },
+  options: {
+    readonly sealedSoFar: ReadonlyMap<string, number>;
+    /**
+     * The mission's own contract, for a mission the gate kept WHOLE (R31).
+     *
+     * Passed in rather than read off the trail because `mission.intake_accepted`
+     * is recorded by the CONTROL PLANE — the worker never appends it, so it is
+     * on the ledger and absent from the trail this walks. A first fix read it
+     * from the events, passed its tests, and banked nothing on a live mission.
+     */
+    readonly missionContract?: unknown;
+  },
 ): BenchCaseInput[] {
   const facts = new Map<string, TaskFacts>();
   const order: string[] = [];
@@ -69,6 +80,22 @@ export function casesFromTrail(
   for (const event of trail) {
     if (event.taskId === null) continue;
 
+    /**
+     * A mission kept WHOLE never contracts a child — it executes at the mission
+     * task, whose contract is on the intake event (R31). This producer was
+     * written when every mission decomposed, so a kept-whole mission banked
+     * nothing and the sealed bench stayed empty: the same shape as defect
+     * `dd2e9d18`, where a projection knew only `mission.folded`.
+     *
+     * It matters more than one missing row. The bench is the ground truth the
+     * science loop validates candidates against, petitions are evaluated on,
+     * and reviewer calibration draws its probes from — so an empty bench
+     * starves the whole learning half of the system.
+     *
+     * Recorded as a fallback, never an override: a child task that carries its
+     * own contract keeps it, or a child deliverable would be banked against the
+     * mission's criteria and the pair would grade the wrong thing.
+     */
     if (event.type === 'task.contracted') {
       const fact = factsFor(event.taskId);
       fact.contract = event.payload['contract'];
@@ -112,8 +139,18 @@ export function casesFromTrail(
   for (const taskId of order) {
     const fact = facts.get(taskId)!;
     if (fact.passed !== true) continue;
-    if (fact.contract === undefined || fact.deliverable === undefined) continue;
+    if (fact.deliverable === undefined) continue;
     if (fact.verdictEventId === undefined) continue;
+
+    // A mission kept whole never contracts a child: it executes at the mission
+    // task, whose contract came from intake. Without this it banked nothing,
+    // and the sealed bench is the ground truth the science loop validates
+    // candidates against, petitions are evaluated on, and reviewer calibration
+    // draws its probes from — an empty bench starves the whole learning half.
+    // A fallback, never an override: a child keeps its own contract, or a child
+    // deliverable would be graded against the mission's criteria.
+    const contract = fact.contract ?? options.missionContract;
+    if (contract === undefined) continue;
 
     const capability = fact.capability
       ?? (fact.rawCategory === undefined ? undefined : capabilityOf(fact.rawCategory));
@@ -134,7 +171,7 @@ export function casesFromTrail(
       sourceTaskId: taskId,
       sourceMissionId: trail[0]?.missionId ?? '',
       capability,
-      contract: fact.contract,
+      contract,
       // The contract's own inputs, so a replay starts from what the task was
       // actually given rather than from whatever the replayer chooses.
       inputs: (fact.contract as { inputs?: unknown } | undefined)?.inputs ?? {},

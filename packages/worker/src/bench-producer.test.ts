@@ -167,3 +167,71 @@ describe('c1b3ae71 — verified tasks become replay bench cases', () => {
     expect(casesFromTrail(trail as never, { sealedSoFar: new Map() })[0]!.capability).toBe('answering');
   });
 });
+
+/**
+ * A mission kept WHOLE can bank a bench case (R25, defect found 2026-08-03).
+ *
+ * The bench was empty after a delivered mission, and the owner's question about
+ * the learning loop is why that matters: the sealed bench is the ground truth
+ * the science loop validates candidates against, petitions are evaluated on,
+ * and reviewer calibration probes come from. Empty bench, starved learning.
+ *
+ * The cause is the shape defect `dd2e9d18` had: this producer was written when
+ * every mission decomposed, so it reads the contract off `task.contracted` —
+ * and a mission the decompose-or-delegate gate keeps whole never contracts a
+ * child. It executes at the mission task, whose contract is on
+ * `mission.intake_accepted`. Measured live: 1 delivered mission, 0 bench cases.
+ */
+describe('a kept-whole mission banks its case too', () => {
+  const MISSION = 'm-1';
+  const contract = { taskId: MISSION, objective: 'Explain it.', acceptanceCriteria: [] };
+
+  /**
+   * Exactly what the worker's own trail carries — and notably NOT
+   * `mission.intake_accepted`, which the API records and the worker never
+   * appends. The first version of this fixture included it, the test passed,
+   * and the live mission banked nothing: a fixture supplying an event
+   * production does not produce proves only that the fixture is generous.
+   */
+  const keptWholeTrail = [
+    { eventId: 'e2', taskId: MISSION, type: 'agent.staffed', payload: { capability: 'explaining' } },
+    { eventId: 'e3', taskId: MISSION, type: 'task.executed', payload: { deliverable: { answer: 'Because.' } } },
+    { eventId: 'e4', taskId: MISSION, type: 'gate_b.verdict_issued', payload: { outcome: 'pass' } },
+  ];
+
+  it('banks the case using the mission contract it was handed', () => {
+    const cases = casesFromTrail(keptWholeTrail as never, { sealedSoFar: new Map(), missionContract: contract });
+
+    expect(cases, 'a delivered kept-whole mission banked nothing — the bench starves').toHaveLength(1);
+    expect(cases[0]?.capability).toBe('explaining');
+    expect(cases[0]?.contract).toEqual(contract);
+  });
+
+  it('DISTRACTOR: a kept-whole mission that FAILED review banks nothing', () => {
+    // The bench is verified ground truth. Banking a failure would make every
+    // candidate that reproduces it look correct.
+    const failed = keptWholeTrail.map((e) =>
+      e.type === 'gate_b.verdict_issued' ? { ...e, payload: { outcome: 'fail' } } : e,
+    );
+
+    expect(casesFromTrail(failed as never, { sealedSoFar: new Map(), missionContract: contract })).toHaveLength(0);
+  });
+
+  it('DISTRACTOR: a CHILD task still uses its own contract, not the mission intake', () => {
+    // The fallback must not overwrite a real per-task contract with the
+    // mission's — a child is graded on its own criteria, and banking the
+    // mission contract against a child deliverable would pair the wrong two.
+    const childContract = { taskId: 't-a', objective: 'Part A', acceptanceCriteria: [] };
+    const decomposed = [
+      { eventId: 'e2', taskId: 't-a', type: 'task.contracted', payload: { contract: childContract, category: 'writing' } },
+      { eventId: 'e3', taskId: 't-a', type: 'agent.staffed', payload: { capability: 'writing' } },
+      { eventId: 'e4', taskId: 't-a', type: 'task.executed', payload: { deliverable: { answer: 'A.' } } },
+      { eventId: 'e5', taskId: 't-a', type: 'gate_b.verdict_issued', payload: { outcome: 'pass' } },
+    ];
+
+    const cases = casesFromTrail(decomposed as never, { sealedSoFar: new Map(), missionContract: contract });
+
+    expect(cases).toHaveLength(1);
+    expect(cases[0]?.contract, 'a child was banked against the mission contract').toEqual(childContract);
+  });
+});

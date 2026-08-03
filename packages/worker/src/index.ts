@@ -242,7 +242,9 @@ export async function main(): Promise<void> {
         for (const existing of await bench.list()) {
           banked.set(existing.capability, (banked.get(existing.capability) ?? 0) + 1);
         }
-        const cases = casesFromTrail(result.trail, { sealedSoFar: banked });
+        // The mission contract travels with the job; `mission.intake_accepted`
+        // is the control plane's event and never reaches the worker's trail.
+        const cases = casesFromTrail(result.trail, { sealedSoFar: banked, missionContract: contract });
         for (const bankable of cases) await bench.record(bankable);
         if (cases.length > 0) {
           console.log(`  banked ${cases.length} bench case(s): ${cases.map((c) => c.slice).join(', ')}`);
