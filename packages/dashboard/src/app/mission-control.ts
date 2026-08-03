@@ -15,6 +15,7 @@ import { CanvasNode } from './canvas-node';
 import { Cockpit } from './cockpit';
 import type { CockpitAction } from './cockpit';
 import { readableDeliverable } from './deliverable';
+import { buildMissionEvidence } from './mission-evidence';
 import { buildRequesterView } from './requester-view';
 import { answerNote, partitionAttention } from './attention-queue';
 import { Fleet } from './fleet';
@@ -85,6 +86,17 @@ export class MissionControl implements OnInit {
    * was delivered."
    */
   readonly deliverableText = computed(() => readableDeliverable(this.visibleTree()?.deliverable));
+
+  /**
+   * What the mission did, beside what it produced (R40).
+   *
+   * A deliverable on its own is a claim. Effort against the commissioned
+   * budget, the assumptions the worker declared, how many tools it ran and
+   * sources it consulted, and the reviewer's verdict are what let a reader tell
+   * a thorough answer from a thin one — all recorded, none of it rendered until
+   * the owner asked whether anyone could do anything real with the output.
+   */
+  readonly evidence = computed(() => buildMissionEvidence(this.visibleEvents()));
 
   readonly restatedCriteria = signal<string | null>(null);
 

@@ -52,3 +52,46 @@ describe('readableDeliverable', () => {
     expect(out).toContain('answer');
   });
 });
+
+/**
+ * A deliverable that is a document (R37).
+ *
+ * The worker can now return `sections` — one per thing the criteria asked for.
+ * Rendering that as raw JSON would make the report unreadable in exactly the
+ * way the owner complained about: "we just have a short paragraph, that really
+ * does not give us anything usable."
+ */
+describe('readableDeliverable — documents', () => {
+  const REPORT = {
+    answer: 'Three algorithms for stem cell research.',
+    sections: [
+      { heading: 'Induced Pluripotent Stem Cells', body: 'Yamanaka factors reprogram somatic cells.' },
+      { heading: 'CRISPR-Cas9', body: 'Guide RNA directs Cas9 to a locus.' },
+    ],
+  };
+
+  it('renders the summary and every section as readable prose', () => {
+    const out = readableDeliverable(REPORT);
+
+    expect(out).toContain('Three algorithms for stem cell research.');
+    expect(out).toContain('Induced Pluripotent Stem Cells');
+    expect(out).toContain('Yamanaka factors reprogram somatic cells.');
+    expect(out).toContain('CRISPR-Cas9');
+    expect(out).toContain('Guide RNA directs Cas9 to a locus.');
+  });
+
+  it('DISTRACTOR: it is prose, not JSON — no braces or quoted keys survive', () => {
+    // The failure being fixed: a report rendered as `{"sections":[{"heading":…`
+    // is technically complete and practically unreadable.
+    const out = readableDeliverable(REPORT);
+
+    expect(out).not.toContain('"heading"');
+    expect(out).not.toContain('{');
+  });
+
+  it('DISTRACTOR: an empty sections array renders as the plain answer', () => {
+    // A model that returns `sections: []` must not produce a document with no
+    // content and a dangling summary.
+    expect(readableDeliverable({ answer: 'Just this.', sections: [] })).toBe('Just this.');
+  });
+});

@@ -177,3 +177,21 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .delivered { margin: .8rem 0 0; border: 1px solid #cfe6d8; background: #f4fbf6; border-radius: 8px; padding: .8rem; }
 .delivered h3 { margin: 0 0 .4rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: #1f6b40; }
 .delivered pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: .9rem; line-height: 1.45; }
+/* How the answer was produced — the context that makes a deliverable judgeable. */
+.evidence { margin: .8rem 0 0; border: 1px solid #e2e2e2; border-radius: 8px; padding: .8rem; }
+.evidence h3 { margin: 0 0 .5rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: #33477d; }
+.evidence h4 { margin: .7rem 0 .3rem; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #666; }
+.evidence dl { display: flex; flex-wrap: wrap; gap: 1.2rem; margin: 0; }
+.evidence dt { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #888; }
+.evidence dd { margin: .1rem 0 0; font-size: 1.05rem; font-weight: 600; color: #33477d; }
+/* A zero here is a finding, not missing data: no tools, no sources, or a
+   fraction of the budget is exactly what distinguishes thin work. */
+.evidence dd.thin { color: #a8700f; }
+.evidence dd .of { font-size: .8rem; font-weight: 400; color: #888; }
+.evidence .assumptions, .evidence .findings { margin: 0; padding-left: 1.1rem; font-size: .85rem; line-height: 1.5; }
+.evidence .findings { color: #9c2b23; }
+.evidence .hint { margin: 0; font-size: .8rem; color: #888; }
+/* Work Gate B refused: shown, because it cannot be judged unseen — but never
+   dressed up as an accepted result. */
+.delivered.rejected { border-color: #e6d7b8; background: #fdf9f0; }
+.delivered.rejected h3 { color: #8a5a10; }

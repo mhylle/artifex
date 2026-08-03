@@ -174,7 +174,13 @@ describe('R40 AC-1 — the real work seam asks the worker what it assumed', () =
     await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
 
     const answerSchema = gen.schemas.find((sc: unknown) => (sc as { $id?: string }).$id === ANSWER);
-    expect(propsOf(answerSchema)).toEqual(['answer']);
+    // Asserted as the PROPERTY it protects rather than by counting fields.
+    // This read `toEqual(['answer'])`, which broke the day the answer schema
+    // gained `sections` so a report could be expressed at all — and the thing
+    // it exists to prevent was never the field count, it was assumptions
+    // riding along on the deliverable probe.
+    expect(propsOf(answerSchema)).not.toContain('assumptions');
+    expect(propsOf(answerSchema)).toContain('answer');
   });
 
   it('DISTRACTOR: a model that omits the field is tolerated, not crashed on', async () => {
@@ -250,5 +256,86 @@ describe('effortSpent is measured, not assumed', () => {
     const second = await seams.work.execute({ contract: view(), restatement: 'r', ...ACTOR });
 
     expect(second.effortSpent).toBe(first.effortSpent);
+  });
+});
+
+/**
+ * The deliverable can hold a document, not only a paragraph.
+ *
+ * Found by the owner, on a mission whose criterion asked for "3 different
+ * algorithms … and a report describing them". What came back was one paragraph
+ * of about 1,000 characters, and it had spent **2 of its 20 effort units**.
+ * Their question was the right one: "would anyone be able to do anything real
+ * with the output of the system?"
+ *
+ * The cause was structural, not a bad model day. The worker was handed
+ * `{ answer: string }` — a schema with one string field cannot hold a report,
+ * so no prompt could have produced one. Find-shape (f): a seam whose shape
+ * cannot work.
+ *
+ * `sections` is OPTIONAL, deliberately. A tier-1 model that ignores it still
+ * returns a valid answer, and a one-line question still gets a one-line reply
+ * rather than a document with headings bolted onto it.
+ */
+describe('the work seam can produce a structured document', () => {
+  it('carries sections through when the model returns them', async () => {
+    const gen = generatorReturning({
+      [ANSWER]: {
+        answer: 'Three algorithms for stem cell research.',
+        sections: [
+          { heading: 'Induced Pluripotent Stem Cells', body: 'Yamanaka factors reprogram somatic cells…' },
+          { heading: 'CRISPR-Cas9 Guided Differentiation', body: 'Guide RNA directs Cas9 to a locus…' },
+        ],
+      },
+      [ASSUMPTIONS]: { assumptions: [] },
+    });
+
+    const result = await createMissionSeams(gen, MODELS).work!.execute({ contract: view(), ...ACTOR });
+
+    const deliverable = result.deliverable as { answer: string; sections?: { heading: string; body: string }[] };
+    expect(deliverable.sections, 'the document the model produced was dropped').toHaveLength(2);
+    expect(deliverable.sections?.[0]?.heading).toBe('Induced Pluripotent Stem Cells');
+    expect(deliverable.answer).toBe('Three algorithms for stem cell research.');
+  });
+
+  it('offers sections in the schema, so a report is expressible at all', () => {
+    // Asserting the SCHEMA handed to the model, not the prompt wording: a field
+    // the model is not given is a thing it cannot produce, however the prompt is
+    // phrased. This is the check that would have caught the original gap.
+    const gen = generatorReturning({ [ANSWER]: { answer: 'x' }, [ASSUMPTIONS]: { assumptions: [] } });
+
+    return createMissionSeams(gen, MODELS).work!.execute({ contract: view(), ...ACTOR }).then(() => {
+      const schema = gen.schemas.find((s) => (s as { $id?: string }).$id === ANSWER) as {
+        properties: Record<string, unknown>;
+        required?: string[];
+      };
+      expect(Object.keys(schema.properties)).toContain('sections');
+      // Optional: a model that ignores it must still satisfy the schema, and a
+      // short question must not be forced into a document.
+      expect(schema.required ?? []).not.toContain('sections');
+    });
+  });
+
+  it('DISTRACTOR: a plain answer with no sections is unchanged', async () => {
+    // The additive half. Most tasks are a sentence, and this must not turn them
+    // into reports with one empty heading.
+    const gen = generatorReturning({ [ANSWER]: { answer: 'It rings.' }, [ASSUMPTIONS]: { assumptions: [] } });
+
+    const result = await createMissionSeams(gen, MODELS).work!.execute({ contract: view(), ...ACTOR });
+
+    const deliverable = result.deliverable as { answer: string; sections?: unknown };
+    expect(deliverable.answer).toBe('It rings.');
+    expect(deliverable.sections).toBeUndefined();
+  });
+
+  it('tells the worker to match the depth to what the criteria ask for', () => {
+    // Prompt wording asserted deliberately, and said so: the schema is already
+    // right by the test above, so whether a report actually gets written now
+    // lives in the words. Without this the model has a field it never uses.
+    const gen = generatorReturning({ [ANSWER]: { answer: 'x' }, [ASSUMPTIONS]: { assumptions: [] } });
+
+    return createMissionSeams(gen, MODELS).work!.execute({ contract: view(), ...ACTOR }).then(() => {
+      expect(promptFor(gen, ANSWER)).toMatch(/section/i);
+    });
   });
 });

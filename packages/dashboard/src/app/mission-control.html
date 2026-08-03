@@ -411,10 +411,65 @@
       Nothing rendered a deliverable at all until an owner asked where theirs was.
     -->
     @if (deliverableText(); as answer) {
-      <section class="delivered">
-        <h3>Delivered</h3>
+      <section class="delivered" [class.rejected]="tree.status !== 'delivered'">
+        <!--
+          Gate B refuses work that does not meet the criteria, and the mission
+          still surrenders holding it. Showing it is right: an operator cannot
+          judge what they cannot see. Calling it delivered is not.
+        -->
+        <h3>{{ tree.status === 'delivered' ? 'Delivered' : 'Produced, but not accepted' }}</h3>
         <pre>{{ answer }}</pre>
       </section>
+    }
+
+    <!--
+      How it was produced. A deliverable on its own is a claim; this is what
+      lets a reader judge it without opening the ledger explorer. Shown only
+      once something has actually executed — zeroes on a mission that never ran
+      would read as "it did nothing", a different claim from "not yet".
+    -->
+    @if (evidence(); as ev) {
+      @if (ev.ran) {
+        <section class="evidence">
+          <h3>How it was produced</h3>
+          <dl>
+            <div>
+              <dt>Effort</dt>
+              <dd [class.thin]="ev.ceiling && ev.effortSpent / ev.ceiling < 0.25">
+                {{ ev.effortSpent }}<span class="of"> of {{ ev.ceiling ?? '—' }}</span>
+              </dd>
+            </div>
+            <div>
+              <dt>Tools run</dt>
+              <dd [class.thin]="ev.toolsUsed === 0">{{ ev.toolsUsed }}</dd>
+            </div>
+            <div>
+              <dt>Sources consulted</dt>
+              <dd [class.thin]="ev.sourcesConsulted === 0">{{ ev.sourcesConsulted }}</dd>
+            </div>
+            <div>
+              <dt>Review</dt>
+              <dd>{{ ev.verdict ?? 'not yet reviewed' }}</dd>
+            </div>
+          </dl>
+
+          @if (ev.findings.length) {
+            <h4>What the reviewer found</h4>
+            <ul class="findings">
+              @for (f of ev.findings; track f) { <li>{{ f }}</li> }
+            </ul>
+          }
+
+          <h4>What it assumed</h4>
+          @if (ev.assumptions.length) {
+            <ul class="assumptions">
+              @for (a of ev.assumptions; track a) { <li>{{ a }}</li> }
+            </ul>
+          } @else {
+            <p class="hint">Nothing declared. Either the work rested on nothing unstated, or nobody asked.</p>
+          }
+        </section>
+      }
     }
 
     <!--

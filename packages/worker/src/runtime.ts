@@ -44,8 +44,47 @@ import { DecomposeOrDelegateSchema, createModelReconciler, createStepwisePlanner
 import type { StructuredGenerator } from './planner.js';
 import type { MissionSeams } from './mission-loop.js';
 
+/**
+ * What a worker submits.
+ *
+ * `sections` exists because a single string field cannot hold a report, and no
+ * prompt can produce what the schema cannot express — find-shape (f), a seam
+ * whose shape cannot work. Found live on a mission whose criterion asked for
+ * "3 different algorithms … and a report describing them" and which returned
+ * one paragraph, having spent 2 of its 20 effort units.
+ *
+ * OPTIONAL on purpose, for two reasons. A tier-1 model that ignores it still
+ * returns a valid answer — the documented JSON-leakage risk on wider schemas
+ * (see `AssumptionsSchema`) is real, and this must degrade to today's behaviour
+ * rather than fail. And most tasks are one sentence: forcing a document with
+ * headings onto "why does ice float" would be worse than the gap it fixes.
+ *
+ * `answer` stays required and stays the summary, so every existing reader — the
+ * reviewer, the fold-up, the requester view — keeps working unchanged.
+ */
 const AnswerSchema = Type.Object(
-  { answer: Type.String({ minLength: 1 }) },
+  {
+    answer: Type.String({
+      minLength: 1,
+      description:
+        'The answer itself when the task is small, or a summary of the whole when sections are used.',
+    }),
+    sections: Type.Optional(
+      Type.Array(
+        Type.Object(
+          {
+            heading: Type.String({ minLength: 1, description: 'What this part of the work covers.' }),
+            body: Type.String({ minLength: 1, description: 'The full content of this part, written out.' }),
+          },
+          { additionalProperties: false },
+        ),
+        {
+          description:
+            'Use one section per distinct thing the criteria ask for. Omit entirely when the task is answerable in a paragraph.',
+        },
+      ),
+    ),
+  },
   { $id: 'WorkerAnswer', additionalProperties: false },
 );
 
@@ -997,10 +1036,19 @@ export function createMissionSeams(
         const out = (await spend(gen(models.worker, AnswerSchema, [
           'Answer the task so that EVERY acceptance criterion below is satisfied.',
           '',
+          // The depth is the criteria's to decide, not the model's mood. A
+          // criterion asking for several things, or for a report, is not
+          // satisfied by a paragraph mentioning them — which is exactly what
+          // came back when the schema had nowhere else to put the work.
+          'Match the depth of your answer to what the criteria ask for. When they call for',
+          'more than one thing, or for anything a reader would expect to be written out in',
+          'full, put each part in its own section with a heading and write it out there.',
+          'Use the answer field for a short summary when you do.',
+          '',
           `TASK: ${contract.objective}`,
           'ACCEPTANCE CRITERIA (you are graded on exactly these):',
           ...contract.acceptanceCriteria.map((c) => `  - ${c.statement}`),
-        ].join('\n')))) as { answer: string };
+        ].join('\n')))) as { answer: string; sections?: { heading: string; body: string }[] };
 
         // ---- the agent may now ACT on its own answer (R13 AC-0) -------------
         // Offered only what this contract was actually granted. The broker would
@@ -1122,7 +1170,10 @@ export function createMissionSeams(
         }
 
         return {
-          deliverable: { answer: revised },
+          // Sections travel with the answer. Dropping them here would make the
+          // schema field decorative — the model would produce a report and the
+          // ledger would record the summary alone.
+          deliverable: { answer: revised, ...(out.sections === undefined ? {} : { sections: out.sections }) },
           // The structured record the broker produced, not a sentence about it
           // (R13 AC-2). This was a hardcoded `[]`, which is why `reviewer.ts:450`
           // — which fails a task that carried entitlements and produced no

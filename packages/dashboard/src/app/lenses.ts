@@ -10,6 +10,7 @@
  * would have no way to tell which one was lying.
  */
 import type { LedgerEventView } from './mission-tree';
+import { sinceLastRestatement } from './current-plan';
 
 /** Events as they arrive, plus the timestamp the lenses need. */
 export type TimedEvent = LedgerEventView & { readonly occurredAt?: string };
@@ -41,7 +42,11 @@ export interface WorkforceAgent {
 
 /** Every specialist the trail staffed, with what it holds and how it is doing. */
 export function buildWorkforce(events: readonly TimedEvent[]): WorkforceAgent[] {
-  const ordered = [...events].sort((a, b) => a.seq - b.seq);
+  // Only the plan the mission is actually running (R41). A restatement
+  // replaces the specification, so anything contracted before it was
+  // planned against criteria that no longer exist — this lens drew that
+  // rejected tree over a mission that had since delivered something else.
+  const ordered = [...sinceLastRestatement(events)].sort((a, b) => a.seq - b.seq);
   const category = new Map<string, string | null>();
   const objective = new Map<string, string>();
   const verdicts = new Map<string, { passed: number; total: number }>();
@@ -110,7 +115,11 @@ export interface TimelineLane {
 
 /** One swimlane per task: when it waited, ran, was reviewed and escalated. */
 export function buildTimeline(events: readonly TimedEvent[]): TimelineLane[] {
-  const ordered = [...events].sort((a, b) => a.seq - b.seq);
+  // Only the plan the mission is actually running (R41). A restatement
+  // replaces the specification, so anything contracted before it was
+  // planned against criteria that no longer exist — this lens drew that
+  // rejected tree over a mission that had since delivered something else.
+  const ordered = [...sinceLastRestatement(events)].sort((a, b) => a.seq - b.seq);
   const lanes = new Map<string, TimelineEntry[]>();
   const objective = new Map<string, string>();
   const contractedAt = new Map<string, number>();

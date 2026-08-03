@@ -1538,3 +1538,51 @@ describe('MissionControl — showing what was delivered', () => {
     expect(fixture.nativeElement.querySelector('.delivered')).toBeFalsy();
   });
 });
+
+/**
+ * Rejected work is shown, and is not called delivered.
+ *
+ * Showing what a surrendered mission produced is right — the owner needs to see
+ * the work to judge it, and hiding it was the original complaint. Labelling it
+ * "Delivered" is not: Gate B refused that output, and a heading that says
+ * otherwise tells the operator the opposite of what the ledger records.
+ */
+describe('MissionControl — work that was produced but not accepted', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let feed: LedgerFeed;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    feed = TestBed.inject(LedgerFeed);
+  });
+
+  it('shows what a SURRENDERED mission produced, under an honest heading', () => {
+    feed.events.set([
+      ev(1, 'mission.started', MISSION, { objective: 'Three algorithms' }),
+      ev(2, 'task.executed', MISSION, { deliverable: { answer: 'A partial attempt.' } }),
+      ev(3, 'gate_b.verdict_issued', MISSION, { outcome: 'fail', findings: [] }),
+      ev(4, 'mission.surrendered', MISSION, { blockers: ['not three algorithms'] }),
+    ]);
+    fixture.detectChanges();
+
+    const panel = fixture.nativeElement.querySelector('.delivered');
+    expect(panel, 'the work was hidden — the operator cannot judge what they cannot see').toBeTruthy();
+    expect(panel.textContent).toContain('A partial attempt.');
+    expect(panel.querySelector('h3')?.textContent, 'rejected work was labelled as delivered')
+      .not.toContain('Delivered');
+  });
+
+  it('DISTRACTOR: a genuinely delivered mission still says Delivered', () => {
+    feed.events.set([
+      ev(1, 'mission.started', MISSION, { objective: 'Three algorithms' }),
+      ev(2, 'mission.delivered', MISSION, { deliverable: { answer: 'The real answer.' } }),
+    ]);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.delivered h3')?.textContent).toContain('Delivered');
+  });
+});
