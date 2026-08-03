@@ -204,7 +204,27 @@ const CompletionSchema = Type.Object(
       ),
       { minItems: 1 },
     ),
-    redFlags: Type.Array(Type.String()),
+    /**
+     * Output that is unusable whatever the criteria say (defect `0ecbf103`).
+     *
+     * This was `Type.Array(Type.String())` — no description — and the prompt
+     * asked only whether each criterion was met. A live mission then delivered
+     * three sections of 200+ words under the headings `版枕`, `清路`, `虎`, and
+     * Gate B returned `pass, findings: [], redFlags: []`. By a literal reading
+     * the criteria WERE met: three sections, each over the word count.
+     *
+     * The channel was live the whole time — `reviewer.ts` fails the verdict on
+     * any flag, "refused rather than accepted on its own account of itself" —
+     * so an outcome-affecting field the model could not see was a gate that
+     * could not close. Find-shape (j): a schema field with no description.
+     */
+    redFlags: Type.Array(Type.String(), {
+      description:
+        'Reasons this deliverable is unusable regardless of the criteria: text that is garbled, ' +
+        'corrupted or in the wrong language, a heading unrelated to what follows it, placeholder ' +
+        'or truncated content, or an answer that only appears to address the task. Quote the part ' +
+        'that prompted each one. Empty when the work is sound.',
+    }),
   },
   { $id: 'CompletionAssessment', additionalProperties: false },
 );
@@ -1394,6 +1414,17 @@ export function createMissionSeams(
         const out = (await gen(models.evaluator, CompletionSchema, [
           'Judge whether the delivered work meets EACH acceptance criterion.',
           'Assess every one, and use only the ids given.',
+          '',
+          // The second question, which this prompt never asked. Meeting a word
+          // count is not the same as being readable, and a reviewer told only
+          // to check criteria will pass corrupted output that satisfies them
+          // literally — which is exactly what happened.
+          'Then, separately: is this deliverable USABLE at all? Raise a red flag for text that is',
+          'garbled, corrupt or in the wrong language, a heading unrelated to what follows it,',
+          'placeholder or truncated content, or an answer that only appears to address the task.',
+          'Quote what prompted each flag. A deliverable can satisfy every criterion word by word',
+          'and still be unusable; say so when it is.',
+          '',
           'CRITERIA:',
           ...contract.acceptanceCriteria.map((c) => `  ${c.criterionId}: ${c.statement}`),
           `DELIVERABLE: ${JSON.stringify(bundle.deliverable)}`,

@@ -409,3 +409,74 @@ describe('the work seam is told why the previous attempt failed', () => {
     expect(promptFor(gen, ANSWER)).not.toMatch(/previous attempt/i);
   });
 });
+
+/**
+ * The completion judge is TOLD what a red flag is (defect `0ecbf103`).
+ *
+ * A live mission delivered three sections of 200+ words under the headings
+ * `版枕`, `清路`, `虎`, with bodies describing wet-lab protocols against a
+ * criterion demanding computational algorithms — and Gate B returned
+ * `outcome: pass, findings: [], redFlags: []`. Twice.
+ *
+ * The cause is find-shape (j): `redFlags` was `Type.Array(Type.String())` with
+ * no description, and the prompt asked only whether each criterion was met. The
+ * model was never told the field existed or what belonged in it, so it answered
+ * the one question it was asked — and by a literal reading the criteria WERE
+ * met: three sections, each over the word count.
+ *
+ * The channel was live all along. `reviewer.ts` fails the verdict when
+ * `[...redFlags, ...intent.redFlags]` is non-empty: "a structurally suspicious
+ * output is refused rather than accepted on its own account of itself." An
+ * outcome-affecting field the model cannot see is a gate that cannot close.
+ *
+ * Asserting the SCHEMA, per this project's rule: a field the model is given is
+ * a judgement it will make, and one it is not given is a judgement it cannot.
+ */
+describe('the completion judge can report a corrupt deliverable', () => {
+  function schemaFor(gen: { schemas: unknown[] }, id: string): {
+    properties: Record<string, { description?: string }>;
+  } {
+    return gen.schemas.find((s) => (s as { $id?: string }).$id === id) as never;
+  }
+
+  const bundle = {
+    bundleId: 'b-1', taskId: 't-1', agentId: 'a-1',
+    deliverable: { answer: 'x' }, actions: [], consulted: [], assumptions: [],
+    reflection: null, effortSpent: 2, producedAt: '2026-08-03T09:00:00.000Z',
+  };
+
+  it('describes redFlags, so the model knows the field exists and what it is for', async () => {
+    const gen = generatorReturning({ CompletionAssessment: { criteria: [], redFlags: [] } });
+
+    await createMissionSeams(gen, MODELS).completionJudge.assess({ contract: view() as never, bundle: bundle as never });
+
+    const schema = schemaFor(gen, 'CompletionAssessment');
+    const described = schema.properties['redFlags']?.description ?? '';
+    expect(described, 'redFlags is handed to the model with no description — it cannot know what to put there')
+      .not.toBe('');
+  });
+
+  it('tells the reviewer that unusable output is refused however the criteria read', async () => {
+    // Prompt wording asserted deliberately, and said so: the schema is right
+    // once the field is described, so whether a corrupt deliverable is actually
+    // caught now lives in the words. Without them the model has a field it
+    // never uses — which is the state that let `版枕` through.
+    const gen = generatorReturning({ CompletionAssessment: { criteria: [], redFlags: [] } });
+
+    await createMissionSeams(gen, MODELS).completionJudge.assess({ contract: view() as never, bundle: bundle as never });
+
+    const prompt = promptFor(gen, 'CompletionAssessment');
+    expect(prompt, 'the reviewer was never told to flag output that is unusable regardless of the criteria')
+      .toMatch(/unusable|garbled|corrupt|unreadable/i);
+  });
+
+  it('DISTRACTOR: it still asks about every criterion — flagging does not replace grading', async () => {
+    // The gate's first job is the criteria. A prompt that talked only about
+    // corruption would trade one blind spot for another.
+    const gen = generatorReturning({ CompletionAssessment: { criteria: [], redFlags: [] } });
+
+    await createMissionSeams(gen, MODELS).completionJudge.assess({ contract: view() as never, bundle: bundle as never });
+
+    expect(promptFor(gen, 'CompletionAssessment')).toMatch(/acceptance criterion|EACH acceptance/i);
+  });
+});
