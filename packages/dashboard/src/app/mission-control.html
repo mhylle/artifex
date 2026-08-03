@@ -406,6 +406,18 @@
     }
 
     <!--
+      What the mission produced. Above the lenses because it is the answer the
+      mission was commissioned for — everything below is how it got there.
+      Nothing rendered a deliverable at all until an owner asked where theirs was.
+    -->
+    @if (deliverableText(); as answer) {
+      <section class="delivered">
+        <h3>Delivered</h3>
+        <pre>{{ answer }}</pre>
+      </section>
+    }
+
+    <!--
       A surrendered mission used to be a dead end: a Gate A rejection records no
       `escalation.awaiting_human`, so it reaches no attention queue and the
       cockpit offered nothing that addressed it. Restating is the actual remedy

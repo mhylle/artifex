@@ -1494,3 +1494,47 @@ describe('MissionControl — restating a surrendered mission (R41)', () => {
     expect(restateBox()).toBeFalsy();
   });
 });
+
+/**
+ * The answer reaches the screen (find-shape (o)).
+ *
+ * `readableDeliverable` is proven on its own, and `buildMissionTree` is proven
+ * to carry the deliverable — neither can see whether anything RENDERS it. That
+ * gap is exactly what the owner hit: "there is no place where I can see what
+ * was delivered."
+ */
+describe('MissionControl — showing what was delivered', () => {
+  let fixture: ComponentFixture<MissionControl>;
+  let feed: LedgerFeed;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [MissionControl],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    fixture = TestBed.createComponent(MissionControl);
+    feed = TestBed.inject(LedgerFeed);
+  });
+
+  it('renders the deliverable on a delivered mission, without needing a task selected', () => {
+    // The mission kept whole is the case that had no route at all: the
+    // inspector needs a canvas node, and there is none.
+    feed.events.set([
+      ev(1, 'mission.started', MISSION, { objective: 'Name three algorithms' }),
+      ev(2, 'mission.delivered', MISSION, { deliverable: { answer: 'iPSC, SCiP, CRISPR-Cas9.' } }),
+    ]);
+    fixture.detectChanges();
+
+    const panel = fixture.nativeElement.querySelector('.delivered');
+    expect(panel, 'a delivered mission showed no deliverable anywhere').toBeTruthy();
+    expect(panel.textContent).toContain('iPSC, SCiP, CRISPR-Cas9.');
+  });
+
+  it('DISTRACTOR: a running mission shows no deliverable panel', () => {
+    // An empty panel on an unfinished mission would read as "delivered nothing".
+    feed.events.set([ev(1, 'mission.started', MISSION, { objective: 'In flight' })]);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.delivered')).toBeFalsy();
+  });
+});

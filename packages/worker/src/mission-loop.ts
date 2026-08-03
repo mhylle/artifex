@@ -2430,6 +2430,16 @@ export async function runMission(
   // event that actually assembled the result.
   record(mission.taskId, 'contract', 'mission.delivered', 'orchestrator', {
     objective: mission.objective,
+    // WHAT was delivered, not merely that something was (invariant #1).
+    //
+    // This event carried the objective and the pedigree — everything about the
+    // delivery except the delivery. A mission kept whole at least left its
+    // answer on `task.executed`; a DECOMPOSED mission's reconciled result
+    // existed only in this function's return value and reached no event at all,
+    // so a replay could say a mission delivered and never say what. The same
+    // shape as defect `aa6948ee`, where an event named everything about a patch
+    // except what the instructions were patched to.
+    deliverable: root.deliverable,
     pedigree: pedigreeOf(mission, trail),
   });
 

@@ -14,6 +14,7 @@ import type { Audience } from './audience';
 import { CanvasNode } from './canvas-node';
 import { Cockpit } from './cockpit';
 import type { CockpitAction } from './cockpit';
+import { readableDeliverable } from './deliverable';
 import { buildRequesterView } from './requester-view';
 import { answerNote, partitionAttention } from './attention-queue';
 import { Fleet } from './fleet';
@@ -74,6 +75,17 @@ export class MissionControl implements OnInit {
    * Null until they type: the box shows the contract's own criteria, so the
    * thing being edited is the thing that failed.
    */
+  /**
+   * What the mission produced, ready to read (find-shape (o)).
+   *
+   * The answer has been on the trail since the first delivered mission and no
+   * lens showed it: the inspector renders a TASK deliverable, and only once a
+   * node is selected — a mission kept whole has no node to select. Reported by
+   * the owner of a delivered mission: "there is no place where I can see what
+   * was delivered."
+   */
+  readonly deliverableText = computed(() => readableDeliverable(this.visibleTree()?.deliverable));
+
   readonly restatedCriteria = signal<string | null>(null);
 
   /** The mission's criteria, from the contract it was commissioned with. */

@@ -998,3 +998,44 @@ describe('R41 — a restatement continues the same mission and re-plans it', () 
     expect(result.trail.some((e) => e.type === 'task.contracted'), 'the restated mission stopped at an answered question').toBe(true);
   });
 });
+
+/**
+ * The mission's answer is ON the ledger (invariant #1).
+ *
+ * Reported by the owner of a delivered mission: "there is no place where I can
+ * see what was delivered."
+ *
+ * `mission.delivered` recorded the objective and the pedigree — everything
+ * *about* the delivery except the delivery. For a mission kept whole the answer
+ * could still be dug out of `task.executed`; for a DECOMPOSED mission the
+ * reconciled result existed only in `runMission`'s return value and reached no
+ * event at all. A replay could say a mission delivered and not what it
+ * delivered, which invariant #1 does not allow — the same shape as defect
+ * `aa6948ee`, where an event named everything about a patch except what the
+ * instructions were patched to.
+ */
+describe('R37 AC-0 — mission.delivered carries what was delivered', () => {
+  it('records the deliverable on the delivery event', async () => {
+    const result = await runMission(mission(), seams(), { now: () => AT });
+
+    const delivered = result.trail.find((e) => e.type === 'mission.delivered');
+    expect(delivered, 'CONTROL: the mission did not deliver, so nothing was tested').toBeDefined();
+    expect(delivered?.payload['deliverable'], 'the delivery event does not say what was delivered')
+      .toEqual(result.deliverable);
+  });
+
+  it('records the ASSEMBLED result for a decomposed mission, not one child\'s', async () => {
+    // The half that could not be dug out of `task.executed` at all: a split
+    // mission's answer is what the reconciler assembled, and that existed only
+    // in a return value. The fixture's reconciler returns `{ n: childCount }`,
+    // which no single child ever produced.
+    const result = await runMission(mission(), seams(), { now: () => AT });
+
+    const delivered = result.trail.find((e) => e.type === 'mission.delivered');
+    const executed = result.trail.filter((e) => e.type === 'task.executed');
+    expect(executed.length, 'CONTROL: no task executed, so there is nothing to distinguish').toBeGreaterThan(0);
+    // Whatever the loop returned is what the event must carry — if they can
+    // differ, the trail is describing a different answer than the caller got.
+    expect(delivered?.payload['deliverable']).toEqual(result.deliverable);
+  });
+});

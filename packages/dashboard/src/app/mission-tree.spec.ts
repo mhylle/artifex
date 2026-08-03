@@ -340,3 +340,132 @@ describe('R16 — the projection carries what the inspector shows', () => {
     expect(a?.events).toHaveLength(1);
   });
 });
+
+/**
+ * What was delivered, and what the plan actually is now.
+ *
+ * Two faults the owner found in one screen on a delivered mission: "there is no
+ * place where I can see what was delivered", and — behind it — a canvas still
+ * drawing the task tree from *before* the mission was restated.
+ */
+describe('the mission node carries its deliverable', () => {
+  it('exposes what was delivered, so a lens can show it', () => {
+    const trail = [
+      ev(1, 'mission.started', MISSION, { objective: 'Name three algorithms' }),
+      ev(2, 'task.executed', MISSION, { deliverable: { answer: 'one, two, three' } }),
+      ev(3, 'mission.delivered', MISSION, { deliverable: { answer: 'one, two, three' } }),
+    ];
+
+    expect(buildMissionTree(trail)?.deliverable).toEqual({ answer: 'one, two, three' });
+  });
+
+  it('prefers the DELIVERY event over a task result — the assembled answer wins', () => {
+    // A decomposed mission's answer is what the reconciler assembled, not what
+    // any one child produced. Reading the last `task.executed` would show the
+    // final child's fragment and call it the mission's result.
+    const trail = [
+      ev(1, 'mission.started', MISSION, { objective: 'Two parts' }),
+      ev(2, 'task.contracted', 't-a', { objective: 'Part A' }),
+      ev(3, 'task.executed', 't-a', { deliverable: { part: 'A' } }),
+      ev(4, 'mission.delivered', MISSION, { deliverable: { assembled: 'A and B' } }),
+    ];
+
+    expect(buildMissionTree(trail)?.deliverable).toEqual({ assembled: 'A and B' });
+  });
+
+  it('DISTRACTOR: a mission still running has no deliverable rather than a stale one', () => {
+    const trail = [
+      ev(1, 'mission.started', MISSION, { objective: 'In flight' }),
+      ev(2, 'task.executed', 't-a', { deliverable: { draft: 'partial' } }),
+    ];
+
+    expect(buildMissionTree(trail)?.deliverable, 'a partial task result was reported as the mission answer').toBeNull();
+  });
+});
+
+describe('a restatement invalidates the plan that preceded it (R41)', () => {
+  const withRestatement = () => [
+    ev(1, 'mission.started', MISSION, { objective: 'Original' }),
+    ev(2, 'task.contracted', 't-old', { objective: 'Built for the old criteria' }),
+    ev(3, 'gate_a.verdict_issued', MISSION, { outcome: 'fail' }),
+    ev(4, 'mission.surrendered', MISSION, { blockers: ['not testable'] }),
+    ev(5, 'operator.restated', MISSION, { acceptanceCriteria: [{ criterionId: 'm-1', statement: 'Testable now.' }] }),
+    ev(6, 'mission.started', MISSION, { objective: 'Original' }),
+    ev(7, 'task.executed', MISSION, { deliverable: { answer: 'done' } }),
+    ev(8, 'mission.delivered', MISSION, { deliverable: { answer: 'done' } }),
+  ];
+
+  it('drops tasks contracted before the restatement — that plan was rejected', () => {
+    // The worker already knows this: `foldPriorTrail` clears the plan when it
+    // walks past a restatement, so the mission re-plans. The canvas did not,
+    // and drew the rejected tree over a mission that had since delivered
+    // something else entirely.
+    const tree = buildMissionTree(withRestatement());
+
+    expect(tree?.children.map((c) => c.taskId), 'the canvas kept the plan the restatement replaced').toEqual([]);
+    expect(tree?.status).toBe('delivered');
+  });
+
+  it('keeps tasks contracted AFTER the restatement', () => {
+    // The other side: re-planned work is the real plan and must be drawn.
+    const tree = buildMissionTree([
+      ...withRestatement(),
+      ev(9, 'task.contracted', 't-new', { objective: 'Built for the new criteria' }),
+    ]);
+
+    expect(tree?.children.map((c) => c.taskId)).toEqual(['t-new']);
+  });
+
+  it('DISTRACTOR: without a restatement the whole plan is kept', () => {
+    // Dropping contracts on any resume would empty the canvas of every mission
+    // that was ever interrupted.
+    const tree = buildMissionTree([
+      ev(1, 'mission.started', MISSION, { objective: 'Plain' }),
+      ev(2, 'task.contracted', 't-a', { objective: 'A' }),
+      ev(3, 'task.contracted', 't-b', { objective: 'B' }),
+    ]);
+
+    expect(tree?.children.map((c) => c.taskId)).toEqual(['t-a', 't-b']);
+  });
+});
+
+describe('falling back to the mission task own result', () => {
+  it('uses a task.executed AT THE MISSION TASK when the delivery event carries nothing', () => {
+    // Two reasons this is needed rather than tidy. A mission the gate keeps
+    // whole executes at the mission task itself, so that IS its answer. And
+    // every mission delivered before `mission.delivered` began carrying the
+    // deliverable has its result only there — without this they show nothing,
+    // which is the complaint being fixed, still true for existing work.
+    const trail = [
+      ev(1, 'mission.started', MISSION, { objective: 'Kept whole' }),
+      ev(2, 'task.executed', MISSION, { deliverable: { answer: 'The whole answer.' } }),
+      ev(3, 'mission.delivered', MISSION, {}),
+    ];
+
+    expect(buildMissionTree(trail)?.deliverable).toEqual({ answer: 'The whole answer.' });
+  });
+
+  it('DISTRACTOR: a CHILD task result is never mistaken for the mission answer', () => {
+    // The failure this guards: a decomposed mission whose delivery event is
+    // silent would otherwise report the last child's fragment as the mission's
+    // result — worse than showing nothing, because it looks complete.
+    const trail = [
+      ev(1, 'mission.started', MISSION, { objective: 'Two parts' }),
+      ev(2, 'task.contracted', 't-a', { objective: 'Part A' }),
+      ev(3, 'task.executed', 't-a', { deliverable: { fragment: 'just part A' } }),
+      ev(4, 'mission.delivered', MISSION, {}),
+    ];
+
+    expect(buildMissionTree(trail)?.deliverable, 'a child fragment was reported as the mission answer').toBeNull();
+  });
+
+  it('DISTRACTOR: the delivery event still wins when it carries a deliverable', () => {
+    const trail = [
+      ev(1, 'mission.started', MISSION, { objective: 'Kept whole' }),
+      ev(2, 'task.executed', MISSION, { deliverable: { answer: 'draft' } }),
+      ev(3, 'mission.delivered', MISSION, { deliverable: { answer: 'final' } }),
+    ];
+
+    expect(buildMissionTree(trail)?.deliverable).toEqual({ answer: 'final' });
+  });
+});

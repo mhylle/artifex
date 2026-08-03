@@ -78,6 +78,17 @@ export interface MissionNode {
   readonly taskId: string;
   readonly objective: string;
   readonly status: MissionStatus;
+  /**
+   * What the mission actually produced, or null while it has not.
+   *
+   * The owner of a delivered mission: "there is no place where I can see what
+   * was delivered." The answer was on the trail and no lens read it —
+   * find-shape (o). Taken from `mission.delivered`/`mission.folded`, never from
+   * the last `task.executed`: a decomposed mission's answer is what the
+   * reconciler assembled, and reading a task result would show one child's
+   * fragment and call it the mission's.
+   */
+  readonly deliverable: unknown;
   readonly blockers: string[];
   readonly children: TaskNode[];
   readonly eventCount: number;
@@ -118,6 +129,17 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
   let missionObjective = '';
   let missionStatus: MissionStatus = 'running';
   let blockers: string[] = [];
+  let deliverable: unknown = null;
+  /**
+   * The mission task's own result, kept separately from the delivery event's.
+   *
+   * A mission the gate keeps WHOLE executes at the mission task itself, so that
+   * is its answer — and every mission delivered before `mission.delivered`
+   * began carrying the deliverable has its result only there. Never a child's:
+   * reporting one fragment as the mission's result is worse than showing
+   * nothing, because it looks complete.
+   */
+  let ownResult: unknown = null;
 
   const tasks = new Map<string, Accumulator>();
   const order: string[] = [];
@@ -159,6 +181,23 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
       case 'mission.abandoned':
         missionStatus = 'abandoned';
         break;
+
+      /**
+       * The operator restated the mission (R41). Everything contracted before
+       * this was planned to satisfy criteria that no longer exist.
+       *
+       * The worker already knows: `foldPriorTrail` clears the plan when it
+       * walks past a restatement, so the mission re-plans. This projection did
+       * not, and drew the rejected tree over a mission that had since delivered
+       * something else — two views of one trail disagreeing, which is the one
+       * thing a pure projection exists to prevent.
+       */
+      case 'operator.restated':
+        tasks.clear();
+        order.length = 0;
+        deliverable = null;
+        ownResult = null;
+        break;
       // BOTH delivery events (defect `dd2e9d18`). `mission.delivered` was added
       // by R37 AC-0 because a mission the decompose-or-delegate gate keeps WHOLE
       // never folds, and this projection was never taught about it — so a
@@ -166,14 +205,17 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
       // contradiction: the fleet rail said DELIVERED and this header said
       // SURRENDERED for the same mission on the same screen.
       case 'mission.folded':
-      case 'mission.delivered':
+      case 'mission.delivered': {
         missionStatus = 'delivered';
+        const produced = payload['deliverable'];
+        if (produced !== undefined) deliverable = produced;
         // Cleared, not merely overwritten. A mission that surrendered, was
         // answered and then delivered (R41) has got PAST those blockers, and
         // listing them under a delivered header would describe a problem the
         // operator already solved.
         blockers = [];
         break;
+      }
       case 'mission.surrendered': {
         missionStatus = 'surrendered';
         const raw = payload['blockers'];
@@ -213,6 +255,13 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
         break;
       }
       case 'task.executed': {
+        // The mission task executing IS the mission's own work — that is what a
+        // mission kept whole produces. Captured before the guard below, which
+        // exists to keep mission-level events out of the task tree.
+        if (taskId === missionId) {
+          const produced = payload['deliverable'];
+          if (produced !== undefined) ownResult = produced;
+        }
         if (taskId === null || taskId === missionId) break;
         const node = touch(taskId);
         const spent = payload['effortSpent'];
@@ -268,6 +317,9 @@ export function buildMissionTree(events: readonly LedgerEventView[]): MissionNod
     taskId: missionId,
     objective: missionObjective,
     status: missionStatus,
+    // The delivery event wins: for a decomposed mission it is the assembled
+    // answer, and no task ever produced it.
+    deliverable: deliverable ?? ownResult,
     blockers,
     eventCount: ordered.length,
     children: nest(order, tasks, missionId),
