@@ -1039,3 +1039,82 @@ describe('R37 AC-0 — mission.delivered carries what was delivered', () => {
     expect(delivered?.payload['deliverable']).toEqual(result.deliverable);
   });
 });
+
+/**
+ * The loop actually CARRIES the verdict into the retry (R36).
+ *
+ * `runtime-evidence.test.ts` proves the work seam uses `priorFindings` when it
+ * is given them. Nothing there can see whether the loop ever passes them — and
+ * this project has found six mechanisms that were correct and unreachable, so
+ * the producer gets its own test.
+ */
+describe('R36 — a retry is told why the last attempt was rejected', () => {
+  /** Fails the first attempt with a specific diagnosis, then passes. */
+  function failingOnce(): { seams: MissionSeams; promptsFindings: (readonly string[])[] } {
+    const base = seams();
+    const promptsFindings: (readonly string[])[] = [];
+    let attempts = 0;
+
+    return {
+      promptsFindings,
+      seams: {
+        ...base,
+        work: {
+          async execute(input: { priorFindings?: readonly string[] }) {
+            promptsFindings.push(input.priorFindings ?? []);
+            return { deliverable: { answer: 'x' }, actions: [], consulted: [], assumptions: [], effortSpent: 2 };
+          },
+        },
+        completionJudge: {
+          async assess({ contract }) {
+            attempts += 1;
+            if (attempts === 1) {
+              return {
+                criteria: contract.acceptanceCriteria.map((c) => ({
+                  criterionId: c.criterionId,
+                  met: false,
+                  detail: "conflates 'biological models' with 'algorithms'",
+                })),
+                redFlags: [],
+              };
+            }
+            return {
+              criteria: contract.acceptanceCriteria.map((c) => ({ criterionId: c.criterionId, met: true, detail: 'ok' })),
+              redFlags: [],
+            };
+          },
+        },
+      } as MissionSeams,
+    };
+  }
+
+  it('hands the second attempt the finding that failed the first', async () => {
+    const { seams: s, promptsFindings } = failingOnce();
+
+    await runMission(mission(), s, { now: () => AT });
+
+    expect(promptsFindings.length, 'CONTROL: there was no second attempt, so nothing was carried').toBeGreaterThan(1);
+    expect(promptsFindings[0], 'the FIRST attempt was told about a failure that had not happened').toEqual([]);
+    expect(promptsFindings[1], 'the retry was blind to why the last attempt was rejected')
+      .toContain("conflates 'biological models' with 'algorithms'");
+  });
+
+  it('DISTRACTOR: a task that passes first time is never told about a failure', async () => {
+    const base = seams();
+    const seen: (readonly string[])[] = [];
+    const s = {
+      ...base,
+      work: {
+        async execute(input: { priorFindings?: readonly string[] }) {
+          seen.push(input.priorFindings ?? []);
+          return { deliverable: { answer: 'x' }, actions: [], consulted: [], assumptions: [], effortSpent: 2 };
+        },
+      },
+    } as MissionSeams;
+
+    await runMission(mission(), s, { now: () => AT });
+
+    expect(seen.length, 'CONTROL: no work ran').toBeGreaterThan(0);
+    for (const findings of seen) expect(findings).toEqual([]);
+  });
+});

@@ -1597,6 +1597,17 @@ export async function runMission(
         : await seams.control.grantedBudget(child.taskId).catch(() => 0);
       const effectiveCeiling = child.budget.ceiling + granted;
       let spent = 0;
+      /**
+       * Why the previous attempt was rejected, carried into the next one (R36).
+       *
+       * The reviewer says precisely what was wrong and the loop used to drop it
+       * on the floor: the retry got the original contract and nothing else, so
+       * it produced the same kind of answer and burned a rung finding out.
+       * `decomposition.resplit` already applies this rule one level up — "re-
+       * splitting FROM the verdict rather than retrying blind" — and this is
+       * the same sentence about the same problem one level down.
+       */
+      let priorFindings: readonly string[] = [];
 
       for (let attempt = 0; attempt < maxAttempts && !settled; attempt += 1) {
         if (spent >= effectiveCeiling) {
@@ -1734,6 +1745,7 @@ export async function runMission(
             producedAt: now(),
             priorKnowledge: context.payload,
             consulted: context.consulted,
+            priorFindings,
           });
         } catch (error) {
           // Retry the same tier first. Only a repeated failure is evidence of a
@@ -2004,6 +2016,11 @@ export async function runMission(
         // One outcome per criterion, keyed by the CATEGORY that did the work.
         // A criterion is failed when a finding names it; Gate B records findings
         // only for failures, so absence is the pass.
+        // Kept for the NEXT attempt. Recorded on the ledger either way, but the
+        // ledger is not where the worker reads from — a diagnosis nobody is
+        // told is a log line, not a correction.
+        priorFindings = bVerdict.findings.map((f) => f.detail).filter((d) => typeof d === 'string' && d !== '');
+
         const failedCriteria = new Set(bVerdict.findings.map((f) => f.criterionId));
         designFor.set(child.category, manifest.designId);
         for (const criterion of child.acceptanceCriteria) {

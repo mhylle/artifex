@@ -339,3 +339,73 @@ describe('the work seam can produce a structured document', () => {
     });
   });
 });
+
+/**
+ * A retry is told why the last attempt failed (R36, invariant #3).
+ *
+ * The owner, reading a task that bounced twice with the reviewer's diagnosis
+ * printed on screen: "since it actually specifies that it did not do the job,
+ * why does it not then actually do the job, i.e. update the tasks it is doing
+ * to actually do the job".
+ *
+ * The system reviewed its own work, said precisely what was wrong — "conflates
+ * 'biological models', 'laboratory protocols' and 'computational tools' into a
+ * single category of 'algorithms'" — recorded that on the ledger, and then
+ * handed the retry the ORIGINAL contract and nothing else. The worker could not
+ * know it had failed, let alone why, so it produced the same kind of answer
+ * again and burned a rung of the ladder doing it.
+ *
+ * The codebase already holds this rule and applies it in exactly one place.
+ * `decomposition.resplit` re-splits "FROM the verdict rather than retrying
+ * blind. Re-proposing from the same objective very often reproduces the same
+ * plan." That is the same sentence about a different retry — find-shape (b), a
+ * rule implemented at one site while its siblings ignore it.
+ */
+describe('the work seam is told why the previous attempt failed', () => {
+  it('puts the prior findings in the prompt', async () => {
+    const gen = generatorReturning({ [ANSWER]: { answer: 'x' }, [ASSUMPTIONS]: { assumptions: [] } });
+
+    await createMissionSeams(gen, MODELS).work!.execute({
+      contract: view(),
+      ...ACTOR,
+      priorFindings: ["conflates 'biological models' with 'algorithms'"],
+    });
+
+    expect(promptFor(gen, ANSWER), 'the retry was not told why the last attempt failed')
+      .toContain("conflates 'biological models' with 'algorithms'");
+  });
+
+  it('names them as a previous FAILURE, not as guidance', async () => {
+    // A finding pasted in without saying what it is reads as extra advice. The
+    // worker has to know an attempt was rejected, or it will not treat the
+    // wording as binding.
+    const gen = generatorReturning({ [ANSWER]: { answer: 'x' }, [ASSUMPTIONS]: { assumptions: [] } });
+
+    await createMissionSeams(gen, MODELS).work!.execute({
+      contract: view(), ...ACTOR, priorFindings: ['no third algorithm was named'],
+    });
+
+    expect(promptFor(gen, ANSWER)).toMatch(/reject|fail|previous attempt/i);
+  });
+
+  it('DISTRACTOR: a first attempt says nothing about a previous one', async () => {
+    // Telling a fresh worker that "the previous attempt failed" when there was
+    // none would have it defending against a criticism nobody made.
+    const gen = generatorReturning({ [ANSWER]: { answer: 'x' }, [ASSUMPTIONS]: { assumptions: [] } });
+
+    await createMissionSeams(gen, MODELS).work!.execute({ contract: view(), ...ACTOR });
+
+    expect(promptFor(gen, ANSWER)).not.toMatch(/previous attempt/i);
+  });
+
+  it('DISTRACTOR: an EMPTY findings list is treated as no prior failure', async () => {
+    // Gate B can fail a bundle on red flags alone, leaving `findings` empty. A
+    // heading with nothing under it would tell the worker it failed and refuse
+    // to say why — worse than silence.
+    const gen = generatorReturning({ [ANSWER]: { answer: 'x' }, [ASSUMPTIONS]: { assumptions: [] } });
+
+    await createMissionSeams(gen, MODELS).work!.execute({ contract: view(), ...ACTOR, priorFindings: [] });
+
+    expect(promptFor(gen, ANSWER)).not.toMatch(/previous attempt/i);
+  });
+});

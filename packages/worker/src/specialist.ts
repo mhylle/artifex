@@ -38,6 +38,22 @@ export interface SpecialistWork {
      */
     readonly priorKnowledge?: unknown;
     /**
+     * Why the PREVIOUS attempt at this task was rejected (R36).
+     *
+     * The system reviews its own work and says precisely what was wrong, then
+     * used to hand the retry the original contract and nothing else — so the
+     * worker could not know it had failed, let alone why, and produced the same
+     * kind of answer again while the ladder burned a rung.
+     *
+     * The same rule `decomposition.resplit` already applies one level up:
+     * re-propose FROM the verdict, because re-proposing from the same objective
+     * very often reproduces the same plan.
+     *
+     * Empty or absent on a first attempt, which must read as "no prior
+     * failure" rather than as a failure nobody will explain.
+     */
+    readonly priorFindings?: readonly string[];
+    /**
      * Who is acting, and when — required by the Action Broker (R13).
      *
      * The ritual already knows both; before this they stopped here, so a work
@@ -71,6 +87,8 @@ export async function runSpecialist(input: {
   readonly priorKnowledge?: unknown;
   /** The sources it came from, recorded on the bundle (R40's `consulted`). */
   readonly consulted?: EvidenceBundle['consulted'];
+  /** Why the previous attempt was rejected, carried to the work seam (R36). */
+  readonly priorFindings?: readonly string[];
 }): Promise<SpecialistOutcome> {
   const { contract, agentId, judge, work, bundleId, producedAt } = input;
 
@@ -96,6 +114,7 @@ export async function runSpecialist(input: {
 
   const result = await work.execute({
     contract, restatement, priorKnowledge: input.priorKnowledge, agentId, occurredAt: producedAt,
+    ...(input.priorFindings === undefined ? {} : { priorFindings: input.priorFindings }),
   });
 
   return {

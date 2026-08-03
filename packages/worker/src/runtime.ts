@@ -1001,7 +1001,7 @@ export function createMissionSeams(
     },
 
     work: {
-      async execute({ contract, agentId, occurredAt }) {
+      async execute({ contract, agentId, occurredAt, priorFindings }) {
         /**
          * Effort, MEASURED (the chain behind `e758f460` / `cb939996`).
          *
@@ -1033,9 +1033,28 @@ export function createMissionSeams(
         // The worker MUST be shown its acceptance criteria — they are the spec.
         // Prompting with the objective alone was the P9 bug: the planner wrote
         // criteria the worker never aimed at, and Gate B correctly failed it.
+        /**
+         * What the reviewer rejected last time (R36).
+         *
+         * Without this the retry is blind: the system had already said exactly
+         * what was wrong, recorded it, and then handed the worker the original
+         * contract and nothing else — so it produced the same kind of answer
+         * again. Placed FIRST because it is the binding constraint on this
+         * attempt; the criteria say what is wanted, these say what has already
+         * been refused.
+         */
+        const rejected = (priorFindings ?? []).filter((f) => f.trim() !== '');
         const out = (await spend(gen(models.worker, AnswerSchema, [
           'Answer the task so that EVERY acceptance criterion below is satisfied.',
           '',
+          ...(rejected.length === 0
+            ? []
+            : [
+                'A PREVIOUS ATTEMPT AT THIS TASK WAS REJECTED. The reviewer said:',
+                ...rejected.map((f) => `  - ${f}`),
+                'Do not repeat it. Fix what is named above before anything else.',
+                '',
+              ]),
           // The depth is the criteria's to decide, not the model's mood. A
           // criterion asking for several things, or for a report, is not
           // satisfied by a paragraph mentioning them — which is exactly what
