@@ -36,3 +36,23 @@ Proven live end to end: a mission posted, blocked at intake, answered through th
 **What this does and does not do.** It restores the supply the learning half needs: with a sealed bench, the science loop can test a candidate, a petition can be evaluated against known answers, and reviewer calibration has probes to plant. It does not by itself make the next mission better — one case is not a bench, and whether accumulated cases actually improve outcomes is unmeasured and should stay that way until there is data.
 
 **Still open, recorded rather than fixed:** `decomposition_template` is still 0 (R31 AC-2's learned recipes have never fired live), `agent_design_delta` is still 0 (no redesign has been recorded), and `ledger-evidence.ts` reads the budget ceiling from `task.contracted` too — so a kept-whole mission contributes no budget-versus-value signal to the weak-spot ranking. That last one is the same shape again and is the next thing to fix.
+
+---
+
+## Addendum — the end-to-end test, and what it exposed
+
+Run after the fix, on the owner's own failing stem-cell mission, restated with a testable criterion. Four missions were driven through the real cockpit.
+
+**The bench fix works, and its shape is now understood.** Cases banked on every delivery. But the sealed/open alternation is keyed **per capability** and starts sealed, so after four deliveries the slices read `sealed: 3, open: 0` — every capability had exactly one case. That is the design working rather than a fault: you cannot hold a case out of a capability you have seen once. It does mean **the science loop cannot run until a capability repeats**, which is worth knowing and was not written down anywhere.
+
+**The restated mission delivered — and the output is unusable.** Three sections of 206–217 words, satisfying the length clause, under these headings:
+
+    "版枕"   "清路"   "虎"
+
+with bodies describing snRNA-seq library construction and CRISPR-Cas9 editing — wet-lab protocols, against a criterion demanding *computational algorithms*, on a mission whose out-of-scope list contains "wet-lab protocols".
+
+Gate B: `outcome: pass`, `findings: []`, `redFlags: []`. Twice.
+
+Logged as critical defect `0ecbf103`. Two failures inside it, kept separate: the CJK corruption is the known structured-output runaway (`8b7e9e95`), and **my own `sections` change is implicated** — widening the answer schema is exactly the documented risk, and the cost was not measured before shipping. The serious half is the reviewer: three Han characters as a heading on an English task is not a judgement call, and `findings: []` means it saw nothing to remark on.
+
+**This is the honest answer to "would anyone be able to do anything real with the output".** Still no — and the failure has moved. It used to be visibly thin. It is now superficially substantial and wrong, which is harder to catch from the fleet view and easier to ship.
