@@ -62,6 +62,21 @@ import type { MissionSeams } from './mission-loop.js';
  * `answer` stays required and stays the summary, so every existing reader — the
  * reviewer, the fold-up, the requester view — keeps working unchanged.
  */
+/**
+ * Room for a deliverable that is a document rather than a sentence.
+ *
+ * The default bound is sized for contracts, verdicts and proposals — "all
+ * comfortably under a thousand tokens" — and a worker asked for a report of
+ * several sections runs past it, arriving truncated mid-JSON. Observed live: a
+ * section body cut off at "It is the primary tool used for ...", which the
+ * reviewer then correctly refused as unusable.
+ *
+ * Raised only for the WORK probe. Every judge and planner keeps the tight
+ * default, because there the bound is what converts a small model runaway into
+ * a fast attributable failure rather than an expensive crash.
+ */
+export const DELIVERABLE_TOKENS = 16384;
+
 const AnswerSchema = Type.Object(
   {
     answer: Type.String({
@@ -493,8 +508,20 @@ export function sampledIntent(judge: IntentJudge, samples: number): IntentJudge 
       const real = runs.filter((r): r is NonNullable<typeof r> => r !== null);
       if (real.length === 0) return { servesIntent: true, detail: 'intent tier unavailable', redFlags: [] };
 
+      /**
+       * A MAJORITY condemns, not unanimity.
+       *
+       * This read `condemned.length < real.length`: every sample had to object
+       * before the work was refused, so two of three finding that a deliverable
+       * missed the point still passed it. On a stochastic judge that lets a
+       * single lenient sample rescue anything — the opposite of what sampling
+       * is for, which is to damp noise rather than give it a veto.
+       *
+       * The protection unanimity was reaching for survives: one eccentric
+       * objection out of three still cannot fail work the others found sound.
+       */
       const condemned = real.filter((r) => !r.servesIntent);
-      const servesIntent = condemned.length < real.length;
+      const servesIntent = condemned.length * 2 <= real.length;
 
       // A flag survives only if every sample raised it. Compared on normalised
       // text, since two samples rarely word the same observation identically.
@@ -608,7 +635,14 @@ export function createCandidateSeams(generator: StructuredGenerator, models: Run
     m: { provider: string; model: string },
     schema: unknown,
     prompt: string,
-  ): Promise<unknown> => generator.generate({ provider: m.provider, model: m.model, probe: { schema, prompt } });
+    maxOutputTokens?: number,
+  ): Promise<unknown> =>
+    generator.generate({
+      provider: m.provider,
+      model: m.model,
+      probe: { schema, prompt },
+      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+    });
 
   return {
     generator: {
@@ -628,7 +662,11 @@ export function createCandidateSeams(generator: StructuredGenerator, models: Run
           `TASK: ${input.objective}`,
           'ACCEPTANCE CRITERIA (you are graded on exactly these):',
           ...input.criteria.map((c) => `  - ${c}`),
-        ].join('\n'))) as unknown;
+          // The same room the production work probe gets. The bench decides
+          // which design earns permanence, so grading a candidate on an answer
+          // truncated at a length production never truncates at would measure
+          // the bound rather than the candidate.
+        ].join('\n'), DELIVERABLE_TOKENS)) as unknown;
       },
     },
     judge: {
@@ -793,7 +831,14 @@ export function createMissionSeams(
     m: { provider: string; model: string },
     schema: unknown,
     prompt: string,
-  ): Promise<unknown> => generator.generate({ provider: m.provider, model: m.model, probe: { schema, prompt } });
+    maxOutputTokens?: number,
+  ): Promise<unknown> =>
+    generator.generate({
+      provider: m.provider,
+      model: m.model,
+      probe: { schema, prompt },
+      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+    });
 
   return {
     // Passed through rather than constructed here: the runtime owns the ledger
@@ -1072,7 +1117,14 @@ export function createMissionSeams(
             : [
                 'A PREVIOUS ATTEMPT AT THIS TASK WAS REJECTED. The reviewer said:',
                 ...rejected.map((f) => `  - ${f}`),
-                'Do not repeat it. Fix what is named above before anything else.',
+                // "Fix what is named above" was read by a tier-1 model as
+                // naming the DELIVERABLE, and it returned a critique of the
+                // rejected attempt instead of the artefact. The faults are a
+                // constraint on what to write; they are not the subject.
+                'Write the deliverable again, from the beginning, in full. The points above are',
+                'faults to avoid this time, not a list to reply to: do not describe, critique or',
+                'revise the previous attempt, and do not refer to it. Whoever reads your answer',
+                'has never seen it and receives only what you write now.',
                 '',
               ]),
           // The depth is the criteria's to decide, not the model's mood. A
@@ -1087,7 +1139,7 @@ export function createMissionSeams(
           `TASK: ${contract.objective}`,
           'ACCEPTANCE CRITERIA (you are graded on exactly these):',
           ...contract.acceptanceCriteria.map((c) => `  - ${c.statement}`),
-        ].join('\n')))) as { answer: string; sections?: { heading: string; body: string }[] };
+        ].join('\n'), DELIVERABLE_TOKENS))) as { answer: string; sections?: { heading: string; body: string }[] };
 
         // ---- the agent may now ACT on its own answer (R13 AC-0) -------------
         // Offered only what this contract was actually granted. The broker would

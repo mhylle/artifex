@@ -11,7 +11,8 @@ import type { EvidenceBundle, TaskContract } from '@artifex/shared-types';
 import { describe, expect, it } from 'vitest';
 
 import { gateA, gateB } from './reviewer.js';
-import type { CompletionJudge, CoverageJudge } from './reviewer.js';
+import { sampledIntent } from './runtime.js';
+import type { CompletionJudge, CoverageJudge, IntentJudge } from './reviewer.js';
 
 /**
  * R33 added two judged clauses to Gate A. Permissive here: these tests are about
@@ -363,5 +364,58 @@ describe('Gate A - the dependency graph must be acyclic (R32 AC-2)', () => {
     const verdict = await gateA(contract(), outside, covering, PLAN_OK, META);
 
     expect(verdict.outcome).toBe('pass');
+  });
+});
+
+/**
+ * The intent tier condemns on a MAJORITY, not on unanimity (R34).
+ *
+ * `servesIntent = condemned.length < real.length` meant every sample had to
+ * object before the work was refused: two of three saying a deliverable misses
+ * the point still passed it. On a stochastic judge that makes one lenient
+ * sample enough to rescue anything, which is the opposite of what sampling is
+ * for — it exists to damp noise, not to give noise a veto.
+ *
+ * Majority is the same rule the rest of the system already uses for sampled
+ * judgements, and it keeps the protection unanimity was reaching for: a single
+ * eccentric objection still cannot fail sound work.
+ */
+describe('sampledIntent — condemns on a majority', () => {
+  const yes = { servesIntent: true, detail: 'fine', redFlags: [] };
+  const no = { servesIntent: false, detail: 'misses the point', redFlags: [] };
+
+  function judgeReturning(sequence: (typeof yes)[]): IntentJudge {
+    let i = 0;
+    return { async assess() { return sequence[i++ % sequence.length]!; } };
+  }
+
+  it('refuses when two of three object', async () => {
+    const judged = await sampledIntent(judgeReturning([no, no, yes]), 3).assess({} as never);
+
+    expect(judged.servesIntent, 'two of three objected and the work passed anyway').toBe(false);
+  });
+
+  it('DISTRACTOR: one objection out of three does NOT refuse', async () => {
+    // The protection unanimity was reaching for. A single eccentric sample must
+    // not fail work the other two found sound.
+    const judged = await sampledIntent(judgeReturning([no, yes, yes]), 3).assess({} as never);
+
+    expect(judged.servesIntent).toBe(true);
+  });
+
+  it('DISTRACTOR: unanimous approval still passes', async () => {
+    const judged = await sampledIntent(judgeReturning([yes, yes, yes]), 3).assess({} as never);
+
+    expect(judged.servesIntent).toBe(true);
+  });
+
+  it('DISTRACTOR: an unavailable tier does not condemn', async () => {
+    // A judge that cannot run has said nothing. Reading silence as an objection
+    // would turn a model outage into a mission failure.
+    const broken: IntentJudge = { async assess() { throw new Error('tier down'); } };
+
+    const judged = await sampledIntent(broken, 3).assess({} as never);
+
+    expect(judged.servesIntent).toBe(true);
   });
 });

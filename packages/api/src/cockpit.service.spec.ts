@@ -47,6 +47,39 @@ describe('R17 AC-0 — every cockpit act is a ledger event with the operator on 
     expect(event.taskId).toBe(TASK);
   });
 
+  /**
+   * The guard says "a cockpit action must name the operator performing it" and
+   * only implemented half of it: `request.operator.trim()` reads the field
+   * before checking it exists, so a request that names NO operator threw a
+   * TypeError and the operator got a 500 instead of the sentence above.
+   *
+   * Found live — a control POST that used `actor` instead of `operator` (an
+   * easy mistake, since the ledger event calls it `actor`) crashed the
+   * endpoint. Find-shape (h): a guard stating an intent its own implementation
+   * does not cover.
+   */
+  it('refuses an action naming no operator, with a reason rather than a crash', async () => {
+    const { service, appended } = harness();
+
+    // The exact shape that crashed it: the field simply absent.
+    const acting = service.act({ missionId: MISSION, taskId: null, action: 'pause' } as never);
+
+    await expect(acting).rejects.toThrow(/name the operator/);
+    expect(appended, 'a refused action still appended to the ledger').toHaveLength(0);
+  });
+
+  it('refuses a BLANK operator too', async () => {
+    // The half that already worked. Kept as an anti-regression distractor: a
+    // fix that only added an existence check would let whitespace through, and
+    // "someone paused this" is not accountability.
+    const { service, appended } = harness();
+
+    await expect(
+      service.act({ missionId: MISSION, taskId: null, action: 'pause', operator: '   ' }),
+    ).rejects.toThrow(/name the operator/);
+    expect(appended).toHaveLength(0);
+  });
+
   it('AC-2: a budget grant is an ECONOMIC event carrying the amount', async () => {
     const { service, appended } = harness();
 

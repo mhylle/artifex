@@ -104,6 +104,24 @@
             <li class="empty">No candidate has been bench-tested yet.</li>
           }
         </ul>
+        <h4>Registry ratchet <span class="count">what a measured win actually changed</span></h4>
+        <ul class="decisions">
+          @for (d of learning().deltas; track d.event.eventId) {
+            <li>
+              <span class="outcome" [class]="d.adopted ? 'outcome-adopt' : 'outcome-reject'">
+                {{ d.adopted ? 'design updated' : 'held' }}
+              </span>
+              <span class="tally">
+                {{ d.designId }} · score {{ d.scorePercent }}%
+                @if (d.toVersion !== null) { · now v{{ d.toVersion }} }
+              </span>
+              <span class="why">{{ d.reason }}</span>
+            </li>
+          }
+          @if (learning().deltas.length === 0) {
+            <li class="empty">No design change has been proposed to the registry yet.</li>
+          }
+        </ul>
         <h4>Weak spots <span class="count">what the next hypothesis aims at</span></h4>
         <ul class="rankings">
           @for (r of learning().rankings; track r.event.eventId) {
@@ -126,7 +144,7 @@
       } @else {
         <p class="empty">
           Nothing to show. This mission recorded no experiment, adoption, petition,
-          bench-tested candidate, weak-spot ranking or learned template.
+          bench-tested candidate, registry delta, weak-spot ranking or learned template.
         </p>
       }
     </section>

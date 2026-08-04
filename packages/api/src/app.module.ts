@@ -15,6 +15,7 @@ import { MissionIntakeService } from './mission-intake.service';
 import type { MissionJob, MissionQueue } from './mission-intake.service';
 import type { LedgerReader } from './ledger.types';
 import { INTAKE_CLOCK, LEDGER_READER, LEDGER_SINK, MISSION_QUEUE } from './tokens';
+import { contractAfterRestatement } from './restated-contract';
 
 /**
  * The control plane's composition root.
@@ -114,12 +115,12 @@ function connectionString(): string {
              * because a restatement names the criteria and must not silently
              * blank the budget, boundaries or dial the mission was started with.
              */
-            const restated = [...trail].reverse().find((e) => e.type === 'operator.restated');
-            const amendment = restated === undefined ? {} : restated.payload;
-
             await queue.enqueue({
               missionId,
-              contract: { ...(contract as Record<string, unknown>), ...amendment } as never,
+              contract: contractAfterRestatement(
+                contract as Record<string, unknown>,
+                trail as unknown as { type: string; payload: Record<string, unknown> }[],
+              ) as never,
             });
           },
         }),

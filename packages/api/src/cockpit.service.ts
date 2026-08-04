@@ -103,7 +103,11 @@ export class CockpitService {
     if (shape === undefined) {
       throw new BadRequestException(`unknown cockpit action "${String(request.action)}"`);
     }
-    if (request.operator.trim().length === 0) {
+    // Existence checked BEFORE the trim, not folded into it. Reading the field
+    // first threw a TypeError on a request that simply omitted it, so the
+    // operator got a 500 and this sentence — the one thing that would have told
+    // them what was wrong — was never reached.
+    if (typeof request.operator !== 'string' || request.operator.trim().length === 0) {
       // An unattributed human act defeats the symmetry rule: the trail would
       // record that *someone* paused this, which is not accountability.
       throw new BadRequestException('a cockpit action must name the operator performing it');

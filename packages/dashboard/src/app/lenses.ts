@@ -264,7 +264,7 @@ export interface PetitionView {
 export function hasLearningOutput(view: LearningView): boolean {
   return view.experiments.length + view.adoptions.length + view.reverts.length
     + view.petitions.length + view.libraryGrowth.length
-    + view.candidateDecisions.length + view.rankings.length > 0;
+    + view.candidateDecisions.length + view.rankings.length + view.deltas.length > 0;
 }
 
 /**
@@ -277,6 +277,31 @@ export function hasLearningOutput(view: LearningView): boolean {
  * rejection — and "the science loop has done nothing" is exactly the false
  * impression to avoid.
  */
+/**
+ * What the REGISTRY decided about a candidate the bench had already approved.
+ *
+ * Distinct from {@link CandidateDecisionView} on purpose: that one answers "did
+ * this candidate beat its bench?", this one answers "did it beat the incumbent,
+ * and was it no more complicated?" — R28's ratchet, the only thing that moves a
+ * design's version.
+ */
+export interface DesignDeltaView {
+  readonly event: TimedEvent;
+  readonly designId: string;
+  readonly candidateId: string;
+  readonly candidateScore: number;
+  /**
+   * The score as a whole percent, rounded here rather than in the template.
+   * `wins / runs` is frequently non-terminating (2 of 3 is 0.666…), and a rule
+   * that lives in a component expression cannot be tested or mutated.
+   */
+  readonly scorePercent: number;
+  readonly adopted: boolean;
+  readonly reason: string;
+  /** The version the design moved TO, or null when nothing moved. */
+  readonly toVersion: number | null;
+}
+
 export interface CandidateDecisionView {
   readonly event: TimedEvent;
   readonly candidateId: string;
@@ -318,6 +343,7 @@ export interface LearningView {
    * carried the same weight.
    */
   readonly candidateDecisions: readonly CandidateDecisionView[];
+  readonly deltas: readonly DesignDeltaView[];
   /** Weak-spot rankings — the Learning Agent's primary output. */
   readonly rankings: readonly RankingView[];
 }
@@ -434,6 +460,28 @@ export function buildLearningView(events: readonly TimedEvent[]): LearningView {
         wins: Number(p.evidence?.wins ?? 0),
         losses: Number(p.evidence?.losses ?? 0),
         heldOutWon: typeof heldOut === 'boolean' ? heldOut : null,
+      };
+    }),
+    deltas: of('learning.design_delta_proposed').map((event): DesignDeltaView => {
+      const p = event.payload as {
+        designId?: unknown; candidateId?: unknown; candidateScore?: unknown;
+        outcome?: unknown; reason?: unknown; toVersion?: unknown;
+      };
+      const score = Number(p.candidateScore ?? 0);
+      return {
+        event,
+        designId: String(p.designId ?? 'unknown'),
+        candidateId: String(p.candidateId ?? 'unknown'),
+        candidateScore: score,
+        scorePercent: Math.round(score * 100),
+        // Explicitly `=== 'adopted'`. The worker also records `reverted` (the
+        // ratchet said no) and `refused` (the ratchet could not run, usually
+        // R28 AC-2's missing validation harness) — neither is a change the
+        // swarm made to itself, and anything but the one word must not render
+        // as one.
+        adopted: p.outcome === 'adopted',
+        reason: String(p.reason ?? ''),
+        toVersion: typeof p.toVersion === 'number' ? p.toVersion : null,
       };
     }),
     rankings: of('learning.weak_spots_ranked').map((event): RankingView => {

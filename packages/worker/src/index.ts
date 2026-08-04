@@ -19,6 +19,7 @@ import pg from 'pg';
 import { runMission } from './mission-loop.js';
 import { LedgerEvidenceSource } from './ledger-evidence.js';
 import { rankWeakSpots } from './science-loop.js';
+import { deltaProposalFor } from './adoption-ratchet.js';
 import { casesFromTrail } from './bench-producer.js';
 import { candidateExecutor, candidateJudge } from './candidate-execution.js';
 import { buildScienceLoop } from './science-seams.js';
@@ -437,8 +438,12 @@ export async function main(): Promise<void> {
           });
 
           for (const decision of loop.evaluate(results)) {
+            // Hoisted, because a delta must cite the evidence that justifies
+            // it and this event IS that evidence (R28: "only measured wins
+            // enter"). Generated inline, it could not be cited.
+            const verdictEventId = randomUUID();
             await ledger.append({
-              eventId: randomUUID(),
+              eventId: verdictEventId,
               missionId: contract.missionId,
               taskId: null,
               family: 'learning',
@@ -450,6 +455,56 @@ export async function main(): Promise<void> {
               occurredAt: new Date().toISOString(),
             });
             console.log(`  candidate ${decision.evidence.candidateId}: ${decision.adopt ? 'ADOPT' : 'reject'} — ${decision.reason}`);
+
+            // ---- R28's ratchet, which nothing used to reach ---------------
+            // `proposeDelta` was complete and had no production caller, so a
+            // candidate that WON its bench stopped at the event above and no
+            // measured win ever changed a design. `agent_design_delta` was
+            // empty after every mission for that reason alone.
+            const patch = candidates.find((c) => c.hotFixId === decision.evidence.candidateId);
+            const proposal = patch === undefined
+              ? null
+              : deltaProposalFor(decision, patch, [verdictEventId]);
+            if (proposal !== null) {
+              // The second gate: the science loop asked whether the candidate
+              // beat its BENCH, the registry asks whether it beats the
+              // INCUMBENT and is no more complicated. It may still refuse, and
+              // a refusal is a row in the delta table, not a silence.
+              const outcome = await assets.proposeDelta(proposal).then(
+                (result) => result,
+                // Degraded OPEN — a mission must not fail because the learner
+                // could not improve a design. But RECORDED, because a
+                // swallowed failure is indistinguishable from a clean result:
+                // "no delta" and "the ratchet threw" would otherwise look the
+                // same to anyone reading the ledger. The commonest cause is
+                // legitimate — R28 AC-2 refuses a design with no validation
+                // harness, whose score cannot be trusted whatever it says.
+                (cause: unknown) => ({
+                  outcome: 'refused' as const,
+                  reason: String(cause instanceof Error ? cause.message : cause),
+                  toVersion: null,
+                }),
+              );
+              await ledger.append({
+                eventId: randomUUID(),
+                missionId: contract.missionId,
+                taskId: null,
+                family: 'learning',
+                type: 'learning.design_delta_proposed',
+                actor: { kind: 'learning_agent', id: 'learning_agent', displayName: 'Learning Agent' },
+                payload: {
+                  designId: proposal.designId,
+                  candidateId: decision.evidence.candidateId,
+                  candidateScore: proposal.candidateScore,
+                  justifiedBy: proposal.justifiedBy,
+                  ...outcome,
+                },
+                occurredAt: new Date().toISOString(),
+              });
+              console.log(
+                `  delta on ${proposal.designId}: ${outcome.outcome} — ${outcome.reason}`,
+              );
+            }
           }
         }
       } catch (cause) {

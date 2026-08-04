@@ -192,6 +192,26 @@ export class LedgerEvidenceSource {
           continue;
         }
 
+        /**
+         * A mission kept WHOLE never contracts a child (R31), so its budget
+         * ceiling arrives on the intake event instead. Without this the
+         * budget-versus-value signal is zero for every kept-whole mission, and
+         * `rankWeakSpots` can never see one as a budget outlier — the fourth
+         * instance of a mechanism written when every mission decomposed.
+         *
+         * Read from the ledger here rather than passed in, because this source
+         * replays the FULL trail from the repository, which does include the
+         * control plane's intake event.
+         */
+        if (event.type === 'mission.intake_accepted') {
+          const contract = event.payload['contract'] as { budget?: { ceiling?: unknown } } | undefined;
+          const ceiling = contract?.budget?.ceiling;
+          if (typeof ceiling === 'number' && !ceilingOf.has(event.taskId)) {
+            ceilingOf.set(event.taskId, ceiling);
+          }
+          continue;
+        }
+
         // Only the PRODUCER's staffing. A task carries two staffings on the same
         // task id, and the verifier's has its own `verifier.staffed` type —
         // reading it here would put every verified task in a `verification.*`

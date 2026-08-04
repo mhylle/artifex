@@ -388,6 +388,62 @@ describe('R19 AC-2 — learning observatory lens', () => {
     expect(view.candidateDecisions[0]!.heldOutWon).toBe(false);
   });
 
+  /**
+   * The OTHER half of the same ratchet, and the half that actually changes a
+   * design. `learning.candidate_evaluated` says a candidate won its bench;
+   * `learning.design_delta_proposed` says whether the REGISTRY accepted it
+   * against the incumbent — a different question with a different answer, and
+   * the only one that moves a design's version.
+   *
+   * The event is new because nothing used to reach `proposeDelta` at all
+   * (find-shape (l)). Adding the lens in the same change so the result does not
+   * land on the ledger with nothing to show it — find-shape (o).
+   */
+  const proposed = (designId: string, outcome: string, over: Record<string, unknown> = {}) =>
+    ev('learning.design_delta_proposed', null, {
+      designId, candidateId: 'hf-1', candidateScore: 0.75,
+      justifiedBy: ['evt-1'], outcome, reason: `${outcome} by the ratchet`,
+      toVersion: outcome === 'adopted' ? 4 : null,
+      ...over,
+    }, 'learning', '2026-07-30T09:06:00.000Z');
+
+  it('shows whether the registry accepted a delta, not just whether the bench liked it', () => {
+    const view = buildLearningView([...trail(), proposed('design-7', 'adopted')]);
+
+    expect(view.deltas).toHaveLength(1);
+    expect(view.deltas[0]!.designId).toBe('design-7');
+    expect(view.deltas[0]!.adopted).toBe(true);
+    expect(view.deltas[0]!.toVersion).toBe(4);
+    expect(view.deltas[0]!.candidateScore).toBeCloseTo(0.75);
+  });
+
+  it('shows a REVERTED delta as evidence, not as an absence', () => {
+    // The ratchet writes a row either way, and a refusal is the more
+    // informative one: it says the candidate beat its bench and still did not
+    // beat the incumbent.
+    const view = buildLearningView([...trail(), proposed('design-7', 'reverted')]);
+
+    expect(view.deltas).toHaveLength(1);
+    expect(view.deltas[0]!.adopted).toBe(false);
+    expect(view.deltas[0]!.toVersion).toBeNull();
+  });
+
+  it('DISTRACTOR: a delta the ratchet REFUSED to run does not read as adopted', () => {
+    // `refused` is the degrade-open outcome the worker records when
+    // `proposeDelta` throws — most often R28 AC-2, a design with no validation
+    // harness. It is not an adoption and must never render as one.
+    const view = buildLearningView([...trail(), proposed('design-7', 'refused', { toVersion: null })]);
+
+    expect(view.deltas[0]!.adopted).toBe(false);
+  });
+
+  it('a delta ALONE is learning output', () => {
+    // The mutant that leaves `deltas` out of the sum: a mission whose only
+    // learning result was a registry decision would render "nothing to show"
+    // while holding the most consequential event the loop produces.
+    expect(hasLearningOutput(buildLearningView([...trail(), proposed('design-7', 'adopted')]))).toBe(true);
+  });
+
   it('DISTRACTOR: a REJECTED candidate is shown, not filtered out', () => {
     // Every live decision so far is a rejection. A panel that showed only
     // adoptions would render empty and read as "the science loop has done

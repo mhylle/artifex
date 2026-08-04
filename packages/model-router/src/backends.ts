@@ -106,16 +106,27 @@ function languageModelFor(
  */
 export function createBackend(options: BackendOptions): StructuredOutputBackend {
   return {
-    async generate({ provider, model, probe }: {
+    async generate({ provider, model, probe, maxOutputTokens }: {
       provider: string;
       model: string;
       probe: AdmissionProbe;
+      /**
+       * A larger bound for a probe that genuinely produces a larger artefact.
+       *
+       * The default is sized for contracts, verdicts and proposals. A worker
+       * asked for a report writes several hundred words, and the default cut it
+       * off mid-JSON — the deliverable arrived with a truncated section and the
+       * reviewer, correctly, refused it. Per-probe rather than global so the
+       * judges and planners keep the tight bound that turns a runaway into a
+       * fast attributable failure.
+       */
+      maxOutputTokens?: number;
     }) {
       const { object } = await generateObject({
         model: languageModelFor(provider, model, options),
         schema: jsonSchema(toJsonSchema(probe.schema) as unknown as JSONSchema7),
         prompt: probe.prompt,
-        maxOutputTokens: options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+        maxOutputTokens: maxOutputTokens ?? options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
       });
       return object;
     },

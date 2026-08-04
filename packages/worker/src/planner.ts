@@ -83,6 +83,8 @@ export interface StructuredGenerator {
     readonly provider: string;
     readonly model: string;
     readonly probe: { readonly schema: unknown; readonly prompt: string };
+    /** A larger token bound for a probe that produces a larger artefact. */
+    readonly maxOutputTokens?: number;
   }): Promise<unknown>;
 }
 
@@ -398,7 +400,16 @@ export function createStepwisePlanner(options: ModelSeamOptions): Planner {
 
       const { count } = await ask<{ count: number }>(
         SubtaskCountSchema,
-        `How many INDEPENDENT subtasks fully cover this objective? Answer with a number only.\n\nOBJECTIVE: ${contract.objective}` +
+        `How many INDEPENDENT subtasks fully cover this objective? Answer with a number only.\n` +
+          // The bar the split will actually be graded against. It lived only in
+          // the judge, so the planner optimised for "distinct and covering" —
+          // both of which a compound leaf satisfies — and Gate A rejected the
+          // result twice on the same mission. The COUNT needs it as much as the
+          // outline: a model that does not know leaves must carry a single
+          // responsibility picks too few of them.
+          `Each subtask must carry exactly ONE responsibility with ONE verifiable outcome.\n` +
+          `Count the responsibilities the objective contains, and answer with that.\n` +
+          `\nOBJECTIVE: ${contract.objective}` +
           guidance.join('\n'),
       );
 
@@ -406,6 +417,12 @@ export function createStepwisePlanner(options: ModelSeamOptions): Planner {
         [
           `List ${count} DISTINCT sub-objectives that together fully cover this objective.`,
           `Each must be a different piece of the work — not a restatement of the whole.`,
+          // Added alongside the two constraints above, never instead of them:
+          // those stop the planner returning restatements of the parent, this
+          // stops it returning compound leaves. Gate A enforces this one and
+          // the planner was never told it.
+          `Each must also carry exactly ONE responsibility with ONE verifiable outcome.`,
+          `A sub-objective that both works something out and then writes it up is two.`,
           ``,
           `OBJECTIVE: ${contract.objective}`,
           ...guidance,
